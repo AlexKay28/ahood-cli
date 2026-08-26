@@ -2,11 +2,19 @@
 import { login } from "./commands/login.js";
 import { logout } from "./commands/logout.js";
 import { whoami } from "./commands/whoami.js";
+import { search } from "./commands/search.js";
+import { add } from "./commands/add.js";
+import { update } from "./commands/update.js";
+import { remove } from "./commands/remove.js";
 
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   login: () => login(),
   logout: () => logout(),
   whoami: () => whoami(),
+  search: (args) => search(args),
+  add: (args) => add(args),
+  update: (args) => update(args),
+  remove: (args) => remove(args),
 };
 
 async function main() {
