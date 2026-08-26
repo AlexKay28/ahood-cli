@@ -6,6 +6,7 @@ import { search } from "./commands/search.js";
 import { add } from "./commands/add.js";
 import { update } from "./commands/update.js";
 import { remove } from "./commands/remove.js";
+import { publish } from "./commands/publish.js";
 
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   login: () => login(),
@@ -15,6 +16,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   add: (args) => add(args),
   update: (args) => update(args),
   remove: (args) => remove(args),
+  publish: (args) => publish(args),
 };
 
 async function main() {
