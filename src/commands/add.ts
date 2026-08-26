@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import * as tarStream from "tar-stream";
 import { gunzipSync } from "node:zlib";
 import { apiFetch, apiJson } from "../http.js";
@@ -45,11 +45,31 @@ function parseSpec(spec: string): { owner: string; skill: string; version: strin
   return { owner, skill, version };
 }
 
-async function extractTarGz(buffer: Buffer, destDir: string): Promise<void> {
+export async function extractTarGz(buffer: Buffer, destDir: string): Promise<void> {
   const tarBuffer = gunzipSync(buffer);
   const extract = tarStream.extract();
-  await new Promise<void>((resolve, reject) => {
+  const resolvedDest = resolve(destDir);
+  await new Promise<void>((resolvePromise, reject) => {
     extract.on("entry", (header, stream, next) => {
+      // Path containment, checked BEFORE anything is written. A tar entry
+      // name is attacker-controlled data in an archive we merely downloaded
+      // -- the server's publish-time validateEntries is supposed to have
+      // rejected `..` already, but a client that extracts a remote archive
+      // must not depend on a check it cannot see. resolve() collapses `..`
+      // segments (and, on Windows, drive-absolute and backslash-separated
+      // names) so the comparison catches every escape shape, not just a
+      // literal leading "../".
+      const entryPath = header.name.replace(/^\.\//, "");
+      const fullPath = resolve(destDir, entryPath);
+      if (fullPath !== resolvedDest && !fullPath.startsWith(resolvedDest + sep)) {
+        stream.resume();
+        reject(new Error(`Refusing to extract unsafe archive entry: ${header.name}`));
+        // next() is deliberately NOT called -- nothing further in this archive
+        // should be processed. destroy() tears the paused extractor down
+        // rather than leaving it stalled mid-entry.
+        extract.destroy();
+        return;
+      }
       if (header.type !== "file") {
         stream.resume();
         next();
@@ -58,15 +78,13 @@ async function extractTarGz(buffer: Buffer, destDir: string): Promise<void> {
       const chunks: Buffer[] = [];
       stream.on("data", (chunk) => chunks.push(chunk as Buffer));
       stream.on("end", () => {
-        const path = header.name.replace(/^\.\//, "");
-        const fullPath = join(destDir, path);
         mkdirSync(join(fullPath, ".."), { recursive: true });
         writeFileSync(fullPath, Buffer.concat(chunks));
         next();
       });
       stream.on("error", reject);
     });
-    extract.on("finish", resolve);
+    extract.on("finish", () => resolvePromise());
     extract.on("error", reject);
     extract.end(tarBuffer);
   });
@@ -103,7 +121,12 @@ export async function add(args: string[]): Promise<void> {
     );
   }
 
-  const destDir = join(".claude", "skills", skill);
+  // Owner-namespaced on disk, mirroring npm's node_modules/@scope/package.
+  // Keyed on the slug alone, alice/utils and bob/utils were the same
+  // directory: installing one silently overwrote the other's files, and
+  // `remove` deleted whichever happened to be there. The lockfile key is
+  // already "owner/skill" and needs no change.
+  const destDir = join(".claude", "skills", owner, skill);
   await extractTarGz(buffer, destDir);
   writeLockfileEntry(join(".claude", "skills.lock.json"), `${owner}/${skill}`, {
     version: meta.version,

@@ -19,8 +19,21 @@ export async function login(): Promise<void> {
   const deadline = Date.now() + expires_in * 1000;
   while (Date.now() < deadline) {
     await sleep(2000);
-    const res = await fetch(`${verification_url.split("?")[0].replace("/cli-auth", "")}/api/v1/auth/cli/device/${code}`);
-    const body: PollResponse = await res.json();
+    let res: Response;
+    let body: PollResponse;
+    try {
+      res = await fetch(`${verification_url.split("?")[0].replace("/cli-auth", "")}/api/v1/auth/cli/device/${code}`);
+      body = await res.json();
+    } catch (error) {
+      // A THROWN fetch (DNS blip, dropped socket, a body that isn't JSON) is
+      // transient by nature, and this loop runs for up to ten minutes while a
+      // human walks to their browser -- one bad network moment must not kill
+      // a login that is about to succeed. HTTP *statuses* are still decided
+      // below; only the transport failure is retried. The deadline is
+      // untouched, so this cannot loop forever.
+      console.error(`Polling failed (${error instanceof Error ? error.message : String(error)}); retrying...`);
+      continue;
+    }
     if (res.status === 200 && body.status === "approved" && body.token) {
       writeCredentials({ token: body.token });
       console.log("Logged in.");

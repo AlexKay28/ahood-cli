@@ -6,6 +6,25 @@ import { apiJson } from "../http.js";
 
 type InitResponse = { upload_url: string; storage_path: string; version_id: string };
 
+// Matched by ENTRY NAME at every depth, not by path prefix, so a nested
+// `vendor/thing/.git` is skipped the same as a top-level one. Not a
+// .gitignore parser (out of scope) -- just the fixed set of names that must
+// never end up in a published archive:
+//   .git      -- .git/config routinely carries a remote URL with embedded
+//                credentials (https://user:ghp_xxx@github.com/...), which the
+//                server-side secret scanner's regexes (AKIA, PEM headers,
+//                32+ hex) do not match.
+//   node_modules -- never part of a skill, and megabytes of it.
+//   .env / .env.* -- the single most likely place a real secret lives.
+//   .DS_Store -- noise.
+const EXCLUDED_NAMES = new Set([".git", "node_modules", ".DS_Store"]);
+
+function isExcluded(name: string): boolean {
+  if (EXCLUDED_NAMES.has(name)) return true;
+  if (name === ".env" || name.startsWith(".env.")) return true;
+  return false;
+}
+
 async function tarGzDirectory(dir: string): Promise<Buffer> {
   const { readdirSync, statSync } = await import("node:fs");
   const tar = pack();
@@ -14,6 +33,7 @@ async function tarGzDirectory(dir: string): Promise<Buffer> {
 
   function addDir(current: string, prefix: string) {
     for (const entry of readdirSync(current)) {
+      if (isExcluded(entry)) continue;
       const fullPath = join(current, entry);
       const relPath = prefix ? `${prefix}/${entry}` : entry;
       const stat = statSync(fullPath);
