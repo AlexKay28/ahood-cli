@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readCredentials, writeCredentials, clearCredentials, resolveToken } from "../src/credentials.js";
@@ -34,6 +34,21 @@ describe("credentials file", () => {
   it("writes the credentials file with mode 0600", () => {
     writeCredentials({ token: "shk_abc123" });
     const stat = statSync(join(dir, ".config", "skillhub", "credentials.json"));
+    expect(stat.mode & 0o777).toBe(0o600);
+  });
+
+  it("restores 0600 even when a pre-existing file has looser permissions", () => {
+    const skillhubDir = join(dir, ".config", "skillhub");
+    mkdirSync(skillhubDir, { recursive: true, mode: 0o755 });
+    const path = join(skillhubDir, "credentials.json");
+    writeFileSync(path, JSON.stringify({ token: "shk_old" }), { mode: 0o644 });
+    // Sanity-check the fixture actually starts out loose -- writeFileSync's
+    // mode option only applies at creation, so this should be 0644 here.
+    expect(statSync(path).mode & 0o777).toBe(0o644);
+
+    writeCredentials({ token: "shk_new" });
+
+    const stat = statSync(path);
     expect(stat.mode & 0o777).toBe(0o600);
   });
 
