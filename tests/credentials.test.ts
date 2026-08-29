@@ -7,19 +7,19 @@ import { readCredentials, writeCredentials, clearCredentials, resolveToken } fro
 describe("credentials file", () => {
   let dir: string;
   const originalHome = process.env.HOME;
-  const originalToken = process.env.SKILLHUB_TOKEN;
+  const originalToken = process.env.AHOOD_TOKEN;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "skillhub-test-"));
+    dir = mkdtempSync(join(tmpdir(), "ahood-test-"));
     process.env.HOME = dir;
-    delete process.env.SKILLHUB_TOKEN;
+    delete process.env.AHOOD_TOKEN;
   });
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
     process.env.HOME = originalHome;
-    if (originalToken === undefined) delete process.env.SKILLHUB_TOKEN;
-    else process.env.SKILLHUB_TOKEN = originalToken;
+    if (originalToken === undefined) delete process.env.AHOOD_TOKEN;
+    else process.env.AHOOD_TOKEN = originalToken;
   });
 
   it("returns null when no credentials file exists", () => {
@@ -27,46 +27,46 @@ describe("credentials file", () => {
   });
 
   it("writes and reads back the token", () => {
-    writeCredentials({ token: "shk_abc123" });
-    expect(readCredentials()).toEqual({ token: "shk_abc123" });
+    writeCredentials({ token: "ahd_abc123" });
+    expect(readCredentials()).toEqual({ token: "ahd_abc123" });
   });
 
   it("writes the credentials file with mode 0600", () => {
-    writeCredentials({ token: "shk_abc123" });
-    const stat = statSync(join(dir, ".config", "skillhub", "credentials.json"));
+    writeCredentials({ token: "ahd_abc123" });
+    const stat = statSync(join(dir, ".config", "ahood", "credentials.json"));
     expect(stat.mode & 0o777).toBe(0o600);
   });
 
   it("restores 0600 even when a pre-existing file has looser permissions", () => {
-    const skillhubDir = join(dir, ".config", "skillhub");
-    mkdirSync(skillhubDir, { recursive: true, mode: 0o755 });
-    const path = join(skillhubDir, "credentials.json");
-    writeFileSync(path, JSON.stringify({ token: "shk_old" }), { mode: 0o644 });
+    const ahoodDir = join(dir, ".config", "ahood");
+    mkdirSync(ahoodDir, { recursive: true, mode: 0o755 });
+    const path = join(ahoodDir, "credentials.json");
+    writeFileSync(path, JSON.stringify({ token: "ahd_old" }), { mode: 0o644 });
     // Sanity-check the fixture actually starts out loose -- writeFileSync's
     // mode option only applies at creation, so this should be 0644 here.
     expect(statSync(path).mode & 0o777).toBe(0o644);
 
-    writeCredentials({ token: "shk_new" });
+    writeCredentials({ token: "ahd_new" });
 
     const stat = statSync(path);
     expect(stat.mode & 0o777).toBe(0o600);
   });
 
   it("clearCredentials removes the file", () => {
-    writeCredentials({ token: "shk_abc123" });
+    writeCredentials({ token: "ahd_abc123" });
     clearCredentials();
     expect(readCredentials()).toBeNull();
   });
 
-  it("resolveToken prefers SKILLHUB_TOKEN over the credentials file", () => {
-    writeCredentials({ token: "shk_from_file" });
-    process.env.SKILLHUB_TOKEN = "shk_from_env";
-    expect(resolveToken()).toBe("shk_from_env");
+  it("resolveToken prefers AHOOD_TOKEN over the credentials file", () => {
+    writeCredentials({ token: "ahd_from_file" });
+    process.env.AHOOD_TOKEN = "ahd_from_env";
+    expect(resolveToken()).toBe("ahd_from_env");
   });
 
-  it("resolveToken falls back to the credentials file when SKILLHUB_TOKEN is unset", () => {
-    writeCredentials({ token: "shk_from_file" });
-    expect(resolveToken()).toBe("shk_from_file");
+  it("resolveToken falls back to the credentials file when AHOOD_TOKEN is unset", () => {
+    writeCredentials({ token: "ahd_from_file" });
+    expect(resolveToken()).toBe("ahd_from_file");
   });
 
   it("resolveToken returns null when neither is present", () => {

@@ -63,7 +63,7 @@ export async function publish(args: string[]): Promise<void> {
     throw new Error(`No SKILL.md found at ${skillMdPath} -- publish must point at a skill folder's root.`);
   }
 
-  // A real skillhub CLI would parse owner/slug/version/name out of SKILL.md
+  // A real ahood CLI would parse owner/slug/version/name out of SKILL.md
   // frontmatter or a companion manifest -- this MVP takes them as explicit
   // flags, matching how `versions/init`'s API itself requires them
   // separately from the archive. Kept simple: --slug, --owner, --version are
@@ -79,7 +79,7 @@ export async function publish(args: string[]): Promise<void> {
   const slug = slugIndex >= 0 ? args[slugIndex + 1] : undefined;
   const version = versionIndex >= 0 ? args[versionIndex + 1] : undefined;
   if (!owner || !slug || !version) {
-    throw new Error("Usage: skillhub publish <path> --owner <owner> --slug <skill> --version <x.y.z>");
+    throw new Error("Usage: ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>");
   }
 
   const archive = await tarGzDirectory(path);

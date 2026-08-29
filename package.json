@@ -1,9 +1,9 @@
 {
-  "name": "skillhub",
+  "name": "ahood",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": { "skillhub": "./dist/index.js" },
+  "bin": { "ahood": "./dist/index.js" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"

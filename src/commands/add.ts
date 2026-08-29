@@ -41,7 +41,7 @@ function parseSpec(spec: string): { owner: string; skill: string; version: strin
   const ownerSkill = atIndex > 0 ? spec.slice(0, atIndex) : spec;
   const version = atIndex > 0 ? spec.slice(atIndex + 1) : "latest";
   const [owner, skill] = ownerSkill.split("/");
-  if (!owner || !skill) throw new Error("Usage: skillhub add <owner>/<skill>[@version]");
+  if (!owner || !skill) throw new Error("Usage: ahood add <owner>/<skill>[@version]");
   return { owner, skill, version };
 }
 
@@ -92,7 +92,7 @@ export async function extractTarGz(buffer: Buffer, destDir: string): Promise<voi
 
 export async function add(args: string[]): Promise<void> {
   const spec = args[0];
-  if (!spec) throw new Error("Usage: skillhub add <owner>/<skill>[@version]");
+  if (!spec) throw new Error("Usage: ahood add <owner>/<skill>[@version]");
   const { owner, skill, version: requestedVersion } = parseSpec(spec);
 
   const meta = await fetchVersionMeta(owner, skill, requestedVersion);
@@ -108,7 +108,7 @@ export async function add(args: string[]): Promise<void> {
   }
 
   const downloadRes = await apiFetch(`/api/v1/skills/${owner}/${skill}/download?version=${meta.version}`, {
-    headers: { "X-Skillhub-Source": "cli" },
+    headers: { "X-Ahood-Source": "cli" },
     redirect: "follow",
   });
   if (!downloadRes.ok) throw new Error(`Download failed with status ${downloadRes.status}`);

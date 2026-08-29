@@ -9,7 +9,7 @@ describe("lockfile", () => {
   let lockPath: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "skillhub-lock-test-"));
+    dir = mkdtempSync(join(tmpdir(), "ahood-lock-test-"));
     lockPath = join(dir, ".claude", "skills.lock.json");
   });
 

@@ -40,9 +40,9 @@ export async function login(): Promise<void> {
       return;
     }
     if (res.status === 410 || res.status === 404) {
-      throw new Error("This login was cancelled or expired. Run `skillhub login` again.");
+      throw new Error("This login was cancelled or expired. Run `ahood login` again.");
     }
     // status === "pending" -- keep polling.
   }
-  throw new Error("Login timed out. Run `skillhub login` again.");
+  throw new Error("Login timed out. Run `ahood login` again.");
 }

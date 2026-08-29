@@ -4,7 +4,7 @@ import { resolveToken } from "../credentials.js";
 export async function whoami(): Promise<void> {
   const token = resolveToken();
   if (!token) {
-    console.log("Not logged in. Run `skillhub login`.");
+    console.log("Not logged in. Run `ahood login`.");
     return;
   }
 
@@ -29,7 +29,7 @@ export async function whoami(): Promise<void> {
       return;
     }
     // 401 and anything else (network failure, 5xx) are both "we could not
-    // confirm this token works" -- exit non-zero so `skillhub whoami` is
+    // confirm this token works" -- exit non-zero so `ahood whoami` is
     // usable as a scriptable auth check.
     console.error("Not authenticated -- your token is invalid or has been revoked.");
     process.exitCode = 1;

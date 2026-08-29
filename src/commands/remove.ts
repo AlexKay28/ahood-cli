@@ -4,9 +4,9 @@ import { removeLockfileEntry } from "../lockfile.js";
 
 export async function remove(args: string[]): Promise<void> {
   const spec = args[0];
-  if (!spec) throw new Error("Usage: skillhub remove <owner>/<skill>");
+  if (!spec) throw new Error("Usage: ahood remove <owner>/<skill>");
   const [owner, skill] = spec.split("/");
-  if (!owner || !skill) throw new Error("Usage: skillhub remove <owner>/<skill>");
+  if (!owner || !skill) throw new Error("Usage: ahood remove <owner>/<skill>");
 
   // Must mirror add.ts's owner-namespaced destDir exactly -- keyed on the
   // slug alone, `remove bob/utils` deleted alice/utils' files.

@@ -7,7 +7,7 @@ import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
 import { add } from "../src/commands/add.js";
 
-const API_URL = "http://skillhub.test";
+const API_URL = "http://ahood.test";
 const OWNER = "alice";
 const SKILL = "demo-skill";
 const VERSION = "1.0.0";
@@ -65,20 +65,20 @@ describe("add", () => {
   let dir: string;
   let originalCwd: string;
   const originalHome = process.env.HOME;
-  const originalApiUrl = process.env.SKILLHUB_API_URL;
-  const originalToken = process.env.SKILLHUB_TOKEN;
+  const originalApiUrl = process.env.AHOOD_API_URL;
+  const originalToken = process.env.AHOOD_TOKEN;
 
   beforeEach(() => {
     originalCwd = process.cwd();
-    dir = mkdtempSync(join(tmpdir(), "skillhub-add-test-"));
+    dir = mkdtempSync(join(tmpdir(), "ahood-add-test-"));
     // `add` writes to the RELATIVE paths .claude/skills/... and
     // .claude/skills.lock.json, which the fs resolves against the real process
     // cwd -- so the scratch directory has to be the cwd, not a mocked
     // process.cwd(). Restored in afterEach.
     process.chdir(dir);
     process.env.HOME = dir;
-    process.env.SKILLHUB_API_URL = API_URL;
-    delete process.env.SKILLHUB_TOKEN;
+    process.env.AHOOD_API_URL = API_URL;
+    delete process.env.AHOOD_TOKEN;
   });
 
   afterEach(() => {
@@ -86,10 +86,10 @@ describe("add", () => {
     process.chdir(originalCwd);
     rmSync(dir, { recursive: true, force: true });
     process.env.HOME = originalHome;
-    if (originalApiUrl === undefined) delete process.env.SKILLHUB_API_URL;
-    else process.env.SKILLHUB_API_URL = originalApiUrl;
-    if (originalToken === undefined) delete process.env.SKILLHUB_TOKEN;
-    else process.env.SKILLHUB_TOKEN = originalToken;
+    if (originalApiUrl === undefined) delete process.env.AHOOD_API_URL;
+    else process.env.AHOOD_API_URL = originalApiUrl;
+    if (originalToken === undefined) delete process.env.AHOOD_TOKEN;
+    else process.env.AHOOD_TOKEN = originalToken;
   });
 
   it("refuses to install when the downloaded archive's checksum does not match the server's", async () => {

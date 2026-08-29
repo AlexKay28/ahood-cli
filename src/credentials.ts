@@ -5,7 +5,7 @@ import { join } from "node:path";
 type Credentials = { token: string };
 
 function credentialsPath(): string {
-  return join(homedir(), ".config", "skillhub", "credentials.json");
+  return join(homedir(), ".config", "ahood", "credentials.json");
 }
 
 export function readCredentials(): Credentials | null {
@@ -20,7 +20,7 @@ export function readCredentials(): Credentials | null {
 
 export function writeCredentials(creds: Credentials): void {
   const path = credentialsPath();
-  const dir = join(homedir(), ".config", "skillhub");
+  const dir = join(homedir(), ".config", "ahood");
   // The `mode` option on mkdirSync/writeFileSync only applies when the
   // directory/file is actually created (POSIX O_CREAT semantics) -- if
   // either already exists with looser permissions (manual chmod, a restored
@@ -38,9 +38,9 @@ export function clearCredentials(): void {
   if (existsSync(path)) unlinkSync(path);
 }
 
-// SKILLHUB_TOKEN always wins -- this is what lets CI use a token without
+// AHOOD_TOKEN always wins -- this is what lets CI use a token without
 // ever running the interactive device-code `login` flow.
 export function resolveToken(): string | null {
-  if (process.env.SKILLHUB_TOKEN) return process.env.SKILLHUB_TOKEN;
+  if (process.env.AHOOD_TOKEN) return process.env.AHOOD_TOKEN;
   return readCredentials()?.token ?? null;
 }

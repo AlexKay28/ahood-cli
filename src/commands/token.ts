@@ -12,19 +12,19 @@ export async function token(args: string[]): Promise<void> {
     case "revoke":
       return tokenRevoke(rest);
     default:
-      throw new Error("Usage: skillhub token create|list|revoke");
+      throw new Error("Usage: ahood token create|list|revoke");
   }
 }
 
 async function tokenCreate(args: string[]): Promise<void> {
   const name = args[0];
-  if (!name) throw new Error("Usage: skillhub token create <name>");
+  if (!name) throw new Error("Usage: ahood token create <name>");
   // Note: this itself requires an existing session-backed token or a
   // browser login -- per docs/adr/backend/0001-backend-services.md's Phase
   // 3 section, tokens can't mint tokens (POST /auth/tokens is session-only,
   // enforced server-side in Task 3). A CLI-only user with no browser access
   // at all cannot bootstrap their very first token through this command;
-  // `skillhub login`'s device-code flow is the only bootstrap path, which
+  // `ahood login`'s device-code flow is the only bootstrap path, which
   // is by design -- see the ADR's "login: device-code flow" as the sole
   // credential-issuing entry point for a CLI-only session.
   const result = await apiJson<{ token: string; name: string }>("/api/v1/auth/tokens", {
@@ -49,7 +49,7 @@ async function tokenList(): Promise<void> {
 
 async function tokenRevoke(args: string[]): Promise<void> {
   const id = args[0];
-  if (!id) throw new Error("Usage: skillhub token revoke <id>");
+  if (!id) throw new Error("Usage: ahood token revoke <id>");
   await apiJson(`/api/v1/auth/tokens/${id}`, { method: "DELETE" });
   console.log(`Revoked ${id}`);
 }

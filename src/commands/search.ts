@@ -4,7 +4,7 @@ type SearchResult = { skills: Array<{ slug: string; name: string; tagline: strin
 
 export async function search(args: string[]): Promise<void> {
   const query = args.join(" ");
-  if (!query) throw new Error("Usage: skillhub search <query>");
+  if (!query) throw new Error("Usage: ahood search <query>");
 
   const { skills } = await apiJson<SearchResult>(`/api/v1/skills?q=${encodeURIComponent(query)}`);
   if (skills.length === 0) {
