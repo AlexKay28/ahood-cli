@@ -8,6 +8,7 @@ import { update } from "./commands/update.js";
 import { remove } from "./commands/remove.js";
 import { publish } from "./commands/publish.js";
 import { token } from "./commands/token.js";
+import { edit } from "./commands/edit.js";
 
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   login: () => login(),
@@ -19,6 +20,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   remove: (args) => remove(args),
   publish: (args) => publish(args),
   token: (args) => token(args),
+  edit: (args) => edit(args),
 };
 
 async function main() {
