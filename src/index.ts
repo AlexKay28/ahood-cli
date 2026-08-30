@@ -10,6 +10,7 @@ import { publish } from "./commands/publish.js";
 import { token } from "./commands/token.js";
 import { edit } from "./commands/edit.js";
 import { unpublish } from "./commands/unpublish.js";
+import { listMine } from "./commands/list-mine.js";
 
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   login: () => login(),
@@ -23,6 +24,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   token: (args) => token(args),
   edit: (args) => edit(args),
   unpublish: (args) => unpublish(args),
+  "list-mine": () => listMine(),
 };
 
 async function main() {
