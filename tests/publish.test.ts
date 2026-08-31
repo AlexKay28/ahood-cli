@@ -48,6 +48,48 @@ function stubApi(uploadCapture: { body?: Uint8Array }) {
   );
 }
 
+// Simulates a first-ever publish: the first /versions/init call 404s (skill
+// doesn't exist), then POST /api/v1/skills creates it, then the retried
+// /versions/init call succeeds. `captures.createBody` records what was sent
+// to the create endpoint so tests can assert the create payload.
+function stubApiFirstPublish(
+  captures: { uploadBody?: Uint8Array; createBody?: unknown },
+  opts: { createdOwner?: string } = {},
+) {
+  let initCalls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input);
+      if (url.endsWith("/versions/init")) {
+        initCalls++;
+        if (initCalls === 1) {
+          return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+        }
+        return new Response(
+          JSON.stringify({ upload_url: "http://upload.test/put", storage_path: "x", version_id: "v1" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url.endsWith("/api/v1/skills")) {
+        captures.createBody = init.body ? JSON.parse(init.body as string) : undefined;
+        return new Response(
+          JSON.stringify({ id: "s1", slug: "demo", owner: opts.createdOwner ?? "alice" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url === "http://upload.test/put") {
+        captures.uploadBody = init.body as Uint8Array;
+        return new Response(null, { status: 200 });
+      }
+      if (url.endsWith("/versions/complete")) {
+        return new Response(JSON.stringify({ version: "1.0.0", status: "published" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+    }),
+  );
+}
+
 describe("publish", () => {
   let dir: string;
   const originalApiUrl = process.env.AHOOD_API_URL;
@@ -149,5 +191,76 @@ describe("publish", () => {
     } finally {
       rmSync(secretDir, { recursive: true, force: true });
     }
+  });
+
+  it("creates the skill via POST /api/v1/skills when versions/init 404s on first publish, then retries and succeeds", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const captures: { uploadBody?: Uint8Array; createBody?: unknown } = {};
+    stubApiFirstPublish(captures);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish([
+      "alice/demo@1.0.0",
+      "--path", dir,
+      "--name", "Demo Skill",
+      "--tagline", "A demo",
+      "--tags", "web, cli",
+      "--license", "MIT",
+    ]);
+
+    expect(captures.createBody).toEqual({
+      slug: "demo",
+      name: "Demo Skill",
+      tagline: "A demo",
+      tags: ["web", "cli"],
+      license: "MIT",
+    });
+    expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
+  });
+
+  it("does not attempt to create the skill when versions/init succeeds on the first try (existing-skill regression check)", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const capture: { body?: Uint8Array } = {};
+    stubApi(capture);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish(["alice/demo@1.0.0", "--path", dir, "--name", "Demo Skill"]);
+
+    const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.some(([u]) => String(u).endsWith("/api/v1/skills"))).toBe(false);
+  });
+
+  it("errors clearly when --name is missing and the skill doesn't exist yet, without attempting the upload", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const uploadCalled = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/versions/init")) {
+          return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+        }
+        if (url === "http://upload.test/put") {
+          uploadCalled();
+          return new Response(null, { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+
+    await expect(publish(["alice/demo@1.0.0", "--path", dir])).rejects.toThrow(
+      /doesn't exist yet -- pass --name/,
+    );
+    expect(uploadCalled).not.toHaveBeenCalled();
+  });
+
+  it("errors clearly when the created skill lands under a different owner than requested", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const captures: { uploadBody?: Uint8Array; createBody?: unknown } = {};
+    stubApiFirstPublish(captures, { createdOwner: "realuser" });
+
+    await expect(
+      publish(["alice/demo@1.0.0", "--path", dir, "--name", "Demo Skill"]),
+    ).rejects.toThrow(/skills are always created under your own account \(realuser\)/);
   });
 });

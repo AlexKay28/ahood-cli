@@ -2,14 +2,15 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pack } from "tar-stream";
 import { createGzip } from "node:zlib";
-import { apiJson } from "../http.js";
+import { apiJson, ApiError } from "../http.js";
 import { flagValue } from "../flags.js";
 import { parseOwnerSkill, SEMVER_RE } from "../spec.js";
 
 type InitResponse = { upload_url: string; storage_path: string; version_id: string };
+type CreateResponse = { id: string; slug: string; owner: string };
 
 const USAGE =
-  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>]\n" +
+  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>]\n" +
   "   or: ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
@@ -85,11 +86,24 @@ async function tarGzDirectory(dir: string): Promise<Buffer> {
   });
 }
 
-function parsePublishArgs(args: string[]): { owner: string; skill: string; version: string; path: string } {
+function parsePublishArgs(args: string[]): {
+  owner: string;
+  skill: string;
+  version: string;
+  path: string;
+  name?: string;
+  tagline?: string;
+  tags?: string;
+  license?: string;
+} {
   const pathFlag = flagValue(args, "--path");
   let owner = flagValue(args, "--owner");
   let skill = flagValue(args, "--slug");
   let version = flagValue(args, "--version");
+  const name = flagValue(args, "--name");
+  const tagline = flagValue(args, "--tagline");
+  const tags = flagValue(args, "--tags");
+  const license = flagValue(args, "--license");
   let legacyPath: string | undefined;
 
   const first = args[0];
@@ -110,11 +124,70 @@ function parsePublishArgs(args: string[]): { owner: string; skill: string; versi
   if (!SEMVER_RE.test(version)) {
     throw new Error(`--version must be a semver like 1.2.3 (got "${version}").\n${USAGE}`);
   }
-  return { owner, skill, version, path: pathFlag ?? legacyPath ?? "." };
+  return { owner, skill, version, path: pathFlag ?? legacyPath ?? ".", name, tagline, tags, license };
+}
+
+// Creates the skill under the caller's own account when versions/init 404s
+// -- skill creation is CLI-only now (there is no separate `ahood create`;
+// publish creates on first use). --name is required for this path since
+// createSkill requires a name; --tagline/--tags/--license are optional and
+// only used here, never applied to an already-existing skill.
+async function createSkillForPublish(
+  owner: string,
+  skill: string,
+  opts: { name?: string; tagline?: string; tags?: string; license?: string },
+): Promise<void> {
+  if (!opts.name) {
+    throw new Error(
+      `${owner}/${skill} doesn't exist yet -- pass --name to create it as part of this publish (e.g. --name "My Skill").`,
+    );
+  }
+  const body: Record<string, unknown> = { slug: skill, name: opts.name };
+  if (opts.tagline !== undefined) body.tagline = opts.tagline;
+  if (opts.tags !== undefined) body.tags = opts.tags.split(",").map((t) => t.trim()).filter(Boolean);
+  if (opts.license !== undefined) body.license = opts.license;
+
+  const created = await apiJson<CreateResponse>("/api/v1/skills", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  // POST /api/v1/skills always creates under the authenticated caller's own
+  // account -- it never reads an owner from the request body. If the caller
+  // typed a different owner segment than their own username, the created
+  // skill lives at a path that doesn't match what they asked to publish to.
+  if (created.owner !== owner) {
+    throw new Error(
+      `Created ${created.owner}/${created.slug}, but this publish targeted "${owner}/${skill}" -- skills ` +
+        `are always created under your own account (${created.owner}). Retry with: ` +
+        `ahood publish ${created.owner}/${skill}@<version>.`,
+    );
+  }
+  console.log(`Created ${created.owner}/${created.slug} -- publishing its first version now.`);
+}
+
+async function initVersion(
+  owner: string,
+  skill: string,
+  version: string,
+  packageSizeBytes: number,
+  createOpts: { name?: string; tagline?: string; tags?: string; license?: string },
+): Promise<InitResponse> {
+  const path = `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/init`;
+  const body = JSON.stringify({ version, package_size_bytes: packageSizeBytes });
+  try {
+    return await apiJson<InitResponse>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) throw error;
+    await createSkillForPublish(owner, skill, createOpts);
+    // Retry exactly once. If this ALSO 404s (e.g. a race, or the create
+    // silently didn't take), let that error propagate rather than looping.
+    return await apiJson<InitResponse>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+  }
 }
 
 export async function publish(args: string[]): Promise<void> {
-  const { owner, skill, version, path } = parsePublishArgs(args);
+  const { owner, skill, version, path, name, tagline, tags, license } = parsePublishArgs(args);
   const skillMdPath = join(path, "SKILL.md");
   if (!existsSync(skillMdPath)) {
     throw new Error(`No SKILL.md found at ${skillMdPath} -- publish must point at a skill folder's root.`);
@@ -122,14 +195,7 @@ export async function publish(args: string[]): Promise<void> {
 
   const archive = await tarGzDirectory(path);
 
-  const init = await apiJson<InitResponse>(
-    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/init`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version, package_size_bytes: archive.length }),
-    },
-  );
+  const init = await initVersion(owner, skill, version, archive.length, { name, tagline, tags, license });
 
   // TS's lib.dom BodyInit (in scope here since tsconfig has no explicit
   // "lib" override, so DOM is included alongside the Node types) type-checks

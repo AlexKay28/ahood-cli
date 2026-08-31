@@ -65,11 +65,22 @@ export const COMMANDS_HELP: CommandHelp[] = [
   { usage: "ahood star <owner>/<skill>", desc: "Star a skill." },
   { usage: "ahood unstar <owner>/<skill>", desc: "Remove your star from a skill." },
   {
-    usage: "ahood publish <owner>/<skill>@<version> [--path <dir>]",
+    usage: "ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>]",
     desc:
-      "Publish a new version of an existing skill from a folder containing SKILL.md (the skill itself is created from the web UI first). " +
+      "Publish a new version of a skill from a folder containing SKILL.md. If the skill doesn't exist yet, this " +
+      "creates it first -- pass --name (required in that case) and optionally --tagline/--tags/--license. " +
       "The legacy form `ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted.",
-    examples: ["ahood publish alice/pdf-tools@1.1.0", "ahood publish alice/pdf-tools@1.1.0 --path ./pdf-tools"],
+    flags: [
+      "--name <text>                 Required only when creating the skill on this publish.",
+      "--tagline <text>              Short one-line description, used only when creating.",
+      "--tags <comma,separated>      Initial tags, used only when creating.",
+      "--license <id>                An SPDX license identifier, e.g. MIT, used only when creating.",
+    ],
+    examples: [
+      "ahood publish alice/pdf-tools@1.1.0",
+      'ahood publish alice/pdf-tools@1.0.0 --name "PDF Tools" --tagline "Merge and split PDFs"',
+      "ahood publish alice/pdf-tools@1.1.0 --path ./pdf-tools",
+    ],
   },
   {
     usage: "ahood token create <name>|list [--json]|revoke <id>",
