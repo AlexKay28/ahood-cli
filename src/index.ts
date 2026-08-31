@@ -11,6 +11,7 @@ import { token } from "./commands/token.js";
 import { edit } from "./commands/edit.js";
 import { unpublish } from "./commands/unpublish.js";
 import { listMine } from "./commands/list-mine.js";
+import { formatHelp, findCommandHelp } from "./help.js";
 
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   login: () => login(),
@@ -29,15 +30,39 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
+
+  // Bare invocation and an explicit help request both just want to see
+  // what's available -- neither is an error.
+  if (!command || command === "help" || command === "--help" || command === "-h") {
+    console.log(formatHelp());
+    return;
+  }
+
   const handler = COMMANDS[command];
   if (!handler) {
-    console.error(`Unknown command: ${command ?? "(none)"}\nAvailable: ${Object.keys(COMMANDS).join(", ")}`);
+    console.error(`Unknown command: ${command}\n`);
+    console.error(formatHelp());
     process.exit(1);
   }
+
+  if (args.includes("--help") || args.includes("-h")) {
+    const entry = findCommandHelp(command);
+    console.log(entry ? `${entry.usage}\n\n${entry.desc}` : formatHelp());
+    return;
+  }
+
   try {
     await handler(args);
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    // "Unauthorized" is the exact, literal body every resolveCaller-gated
+    // route returns on a 401 (see lib/resolve-caller.ts's callers) -- the
+    // one signal worth appending a next-step to, since every other error
+    // message is already command-specific.
+    if (/^unauthorized$/i.test(message)) {
+      console.error("Run `ahood login` first (or set AHOOD_TOKEN).");
+    }
     process.exit(1);
   }
 }
