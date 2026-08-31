@@ -15,7 +15,8 @@ import { star, unstar } from "./commands/star.js";
 import { view } from "./commands/view.js";
 import { completion } from "./commands/completion.js";
 import { formatHelp, formatCommandHelp, findCommandHelp } from "./help.js";
-import { ApiError, NetworkError } from "./http.js";
+import { ApiError } from "./http.js";
+import { exitCodeFor } from "./exit-code.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
 
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
@@ -61,19 +62,6 @@ function closestCommand(input: string): string | undefined {
     }
   }
   return bestDistance <= 2 ? best : undefined;
-}
-
-// A hung/black-holed connection throws undici's generic TypeError("fetch
-// failed") -- http.ts wraps that into NetworkError so it gets its own exit
-// code here, distinct from a server-returned ApiError.
-function exitCodeFor(error: unknown): number {
-  if (error instanceof ApiError) {
-    if (error.status === 401 || error.status === 403) return 4;
-    if (error.status === 404) return 5;
-    return 2;
-  }
-  if (error instanceof NetworkError) return 6;
-  return 1;
 }
 
 async function main() {

@@ -63,6 +63,6 @@ Run `ahood help`, `ahood help <command>`, or `ahood <command> --help` for the sa
 | `2` | Usage or validation error (bad arguments, or the server rejected the request as invalid) |
 | `4` | Authentication required or rejected (not logged in, or the token was refused) |
 | `5` | Not found |
-| `6` | Network/transport error |
+| `6` | Network/transport error, or an upstream server (5xx) error |
 
 Full reference, including personal API tokens, CI usage, the public REST API, and the MCP server: **https://ahood.vercel.app/docs**

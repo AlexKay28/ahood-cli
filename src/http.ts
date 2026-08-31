@@ -36,6 +36,24 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   }
 }
 
+const MAX_ERROR_MESSAGE_LENGTH = 500;
+
+// Defense in depth (ahood-cli#31): the API is expected to never forward a raw
+// upstream error body (an HTML block page from a proxy/WAF, a giant stack
+// trace, etc.) into `error`, but this CLI shouldn't trust that unconditionally
+// -- a regression on any endpoint would otherwise dump multi-KB infra details
+// straight to a user's terminal. Anything HTML-shaped or implausibly long for
+// a normal error string is replaced with a short, safe summary instead.
+function sanitizeErrorMessage(message: string): string {
+  const looksLikeHtml = /<!DOCTYPE|<html[\s>]/i.test(message);
+  if (!looksLikeHtml && message.length <= MAX_ERROR_MESSAGE_LENGTH) return message;
+  // No preview of the raw content: an HTML-shaped body's first bytes are
+  // exactly where infra details (e.g. a Cloudflare block page's title, Ray
+  // ID) live, so a "helpful" excerpt would leak the same details this
+  // exists to suppress. Length alone is safe to report.
+  return `Request failed with an unexpected, oversized, or HTML-shaped error response (${message.length} bytes) -- this usually means an upstream proxy/WAF failure, not a problem with your request.`;
+}
+
 export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await apiFetch(path, init);
 
@@ -46,7 +64,7 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
     const body: unknown = await res.json().catch(() => undefined);
     const message =
       body && typeof body === "object" && typeof (body as { error?: unknown }).error === "string"
-        ? (body as { error: string }).error
+        ? sanitizeErrorMessage((body as { error: string }).error)
         : `Request failed with status ${res.status}`;
     throw new ApiError(res.status, message);
   }

@@ -131,7 +131,8 @@ export function formatHelp(): string {
     "Run `ahood --version` to print the installed CLI version.",
     "",
     "Exit codes: 0 success, 1 general error, 2 usage/validation error,",
-    "            4 authentication required or rejected, 5 not found, 6 network/transport error.",
+    "            4 authentication required or rejected, 5 not found,",
+    "            6 network/transport error or upstream server (5xx) error.",
     "",
     "Full reference: https://ahood.vercel.app/docs",
   ].join("\n");
