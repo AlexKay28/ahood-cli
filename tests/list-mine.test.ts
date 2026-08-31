@@ -51,18 +51,29 @@ describe("listMine", () => {
     expect(logSpy).toHaveBeenCalledWith("You haven't published any skills yet.");
   });
 
-  it("prints one line per skill including visibility and stats", async () => {
+  it("prints one line per skill including owner, visibility, and stats", async () => {
     stubApi(200, {
       skills: [
-        { slug: "demo", name: "Demo", tagline: "a demo", visibility: "public", downloads_count: 5, stars_count: 2 },
-        { slug: "secret", name: "Secret", tagline: null, visibility: "private", downloads_count: 0, stars_count: 0 },
+        { slug: "demo", name: "Demo", tagline: "a demo", visibility: "public", downloads_count: 5, stars_count: 2, profiles: { username: "alice" } },
+        { slug: "secret", name: "Secret", tagline: null, visibility: "private", downloads_count: 0, stars_count: 0, profiles: { username: "alice" } },
       ],
     });
 
     await listMine();
 
-    expect(logSpy).toHaveBeenCalledWith("demo (public) — Demo: a demo (5 downloads, 2 stars)");
-    expect(logSpy).toHaveBeenCalledWith("secret (private) — Secret (0 downloads, 0 stars)");
+    expect(logSpy).toHaveBeenCalledWith("alice/demo (public) - Demo: a demo (5 downloads, 2 stars)");
+    expect(logSpy).toHaveBeenCalledWith("alice/secret (private) - Secret (0 downloads, 0 stars)");
+  });
+
+  it("--json prints the raw skills array, including owner, instead of formatted prose", async () => {
+    const skills = [
+      { slug: "demo", name: "Demo", tagline: "a demo", visibility: "public", downloads_count: 5, stars_count: 2, profiles: { username: "alice" } },
+    ];
+    stubApi(200, { skills });
+
+    await listMine(["--json"]);
+
+    expect(logSpy).toHaveBeenCalledWith(JSON.stringify(skills));
   });
 
   it("surfaces the server's error message on a non-2xx response", async () => {

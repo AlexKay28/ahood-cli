@@ -8,11 +8,13 @@ describe("credentials file", () => {
   let dir: string;
   const originalHome = process.env.HOME;
   const originalToken = process.env.AHOOD_TOKEN;
+  const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "ahood-test-"));
     process.env.HOME = dir;
     delete process.env.AHOOD_TOKEN;
+    delete process.env.XDG_CONFIG_HOME;
   });
 
   afterEach(() => {
@@ -20,6 +22,8 @@ describe("credentials file", () => {
     process.env.HOME = originalHome;
     if (originalToken === undefined) delete process.env.AHOOD_TOKEN;
     else process.env.AHOOD_TOKEN = originalToken;
+    if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
   });
 
   it("returns null when no credentials file exists", () => {
@@ -71,5 +75,24 @@ describe("credentials file", () => {
 
   it("resolveToken returns null when neither is present", () => {
     expect(resolveToken()).toBeNull();
+  });
+
+  it("honors XDG_CONFIG_HOME when set", () => {
+    const xdgDir = mkdtempSync(join(tmpdir(), "ahood-xdg-test-"));
+    process.env.XDG_CONFIG_HOME = xdgDir;
+    try {
+      writeCredentials({ token: "ahd_xdg" });
+      expect(statSync(join(xdgDir, "ahood", "credentials.json")).isFile()).toBe(true);
+      expect(readCredentials()).toEqual({ token: "ahd_xdg" });
+    } finally {
+      rmSync(xdgDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null instead of throwing when the token field isn't a string", () => {
+    const ahoodDir = join(dir, ".config", "ahood");
+    mkdirSync(ahoodDir, { recursive: true });
+    writeFileSync(join(ahoodDir, "credentials.json"), JSON.stringify({ token: { nested: true } }));
+    expect(readCredentials()).toBeNull();
   });
 });

@@ -1,11 +1,11 @@
 import { apiJson } from "../http.js";
+import { flagValue } from "../flags.js";
+import { parseOwnerSkill } from "../spec.js";
 
 type UpdateResponse = { slug: string; tagline: string | null; license: string | null; visibility: string; tags: string[] };
 
-function flagValue(args: string[], flag: string): string | undefined {
-  const index = args.indexOf(flag);
-  return index >= 0 ? args[index + 1] : undefined;
-}
+const USAGE =
+  "Usage: ahood edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private]";
 
 // Mirrors PATCH /api/v1/skills/{owner}/{skill}'s allow-list exactly
 // (lib/skills/mutations.ts's UpdateSkillInput) -- only a field the caller
@@ -14,13 +14,8 @@ function flagValue(args: string[], flag: string): string | undefined {
 // that are present on the body at all).
 export async function edit(args: string[]): Promise<void> {
   const spec = args[0];
-  if (!spec || spec.startsWith("--")) {
-    throw new Error(
-      "Usage: ahood edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private]",
-    );
-  }
-  const [owner, skill] = spec.split("/");
-  if (!owner || !skill) throw new Error("Usage: ahood edit <owner>/<skill> [--tagline ...] [--tags ...] [--license ...] [--visibility ...]");
+  if (!spec || spec.startsWith("--")) throw new Error(USAGE);
+  const { owner, skill } = parseOwnerSkill(spec, USAGE);
 
   const body: Record<string, unknown> = {};
   const tagline = flagValue(args, "--tagline");
@@ -30,17 +25,25 @@ export async function edit(args: string[]): Promise<void> {
   const license = flagValue(args, "--license");
   if (license !== undefined) body.license = license;
   const visibility = flagValue(args, "--visibility");
-  if (visibility !== undefined) body.visibility = visibility;
+  if (visibility !== undefined) {
+    if (visibility !== "public" && visibility !== "private") {
+      throw new Error(`--visibility must be "public" or "private" (got "${visibility}").`);
+    }
+    body.visibility = visibility;
+  }
 
   if (Object.keys(body).length === 0) {
     throw new Error("Nothing to update -- pass at least one of --tagline, --tags, --license, --visibility.");
   }
 
-  const updated = await apiJson<UpdateResponse>(`/api/v1/skills/${owner}/${skill}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const updated = await apiJson<UpdateResponse>(
+    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
 
   console.log(`Updated ${owner}/${updated.slug}: tagline=${JSON.stringify(updated.tagline)}, license=${JSON.stringify(updated.license)}, visibility=${updated.visibility}, tags=[${updated.tags.join(", ")}]`);
 }

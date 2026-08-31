@@ -4,38 +4,99 @@
 // file -- README.md is plain markdown and the docs page is a separate
 // Next.js app) -- a comment in each of those two places points back here so
 // a future command addition doesn't update only one.
-export type CommandHelp = { usage: string; desc: string };
+export type CommandHelp = { usage: string; desc: string; flags?: string[]; examples?: string[] };
 
 export const COMMANDS_HELP: CommandHelp[] = [
   { usage: "ahood login", desc: "Device-code browser login, stores a token locally." },
   { usage: "ahood logout", desc: "Removes the stored token." },
-  { usage: "ahood whoami", desc: "Reports whether your stored token still authenticates." },
-  { usage: "ahood search <query>", desc: "Search published skills." },
-  { usage: "ahood list-mine", desc: "List your own skills, public and private." },
-  { usage: "ahood add <owner>/<skill>[@version]", desc: "Install a skill into .claude/skills/, pinned in the lockfile." },
-  { usage: "ahood update [<owner>/<skill>]", desc: "Move the lockfile pin forward to the latest version." },
+  {
+    usage: "ahood whoami [--json]",
+    desc: "Reports whether your stored token still authenticates.",
+    flags: ["--json    Emit a machine-readable result instead of prose."],
+  },
+  {
+    usage: "ahood search <query> [--json] [--limit <n>]",
+    desc: "Search published skills.",
+    flags: [
+      "--json        Emit the raw skill objects instead of formatted lines.",
+      "--limit <n>   Cap the number of results.",
+    ],
+    examples: ["ahood search pdf-tools", "ahood search pdf-tools --json"],
+  },
+  {
+    usage: "ahood view <owner>/<skill> [--json] [--web]",
+    desc: "Show a single skill's details without installing it.",
+    flags: [
+      "--json   Emit the raw skill object instead of formatted lines.",
+      "--web    Open the skill's page in your browser instead of printing.",
+    ],
+  },
+  {
+    usage: "ahood list-mine [--json]",
+    desc: "List your own skills, public and private.",
+    flags: ["--json    Emit the raw skill objects instead of formatted lines."],
+  },
+  {
+    usage: "ahood add <owner>/<skill>[@version]",
+    desc: "Install a skill into .claude/skills/, pinned in the lockfile.",
+    examples: ["ahood add alice/pdf-tools", "ahood add alice/pdf-tools@1.2.0"],
+  },
+  {
+    usage: "ahood update [<owner>/<skill> ...]",
+    desc: "Move the lockfile pin(s) forward to the latest version. With no argument, updates every installed skill; one failure doesn't stop the rest.",
+  },
   { usage: "ahood remove <owner>/<skill>", desc: "Uninstall and unpin (local only)." },
   {
     usage: "ahood edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility]",
-    desc: "Update a skill you own.",
+    desc: "Update a skill you own. Only the flags you pass are changed.",
+    flags: [
+      "--tagline <text>              Short one-line description.",
+      "--tags <comma,separated>      Replaces the skill's tag list.",
+      "--license <id>                An SPDX license identifier, e.g. MIT.",
+      "--visibility public|private   Who can see and install the skill.",
+    ],
+    examples: ['ahood edit alice/pdf-tools --tagline "Merge and split PDFs"'],
   },
-  { usage: "ahood unpublish <owner>/<skill>", desc: "Delete a skill from the registry (asks for confirmation)." },
+  {
+    usage: "ahood unpublish <owner>/<skill> [--yes]",
+    desc: "Delete a skill from the registry for every consumer (not just your local install). Prompts for a typed \"yes\" unless --yes is passed.",
+    flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+  },
   { usage: "ahood star <owner>/<skill>", desc: "Star a skill." },
   { usage: "ahood unstar <owner>/<skill>", desc: "Remove your star from a skill." },
   {
-    usage: "ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>",
-    desc: "Publish a new version of an existing skill.",
+    usage: "ahood publish <owner>/<skill>@<version> [--path <dir>]",
+    desc:
+      "Publish a new version of an existing skill from a folder containing SKILL.md (the skill itself is created from the web UI first). " +
+      "The legacy form `ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted.",
+    examples: ["ahood publish alice/pdf-tools@1.1.0", "ahood publish alice/pdf-tools@1.1.0 --path ./pdf-tools"],
   },
-  { usage: "ahood token create|list|revoke", desc: "Manage personal API tokens (requires a browser session)." },
+  {
+    usage: "ahood token create <name>|list [--json]|revoke <id>",
+    desc: "Manage personal API tokens. `create` requires an existing browser-backed session.",
+    examples: ["ahood token create ci-runner", "ahood token list --json", "ahood token revoke <id>"],
+  },
+  {
+    usage: "ahood completion <bash|zsh|fish>",
+    desc: "Print a shell completion script for the command names.",
+    examples: ["ahood completion bash >> ~/.bashrc"],
+  },
 ];
 
 export function findCommandHelp(command: string): CommandHelp | undefined {
-  return COMMANDS_HELP.find((c) => c.usage === command || c.usage.startsWith(`ahood ${command} `) || c.usage === `ahood ${command}`);
+  return COMMANDS_HELP.find((c) => c.usage.startsWith(`ahood ${command} `) || c.usage === `ahood ${command}`);
+}
+
+export function formatCommandHelp(entry: CommandHelp): string {
+  const lines = [entry.usage, "", entry.desc];
+  if (entry.flags?.length) lines.push("", "Flags:", ...entry.flags.map((f) => `  ${f}`));
+  if (entry.examples?.length) lines.push("", "Examples:", ...entry.examples.map((e) => `  ${e}`));
+  return lines.join("\n");
 }
 
 export function formatHelp(): string {
   const width = Math.max(...COMMANDS_HELP.map((c) => c.usage.length));
-  const lines = COMMANDS_HELP.map((c) => `  ${c.usage.padEnd(width + 2)}${c.desc}`);
+  const lines = COMMANDS_HELP.map((c) => `  ${c.usage.padEnd(width + 2)}${c.desc.split(". ")[0].replace(/\.$/, "")}.`);
   return [
     "ahood -- CLI for the ahood skills registry (https://ahood.vercel.app)",
     "",
@@ -47,7 +108,12 @@ export function formatHelp(): string {
     "Commands:",
     ...lines,
     "",
-    "Run `ahood <command> --help` for a single command's usage.",
+    "Run `ahood <command> --help` (or `ahood help <command>`) for a single command's flags and examples.",
+    "Run `ahood --version` to print the installed CLI version.",
+    "",
+    "Exit codes: 0 success, 1 general error, 2 usage/validation error,",
+    "            4 authentication required or rejected, 5 not found, 6 network/transport error.",
+    "",
     "Full reference: https://ahood.vercel.app/docs",
   ].join("\n");
 }

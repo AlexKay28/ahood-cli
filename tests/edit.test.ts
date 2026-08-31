@@ -76,4 +76,20 @@ describe("edit", () => {
 
     await expect(edit([`${OWNER}/${SKILL}`, "--tagline", "t"])).rejects.toThrow(/publish/);
   });
+
+  it("errors instead of swallowing the next flag as this one's value", async () => {
+    await expect(
+      edit([`${OWNER}/${SKILL}`, "--tagline", "--visibility", "public"]),
+    ).rejects.toThrow(/--tagline requires a value/);
+  });
+
+  it("errors on a trailing flag with no value instead of silently dropping it", async () => {
+    await expect(edit([`${OWNER}/${SKILL}`, "--tagline"])).rejects.toThrow(/--tagline requires a value/);
+  });
+
+  it("rejects an invalid --visibility value before making a request", async () => {
+    const calls = stubApi(200, {});
+    await expect(edit([`${OWNER}/${SKILL}`, "--visibility", "publik"])).rejects.toThrow(/must be "public" or "private"/);
+    expect(calls).toHaveLength(0);
+  });
 });
