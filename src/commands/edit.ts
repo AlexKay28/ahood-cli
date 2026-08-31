@@ -2,10 +2,18 @@ import { apiJson } from "../http.js";
 import { flagValue } from "../flags.js";
 import { parseOwnerSkill } from "../spec.js";
 
-type UpdateResponse = { slug: string; tagline: string | null; license: string | null; visibility: string; tags: string[] };
+type UpdateResponse = {
+  slug: string;
+  tagline: string | null;
+  license: string | null;
+  visibility: string;
+  tags: string[];
+  homepage?: string | null;
+  repository?: string | null;
+};
 
 const USAGE =
-  "Usage: ahood edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private]";
+  "Usage: ahood edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]";
 
 // Mirrors PATCH /api/v1/skills/{owner}/{skill}'s allow-list exactly
 // (lib/skills/mutations.ts's UpdateSkillInput) -- only a field the caller
@@ -31,9 +39,15 @@ export async function edit(args: string[]): Promise<void> {
     }
     body.visibility = visibility;
   }
+  const homepage = flagValue(args, "--homepage");
+  if (homepage !== undefined) body.homepage = homepage;
+  const repository = flagValue(args, "--repository");
+  if (repository !== undefined) body.repository = repository;
 
   if (Object.keys(body).length === 0) {
-    throw new Error("Nothing to update -- pass at least one of --tagline, --tags, --license, --visibility.");
+    throw new Error(
+      "Nothing to update -- pass at least one of --tagline, --tags, --license, --visibility, --homepage, --repository.",
+    );
   }
 
   const updated = await apiJson<UpdateResponse>(

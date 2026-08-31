@@ -228,6 +228,29 @@ describe("publish", () => {
     expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
   });
 
+  it("forwards --homepage and --repository to the create-skill body on first publish", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const captures: { uploadBody?: Uint8Array; createBody?: unknown } = {};
+    stubApiFirstPublish(captures);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish([
+      "alice/demo@1.0.0",
+      "--path", dir,
+      "--name", "Demo Skill",
+      "--homepage", "https://example.com",
+      "--repository", "https://github.com/alice/demo",
+    ]);
+
+    expect(captures.createBody).toEqual({
+      slug: "demo",
+      name: "Demo Skill",
+      homepage: "https://example.com",
+      repository: "https://github.com/alice/demo",
+    });
+    expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
+  });
+
   it("does not attempt to create the skill when versions/init succeeds on the first try (existing-skill regression check)", async () => {
     writeFileSync(join(dir, "SKILL.md"), "# demo");
     const capture: { body?: Uint8Array } = {};

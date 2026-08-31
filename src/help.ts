@@ -47,13 +47,15 @@ export const COMMANDS_HELP: CommandHelp[] = [
   },
   { usage: "ahood remove <owner>/<skill>", desc: "Uninstall and unpin (local only)." },
   {
-    usage: "ahood edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility]",
+    usage: "ahood edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
     desc: "Update a skill you own. Only the flags you pass are changed.",
     flags: [
       "--tagline <text>              Short one-line description.",
       "--tags <comma,separated>      Replaces the skill's tag list.",
       "--license <id>                An SPDX license identifier, e.g. MIT.",
       "--visibility public|private   Who can see and install the skill.",
+      "--homepage <url>              The skill's homepage URL.",
+      "--repository <url>            The skill's source repository URL.",
     ],
     examples: ['ahood edit alice/pdf-tools --tagline "Merge and split PDFs"'],
   },
@@ -65,10 +67,10 @@ export const COMMANDS_HELP: CommandHelp[] = [
   { usage: "ahood star <owner>/<skill>", desc: "Star a skill." },
   { usage: "ahood unstar <owner>/<skill>", desc: "Remove your star from a skill." },
   {
-    usage: "ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>]",
+    usage: "ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>]",
     desc:
       "Publish a new version of a skill from a folder containing SKILL.md. If the skill doesn't exist yet, this " +
-      "creates it first -- pass --name (required in that case) and optionally --tagline/--tags/--license. " +
+      "creates it first -- pass --name (required in that case) and optionally --tagline/--tags/--license/--homepage/--repository. " +
       "Processing happens server-side after upload; this command polls and reports the final published/failed status. " +
       "The legacy form `ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted.",
     flags: [
@@ -76,6 +78,8 @@ export const COMMANDS_HELP: CommandHelp[] = [
       "--tagline <text>              Short one-line description, used only when creating.",
       "--tags <comma,separated>      Initial tags, used only when creating.",
       "--license <id>                An SPDX license identifier, e.g. MIT, used only when creating.",
+      "--homepage <url>              The skill's homepage URL, used only when creating.",
+      "--repository <url>            The skill's source repository URL, used only when creating.",
     ],
     examples: [
       "ahood publish alice/pdf-tools@1.1.0",

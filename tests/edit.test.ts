@@ -71,6 +71,29 @@ describe("edit", () => {
     expect(JSON.parse(calls[0].init.body as string)).toEqual({ tagline: "t", license: "MIT", visibility: "private" });
   });
 
+  it("sends --homepage and --repository through the same only-passed-flags PATCH", async () => {
+    const calls = stubApi(200, {
+      slug: SKILL,
+      tagline: null,
+      license: null,
+      visibility: "public",
+      tags: [],
+      homepage: "https://example.com",
+      repository: "https://github.com/alice/demo-skill",
+    });
+
+    await edit([
+      `${OWNER}/${SKILL}`,
+      "--homepage", "https://example.com",
+      "--repository", "https://github.com/alice/demo-skill",
+    ]);
+
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({
+      homepage: "https://example.com",
+      repository: "https://github.com/alice/demo-skill",
+    });
+  });
+
   it("surfaces the server's error message on a non-2xx response", async () => {
     stubApi(403, { error: "This token's scopes do not include 'publish'" });
 

@@ -36,7 +36,7 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
 }
 
 const USAGE =
-  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>]\n" +
+  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>]\n" +
   "   or: ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
@@ -121,6 +121,8 @@ function parsePublishArgs(args: string[]): {
   tagline?: string;
   tags?: string;
   license?: string;
+  homepage?: string;
+  repository?: string;
 } {
   const pathFlag = flagValue(args, "--path");
   let owner = flagValue(args, "--owner");
@@ -130,6 +132,8 @@ function parsePublishArgs(args: string[]): {
   const tagline = flagValue(args, "--tagline");
   const tags = flagValue(args, "--tags");
   const license = flagValue(args, "--license");
+  const homepage = flagValue(args, "--homepage");
+  const repository = flagValue(args, "--repository");
   let legacyPath: string | undefined;
 
   const first = args[0];
@@ -150,18 +154,19 @@ function parsePublishArgs(args: string[]): {
   if (!SEMVER_RE.test(version)) {
     throw new Error(`--version must be a semver like 1.2.3 (got "${version}").\n${USAGE}`);
   }
-  return { owner, skill, version, path: pathFlag ?? legacyPath ?? ".", name, tagline, tags, license };
+  return { owner, skill, version, path: pathFlag ?? legacyPath ?? ".", name, tagline, tags, license, homepage, repository };
 }
 
 // Creates the skill under the caller's own account when versions/init 404s
 // -- skill creation is CLI-only now (there is no separate `ahood create`;
 // publish creates on first use). --name is required for this path since
-// createSkill requires a name; --tagline/--tags/--license are optional and
-// only used here, never applied to an already-existing skill.
+// createSkill requires a name; --tagline/--tags/--license/--homepage/
+// --repository are optional and only used here, never applied to an
+// already-existing skill.
 async function createSkillForPublish(
   owner: string,
   skill: string,
-  opts: { name?: string; tagline?: string; tags?: string; license?: string },
+  opts: { name?: string; tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string },
 ): Promise<void> {
   if (!opts.name) {
     throw new Error(
@@ -172,6 +177,8 @@ async function createSkillForPublish(
   if (opts.tagline !== undefined) body.tagline = opts.tagline;
   if (opts.tags !== undefined) body.tags = opts.tags.split(",").map((t) => t.trim()).filter(Boolean);
   if (opts.license !== undefined) body.license = opts.license;
+  if (opts.homepage !== undefined) body.homepage = opts.homepage;
+  if (opts.repository !== undefined) body.repository = opts.repository;
 
   const created = await apiJson<CreateResponse>("/api/v1/skills", {
     method: "POST",
@@ -197,7 +204,7 @@ async function initVersion(
   skill: string,
   version: string,
   packageSizeBytes: number,
-  createOpts: { name?: string; tagline?: string; tags?: string; license?: string },
+  createOpts: { name?: string; tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string },
 ): Promise<InitResponse> {
   const path = `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/init`;
   const body = JSON.stringify({ version, package_size_bytes: packageSizeBytes });
@@ -213,7 +220,7 @@ async function initVersion(
 }
 
 export async function publish(args: string[]): Promise<void> {
-  const { owner, skill, version, path, name, tagline, tags, license } = parsePublishArgs(args);
+  const { owner, skill, version, path, name, tagline, tags, license, homepage, repository } = parsePublishArgs(args);
   const skillMdPath = join(path, "SKILL.md");
   if (!existsSync(skillMdPath)) {
     throw new Error(`No SKILL.md found at ${skillMdPath} -- publish must point at a skill folder's root.`);
@@ -221,7 +228,7 @@ export async function publish(args: string[]): Promise<void> {
 
   const archive = await tarGzDirectory(path);
 
-  const init = await initVersion(owner, skill, version, archive.length, { name, tagline, tags, license });
+  const init = await initVersion(owner, skill, version, archive.length, { name, tagline, tags, license, homepage, repository });
 
   // TS's lib.dom BodyInit (in scope here since tsconfig has no explicit
   // "lib" override, so DOM is included alongside the Node types) type-checks
