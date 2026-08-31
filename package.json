@@ -1,6 +1,6 @@
 {
   "name": "@alexkay/ahood-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI for ahood, a registry for installing and publishing Claude Code skills.",
   "license": "MIT",
   "homepage": "https://ahood.vercel.app/docs",
@@ -15,7 +15,9 @@
   "engines": {
     "node": ">=18"
   },
-  "bin": { "ahood": "./dist/index.js" },
+  "bin": {
+    "ahood": "dist/index.js"
+  },
   "files": [
     "dist"
   ],
