@@ -8,11 +8,11 @@ export async function token(args: string[]): Promise<void> {
     case "create":
       return tokenCreate(rest);
     case "list":
-      return tokenList();
+      return tokenList(rest);
     case "revoke":
       return tokenRevoke(rest);
     default:
-      throw new Error("Usage: ahood token create|list|revoke");
+      throw new Error("Usage: ahood token create <name>|list [--json]|revoke <id>");
   }
 }
 
@@ -36,20 +36,26 @@ async function tokenCreate(args: string[]): Promise<void> {
   console.log("Copy this now -- it will not be shown again.");
 }
 
-async function tokenList(): Promise<void> {
+async function tokenList(args: string[]): Promise<void> {
+  const jsonOutput = args.includes("--json");
   const { tokens } = await apiJson<{ tokens: TokenRow[] }>("/api/v1/auth/tokens");
+
+  if (jsonOutput) {
+    console.log(JSON.stringify(tokens));
+    return;
+  }
   if (tokens.length === 0) {
     console.log("No tokens.");
     return;
   }
   for (const t of tokens) {
-    console.log(`${t.id}  ${t.name}  ${t.token_prefix}…  ${t.scopes.join(",")}${t.revoked_at ? "  (revoked)" : ""}`);
+    console.log(`${t.id}  ${t.name}  ${t.token_prefix}...  ${t.scopes.join(",")}${t.revoked_at ? "  (revoked)" : ""}`);
   }
 }
 
 async function tokenRevoke(args: string[]): Promise<void> {
   const id = args[0];
   if (!id) throw new Error("Usage: ahood token revoke <id>");
-  await apiJson(`/api/v1/auth/tokens/${id}`, { method: "DELETE" });
+  await apiJson(`/api/v1/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
   console.log(`Revoked ${id}`);
 }

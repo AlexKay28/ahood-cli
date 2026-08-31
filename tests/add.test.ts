@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
-import { add } from "../src/commands/add.js";
+import { add, extractTarGz } from "../src/commands/add.js";
 
 const API_URL = "http://ahood.test";
 const OWNER = "alice";
@@ -39,7 +39,12 @@ function sha256(buffer: Buffer): string {
  * from. `checksum` is what the SERVER claims -- the whole point of these tests
  * is what happens when that disagrees with the bytes actually delivered.
  */
-function stubApi(archive: Buffer, checksum: string, manifest: Array<{ path: string }> = [{ path: "SKILL.md" }]) {
+function stubApi(
+  archive: Buffer,
+  checksum: string,
+  manifest: Array<{ path: string }> = [{ path: "SKILL.md" }],
+  version: string = VERSION,
+) {
   const calls: string[] = [];
   vi.stubGlobal(
     "fetch",
@@ -48,11 +53,17 @@ function stubApi(archive: Buffer, checksum: string, manifest: Array<{ path: stri
       calls.push(url);
       if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}`) {
         return new Response(
-          JSON.stringify({ skill_versions: { version: VERSION, manifest, checksum_sha256: checksum } }),
+          JSON.stringify({ skill_versions: { version, manifest, checksum_sha256: checksum } }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
-      if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}/download?version=${VERSION}`) {
+      if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}/versions/${version}`) {
+        return new Response(
+          JSON.stringify({ version, manifest, checksum_sha256: checksum, yanked_at: null }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}/download?version=${version}`) {
         return new Response(new Uint8Array(archive), { status: 200 });
       }
       return new Response(JSON.stringify({ error: `unexpected request: ${url}` }), { status: 404 });
@@ -137,4 +148,46 @@ describe("add", () => {
     expect(existsSync(join(dir, ".claude", "skills", OWNER, "escaped.txt"))).toBe(false);
     expect(existsSync(join(dir, ".claude", "skills", "escaped.txt"))).toBe(false);
   });
+
+  it("rejects a spec whose owner/skill segments try to escape .claude/skills/", async () => {
+    await expect(add(["../../etc"])).rejects.toThrow(/Usage: ahood add/);
+    await expect(add(["alice/.."])).rejects.toThrow(/Invalid skill/);
+    expect(existsSync(join(dir, ".claude"))).toBe(false);
+  });
+
+  it("clears the previous version's files on upgrade instead of only adding to them", async () => {
+    const v1 = await tarGz({ "SKILL.md": "# v1\n", "old-removed-file.md": "stale\n" });
+    stubApi(v1, sha256(v1), [{ path: "SKILL.md" }], "1.0.0");
+    await add([`${OWNER}/${SKILL}@1.0.0`]);
+    expect(existsSync(join(dir, ".claude", "skills", OWNER, SKILL, "old-removed-file.md"))).toBe(true);
+
+    const v2 = await tarGz({ "SKILL.md": "# v2\n" });
+    stubApi(v2, sha256(v2), [{ path: "SKILL.md" }], "2.0.0");
+    await add([`${OWNER}/${SKILL}@2.0.0`]);
+
+    expect(readFileSync(join(dir, ".claude", "skills", OWNER, SKILL, "SKILL.md"), "utf-8")).toBe("# v2\n");
+    expect(existsSync(join(dir, ".claude", "skills", OWNER, SKILL, "old-removed-file.md"))).toBe(false);
+  });
+
+  it("refuses to decompress an archive whose expanded size is over the cap (decompression-bomb guard)", async () => {
+    // A highly-compressible payload past the 200 MB decompressed cap --
+    // gzip shrinks this to a few KB, so building the fixture is cheap even
+    // though the guard it exercises is about the DECOMPRESSED size.
+    const bomb = gzipSync(Buffer.alloc(210 * 1024 * 1024));
+    await expect(extractTarGz(bomb, join(dir, "out"))).rejects.toThrow(/decompresses to more than/);
+  });
+
+  it("refuses to reinstall the same pinned version with a different checksum", async () => {
+    const original = await tarGz({ "SKILL.md": "# demo\n" });
+    stubApi(original, sha256(original));
+    await add([`${OWNER}/${SKILL}`]);
+
+    const tampered = await tarGz({ "SKILL.md": "# tampered\n" });
+    stubApi(tampered, sha256(tampered)); // server now claims a different checksum for the SAME version
+
+    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/does not match the one already pinned/);
+    // Original install must be untouched.
+    expect(readFileSync(join(dir, ".claude", "skills", OWNER, SKILL, "SKILL.md"), "utf-8")).toBe("# demo\n");
+  });
+
 });

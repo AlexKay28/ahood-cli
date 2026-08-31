@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { readLockfile, writeLockfileEntry, removeLockfileEntry } from "../src/lockfile.js";
 
 describe("lockfile", () => {
@@ -49,5 +49,21 @@ describe("lockfile", () => {
     expect(readLockfile(lockPath)).toEqual({
       "bob/skill-b": { version: "2.0.0", checksum_sha256: "bbb" },
     });
+  });
+
+  it("throws instead of silently discarding a corrupted lockfile", () => {
+    mkdirSync(dirname(lockPath), { recursive: true });
+    writeFileSync(lockPath, "{not valid json");
+    expect(() => readLockfile(lockPath)).toThrow(/corrupted/);
+  });
+
+  it("does not lose entries across many back-to-back writes (lock acquire/release round-trips cleanly)", async () => {
+    const writes = Array.from({ length: 8 }, (_, i) =>
+      Promise.resolve().then(() =>
+        writeLockfileEntry(lockPath, `owner/skill-${i}`, { version: "1.0.0", checksum_sha256: `hash-${i}` }),
+      ),
+    );
+    await Promise.all(writes);
+    expect(Object.keys(readLockfile(lockPath))).toHaveLength(8);
   });
 });

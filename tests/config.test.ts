@@ -17,4 +17,24 @@ describe("getApiUrl", () => {
     process.env.AHOOD_API_URL = "http://localhost:3000/";
     expect(getApiUrl()).toBe("http://localhost:3000");
   });
+
+  it("strips multiple trailing slashes", () => {
+    process.env.AHOOD_API_URL = "https://example.com///";
+    expect(getApiUrl()).toBe("https://example.com");
+  });
+
+  it("rejects a non-https, non-local override", () => {
+    process.env.AHOOD_API_URL = "http://evil.example.com";
+    expect(() => getApiUrl()).toThrow(/must use https/);
+  });
+
+  it("rejects an invalid URL", () => {
+    process.env.AHOOD_API_URL = "not a url";
+    expect(() => getApiUrl()).toThrow(/not a valid URL/);
+  });
+
+  it("allows http for a reserved test TLD", () => {
+    process.env.AHOOD_API_URL = "http://ahood.test";
+    expect(getApiUrl()).toBe("http://ahood.test");
+  });
 });

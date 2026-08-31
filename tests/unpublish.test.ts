@@ -97,4 +97,26 @@ describe("unpublish", () => {
 
     await expect(unpublish([`${OWNER}/${SKILL}`])).rejects.toThrow(/Not found/);
   });
+
+  it("rejects instead of silently exiting success when stdin closes with no answer at all", async () => {
+    const calls = stubApi(200);
+    const fakeStdin = new Readable({ read() {} }) as unknown as NodeJS.ReadStream & { fd: 0 };
+    vi.spyOn(process, "stdin", "get").mockReturnValue(fakeStdin);
+    vi.spyOn(process, "stdout", "get").mockReturnValue(
+      new Writable({ write(_c, _e, cb) { cb(); } }) as unknown as NodeJS.WriteStream & { fd: 1 },
+    );
+    queueMicrotask(() => fakeStdin.push(null)); // EOF, no data at all
+
+    await expect(unpublish([`${OWNER}/${SKILL}`])).rejects.toThrow(/not answered/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("--yes bypasses the prompt entirely, for scripted/CI use", async () => {
+    const calls = stubApi(200);
+
+    await unpublish([`${OWNER}/${SKILL}`, "--yes"]);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init.method).toBe("DELETE");
+  });
 });

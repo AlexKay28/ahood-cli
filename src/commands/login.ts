@@ -1,8 +1,12 @@
 import { apiJson } from "../http.js";
+import { getApiUrl } from "../config.js";
 import { writeCredentials } from "../credentials.js";
 
 type DeviceCodeResponse = { code: string; verification_url: string; expires_in: number };
-type PollResponse = { status: "pending" | "approved" } & { token?: string };
+type PollResponse = { status: "pending" | "approved"; token?: string };
+
+const DEFAULT_EXPIRES_IN_SECONDS = 600; // 10 minutes, matching the previous timeout loop's real-world duration
+const POLL_TIMEOUT_MS = 10_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -16,14 +20,25 @@ export async function login(): Promise<void> {
   console.log(`First, confirm this code matches what you see in your browser: ${code}`);
   console.log(`Open ${verification_url} to approve.`);
 
-  const deadline = Date.now() + expires_in * 1000;
+  // expires_in is server-supplied; a missing/non-finite value previously
+  // produced `Date.now() + undefined * 1000` = NaN, so `Date.now() < NaN` is
+  // always false and the poll loop's body never ran even once -- login
+  // failed instantly with "timed out" instead of ever actually polling.
+  const seconds = Number.isFinite(expires_in) && expires_in > 0 ? expires_in : DEFAULT_EXPIRES_IN_SECONDS;
+  const deadline = Date.now() + seconds * 1000;
+
   while (Date.now() < deadline) {
     await sleep(2000);
     let res: Response;
     let body: PollResponse;
     try {
-      res = await fetch(`${verification_url.split("?")[0].replace("/cli-auth", "")}/api/v1/auth/cli/device/${code}`);
-      body = await res.json();
+      // Poll against the CONFIGURED API host (getApiUrl()), not a URL derived
+      // from the server-supplied verification_url -- that field is only ever
+      // shown to the human, never used to build a request, so a compromised
+      // or redirected registry response can't point this at a host that
+      // then harvests the device code and hands back an attacker's token.
+      res = await apiFetchWithTimeout(`/api/v1/auth/cli/device/${encodeURIComponent(code)}`);
+      body = (await res.json()) as PollResponse;
     } catch (error) {
       // A THROWN fetch (DNS blip, dropped socket, a body that isn't JSON) is
       // transient by nature, and this loop runs for up to ten minutes while a
@@ -45,4 +60,12 @@ export async function login(): Promise<void> {
     // status === "pending" -- keep polling.
   }
   throw new Error("Login timed out. Run `ahood login` again.");
+}
+
+// Not apiJson: a non-2xx poll response ("pending", still-provisioning, etc.)
+// is expected and must not throw -- the status code is inspected by the
+// caller instead. Still routed through the same trusted host + a bounded
+// timeout, unlike the raw, unbounded `fetch` this replaced.
+async function apiFetchWithTimeout(path: string): Promise<Response> {
+  return fetch(`${getApiUrl()}${path}`, { signal: AbortSignal.timeout(POLL_TIMEOUT_MS) });
 }

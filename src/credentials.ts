@@ -4,15 +4,23 @@ import { join } from "node:path";
 
 type Credentials = { token: string };
 
+function credentialsDir(): string {
+  return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "ahood");
+}
+
 function credentialsPath(): string {
-  return join(homedir(), ".config", "ahood", "credentials.json");
+  return join(credentialsDir(), "credentials.json");
 }
 
 export function readCredentials(): Credentials | null {
   const path = credentialsPath();
   if (!existsSync(path)) return null;
   try {
-    return JSON.parse(readFileSync(path, "utf-8"));
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    if (!parsed || typeof parsed !== "object" || typeof (parsed as { token?: unknown }).token !== "string") {
+      return null;
+    }
+    return parsed as Credentials;
   } catch {
     return null;
   }
@@ -20,7 +28,7 @@ export function readCredentials(): Credentials | null {
 
 export function writeCredentials(creds: Credentials): void {
   const path = credentialsPath();
-  const dir = join(homedir(), ".config", "ahood");
+  const dir = credentialsDir();
   // The `mode` option on mkdirSync/writeFileSync only applies when the
   // directory/file is actually created (POSIX O_CREAT semantics) -- if
   // either already exists with looser permissions (manual chmod, a restored

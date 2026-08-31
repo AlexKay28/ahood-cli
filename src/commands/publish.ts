@@ -1,10 +1,16 @@
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pack } from "tar-stream";
 import { createGzip } from "node:zlib";
 import { apiJson } from "../http.js";
+import { flagValue } from "../flags.js";
+import { parseOwnerSkill, SEMVER_RE } from "../spec.js";
 
 type InitResponse = { upload_url: string; storage_path: string; version_id: string };
+
+const USAGE =
+  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>]\n" +
+  "   or: ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
 // `vendor/thing/.git` is skipped the same as a top-level one. Not a
@@ -16,17 +22,32 @@ type InitResponse = { upload_url: string; storage_path: string; version_id: stri
 //                32+ hex) do not match.
 //   node_modules -- never part of a skill, and megabytes of it.
 //   .env / .env.* -- the single most likely place a real secret lives.
+//   .npmrc / .yarnrc.yml / .netrc / .pypirc -- package-manager/network auth
+//                tokens (npm_..., ghp_...) that don't match the server
+//                scanner's regexes either.
+//   id_rsa / id_ed25519 / id_ecdsa / id_dsa (+ .pub) / .ssh -- SSH keys.
+//   .aws / .docker -- cloud and registry credentials.
 //   .DS_Store -- noise.
-const EXCLUDED_NAMES = new Set([".git", "node_modules", ".DS_Store"]);
+const EXCLUDED_NAMES = new Set([
+  ".git",
+  "node_modules",
+  ".DS_Store",
+  ".npmrc",
+  ".yarnrc.yml",
+  ".netrc",
+  ".pypirc",
+  ".ssh",
+  ".aws",
+  ".docker",
+]);
+const EXCLUDED_PREFIXES = [".env", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"];
 
 function isExcluded(name: string): boolean {
   if (EXCLUDED_NAMES.has(name)) return true;
-  if (name === ".env" || name.startsWith(".env.")) return true;
-  return false;
+  return EXCLUDED_PREFIXES.some((prefix) => name === prefix || name.startsWith(`${prefix}.`));
 }
 
 async function tarGzDirectory(dir: string): Promise<Buffer> {
-  const { readdirSync, statSync } = await import("node:fs");
   const tar = pack();
   const gzip = createGzip();
   const chunks: Buffer[] = [];
@@ -36,10 +57,18 @@ async function tarGzDirectory(dir: string): Promise<Buffer> {
       if (isExcluded(entry)) continue;
       const fullPath = join(current, entry);
       const relPath = prefix ? `${prefix}/${entry}` : entry;
-      const stat = statSync(fullPath);
+      // lstat, not stat -- following a symlink here would pack whatever it
+      // points at (anywhere on disk, or a parent directory causing unbounded
+      // recursion) under an innocuous-looking name, completely bypassing the
+      // exclusion list above, which only ever matches by name.
+      const stat = lstatSync(fullPath);
+      if (stat.isSymbolicLink()) {
+        console.warn(`WARNING: skipping symlink, not publishing it: ${relPath}`);
+        continue;
+      }
       if (stat.isDirectory()) {
         addDir(fullPath, relPath);
-      } else {
+      } else if (stat.isFile()) {
         tar.entry({ name: relPath, size: stat.size }, readFileSync(fullPath));
       }
     }
@@ -56,39 +85,51 @@ async function tarGzDirectory(dir: string): Promise<Buffer> {
   });
 }
 
+function parsePublishArgs(args: string[]): { owner: string; skill: string; version: string; path: string } {
+  const pathFlag = flagValue(args, "--path");
+  let owner = flagValue(args, "--owner");
+  let skill = flagValue(args, "--slug");
+  let version = flagValue(args, "--version");
+  let legacyPath: string | undefined;
+
+  const first = args[0];
+  if (first && !first.startsWith("--")) {
+    if (first.includes("/") && first.includes("@")) {
+      // Primary form: ahood publish <owner>/<skill>@<version>
+      const parsed = parseOwnerSkill(first.slice(0, first.lastIndexOf("@")), USAGE);
+      owner = owner ?? parsed.owner;
+      skill = skill ?? parsed.skill;
+      version = version ?? first.slice(first.lastIndexOf("@") + 1);
+    } else {
+      // Legacy form: ahood publish <path> --owner ... --slug ... --version ...
+      legacyPath = first;
+    }
+  }
+
+  if (!owner || !skill || !version) throw new Error(USAGE);
+  if (!SEMVER_RE.test(version)) {
+    throw new Error(`--version must be a semver like 1.2.3 (got "${version}").\n${USAGE}`);
+  }
+  return { owner, skill, version, path: pathFlag ?? legacyPath ?? "." };
+}
+
 export async function publish(args: string[]): Promise<void> {
-  const path = args[0] ?? ".";
+  const { owner, skill, version, path } = parsePublishArgs(args);
   const skillMdPath = join(path, "SKILL.md");
   if (!existsSync(skillMdPath)) {
     throw new Error(`No SKILL.md found at ${skillMdPath} -- publish must point at a skill folder's root.`);
   }
 
-  // A real ahood CLI would parse owner/slug/version/name out of SKILL.md
-  // frontmatter or a companion manifest -- this MVP takes them as explicit
-  // flags, matching how `versions/init`'s API itself requires them
-  // separately from the archive. Kept simple: --slug, --owner, --version are
-  // required; metadata creation (POST /skills) is assumed already done via
-  // the web UI or a prior publish -- this command only pushes a NEW VERSION
-  // of an existing skill, matching the ADR's "publish tars, calls
-  // versions/init -> upload -> versions/complete" description exactly (it
-  // does not create the skill's top-level metadata row).
-  const ownerIndex = args.indexOf("--owner");
-  const slugIndex = args.indexOf("--slug");
-  const versionIndex = args.indexOf("--version");
-  const owner = ownerIndex >= 0 ? args[ownerIndex + 1] : undefined;
-  const slug = slugIndex >= 0 ? args[slugIndex + 1] : undefined;
-  const version = versionIndex >= 0 ? args[versionIndex + 1] : undefined;
-  if (!owner || !slug || !version) {
-    throw new Error("Usage: ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>");
-  }
-
   const archive = await tarGzDirectory(path);
 
-  const init = await apiJson<InitResponse>(`/api/v1/skills/${owner}/${slug}/versions/init`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ version, package_size_bytes: archive.length }),
-  });
+  const init = await apiJson<InitResponse>(
+    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/init`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version, package_size_bytes: archive.length }),
+    },
+  );
 
   // TS's lib.dom BodyInit (in scope here since tsconfig has no explicit
   // "lib" override, so DOM is included alongside the Node types) type-checks
@@ -101,11 +142,20 @@ export async function publish(args: string[]): Promise<void> {
   // restriction. Asserting through BodyInit here, rather than reshaping
   // tsconfig's "lib" for the whole package, keeps this fix local to the one
   // call site.
-  const putRes = await fetch(init.upload_url, { method: "PUT", body: archive as unknown as BodyInit });
-  if (!putRes.ok) throw new Error(`Upload failed with status ${putRes.status}`);
+  const putRes = await fetch(init.upload_url, {
+    method: "PUT",
+    body: archive as unknown as BodyInit,
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!putRes.ok) {
+    const body = await putRes.text().catch(() => "");
+    throw new Error(
+      `Upload failed with status ${putRes.status}${body ? `: ${body}` : ""} (version_id: ${init.version_id}, retry with the same command once the underlying issue is fixed).`,
+    );
+  }
 
   const complete = await apiJson<{ version: string; status: string }>(
-    `/api/v1/skills/${owner}/${slug}/versions/complete`,
+    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/complete`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -113,5 +163,5 @@ export async function publish(args: string[]): Promise<void> {
     },
   );
 
-  console.log(`Published ${owner}/${slug}@${complete.version} (${complete.status})`);
+  console.log(`Published ${owner}/${skill}@${complete.version} (${complete.status})`);
 }
