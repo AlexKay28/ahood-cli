@@ -1,11 +1,27 @@
 {
   "name": "ahood",
   "version": "0.1.0",
-  "private": true,
+  "description": "CLI for ahood, a registry for installing and publishing Claude Code skills.",
+  "license": "MIT",
+  "homepage": "https://ahood.vercel.app/docs",
+  "keywords": [
+    "ahood",
+    "claude",
+    "claude-code",
+    "cli",
+    "skills"
+  ],
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "bin": { "ahood": "./dist/index.js" },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build",
     "test": "vitest run"
   },
   "dependencies": {
