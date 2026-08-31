@@ -102,11 +102,27 @@ export const COMMANDS_HELP: CommandHelp[] = [
   },
 ];
 
-const COMMAND_ALIASES: Record<string, string> = { show: "view" };
+// Exported so other consumers of the command list (e.g. shell completion) can
+// surface aliases without needing their own copy of this map.
+export const COMMAND_ALIASES: Record<string, string> = { show: "view" };
 
 export function findCommandHelp(command: string): CommandHelp | undefined {
   const resolved = COMMAND_ALIASES[command] ?? command;
   return COMMANDS_HELP.find((c) => c.usage.startsWith(`ahood ${resolved} `) || c.usage === `ahood ${resolved}`);
+}
+
+// Renders a COMMANDS_HELP entry's usage line with any known aliases folded in
+// after the primary command name, e.g. "ahood view <owner>/<skill> ..." ->
+// "ahood view|show <owner>/<skill> ...". Used by the top-level --help listing
+// so aliases (like "show" for "view") aren't invisible to users who only
+// skim `ahood --help`.
+export function usageWithAliases(entry: CommandHelp): string {
+  const parts = entry.usage.split(" ");
+  const name = parts[1];
+  const aliases = Object.keys(COMMAND_ALIASES).filter((alias) => COMMAND_ALIASES[alias] === name);
+  if (aliases.length === 0) return entry.usage;
+  parts[1] = [name, ...aliases].join("|");
+  return parts.join(" ");
 }
 
 export function formatCommandHelp(entry: CommandHelp): string {
@@ -117,8 +133,10 @@ export function formatCommandHelp(entry: CommandHelp): string {
 }
 
 export function formatHelp(): string {
-  const width = Math.max(...COMMANDS_HELP.map((c) => c.usage.length));
-  const lines = COMMANDS_HELP.map((c) => `  ${c.usage.padEnd(width + 2)}${c.desc.split(". ")[0].replace(/\.$/, "")}.`);
+  const width = Math.max(...COMMANDS_HELP.map((c) => usageWithAliases(c).length));
+  const lines = COMMANDS_HELP.map(
+    (c) => `  ${usageWithAliases(c).padEnd(width + 2)}${c.desc.split(". ")[0].replace(/\.$/, "")}.`
+  );
   return [
     "ahood -- CLI for the ahood skills registry (https://ahood.vercel.app)",
     "",

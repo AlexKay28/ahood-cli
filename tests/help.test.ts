@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { formatHelp, findCommandHelp, COMMANDS_HELP } from "../src/help.js";
+import { formatHelp, findCommandHelp, COMMANDS_HELP, usageWithAliases } from "../src/help.js";
 
 describe("formatHelp", () => {
-  it("includes every command's usage line and a quick-start section", () => {
+  it("includes every command's usage line (aliases folded in) and a quick-start section", () => {
     const help = formatHelp();
-    for (const { usage } of COMMANDS_HELP) {
-      expect(help).toContain(usage);
+    for (const entry of COMMANDS_HELP) {
+      expect(help).toContain(usageWithAliases(entry));
     }
     expect(help).toContain("Quick start:");
     expect(help).toContain("ahood login");
+  });
+
+  it("surfaces the 'show' alias next to 'view' so it isn't invisible in the top-level listing", () => {
+    const help = formatHelp();
+    expect(help).toMatch(/ahood view\|show\b/);
   });
 });
 

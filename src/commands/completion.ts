@@ -1,9 +1,13 @@
-import { COMMANDS_HELP } from "../help.js";
+import { COMMANDS_HELP, COMMAND_ALIASES } from "../help.js";
 
 const USAGE = "Usage: ahood completion <bash|zsh|fish>";
 
+// Includes alias names (e.g. "show" for "view") alongside the primary
+// command names, so shell completion offers every name a user might type,
+// not just the ones with their own COMMANDS_HELP entry.
 function commandNames(): string[] {
-  return COMMANDS_HELP.map((c) => c.usage.split(" ")[1]);
+  const primary = COMMANDS_HELP.map((c) => c.usage.split(" ")[1]);
+  return [...primary, ...Object.keys(COMMAND_ALIASES)];
 }
 
 function bashCompletion(): string {
