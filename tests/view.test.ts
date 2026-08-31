@@ -42,4 +42,66 @@ describe("view", () => {
 
     expect(logSpy).toHaveBeenCalledWith(JSON.stringify(detail));
   });
+
+  it("prints tags, license, homepage, repository, and dates in the default (non-JSON) output", async () => {
+    const detail = {
+      slug: "demo",
+      name: "Demo",
+      tagline: "a demo",
+      license: "MIT",
+      visibility: "public",
+      tags: ["cli", "productivity"],
+      homepage: "https://example.com",
+      repository: "https://github.com/alice/demo",
+      downloads_count: 3,
+      stars_count: 1,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-02T00:00:00Z",
+      owner: "alice",
+      is_starred: true,
+      skill_versions: { version: "1.0.0", checksum_sha256: "abc" },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(detail), { status: 200 })));
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await view(["alice/demo"]);
+
+    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("alice/demo");
+    expect(output).toContain("cli, productivity");
+    expect(output).toContain("MIT");
+    expect(output).toContain("https://example.com");
+    expect(output).toContain("https://github.com/alice/demo");
+    expect(output).toContain("2026-01-01T00:00:00Z");
+    expect(output).toContain("2026-01-02T00:00:00Z");
+    expect(output).toContain("yes");
+  });
+
+  it("falls back to '-' for absent optional fields instead of printing null/undefined", async () => {
+    const detail = {
+      slug: "demo",
+      name: "Demo",
+      tagline: null,
+      license: null,
+      visibility: "private",
+      tags: [],
+      homepage: null,
+      repository: null,
+      downloads_count: 0,
+      stars_count: 0,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      owner: "alice",
+      is_starred: null,
+      skill_versions: null,
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(detail), { status: 200 })));
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await view(["alice/demo"]);
+
+    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("no published version");
+    expect(output).not.toMatch(/\bnull\b|\bundefined\b/);
+  });
 });

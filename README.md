@@ -39,7 +39,7 @@ For CI or any non-interactive environment, set `AHOOD_TOKEN` instead of running 
 | `ahood logout` | Removes the stored token. |
 | `ahood whoami [--json]` | Reports whether your stored token still authenticates. |
 | `ahood search <query> [--json] [--limit <n>]` | Search published skills. |
-| `ahood view <owner>/<skill> [--json] [--web]` | Show a single skill's details without installing it, or open its page in a browser. |
+| `ahood view <owner>/<skill> [--json] [--web]` (alias: `show`) | Show a single skill's details -- tags, license, homepage, repository, dates, etc. -- without installing it, or open its page in a browser. |
 | `ahood list-mine [--json]` | List your own skills, public and private, with their visibility and download/star counts. |
 | `ahood add <owner>/<skill>[@version]` | Install into `.claude/skills/<owner>/<skill>/`, pinned in `.claude/skills.lock.json`. |
 | `ahood update [<owner>/<skill> ...]` | Move the lockfile pin(s) forward to the latest version. One skill failing to update doesn't stop the rest. |

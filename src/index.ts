@@ -34,6 +34,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   star,
   unstar,
   view,
+  show: view, // alias -- "ahood show" is the name issue #30 proposed; same command as "view"
   completion,
 };
 

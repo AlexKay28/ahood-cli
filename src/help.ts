@@ -25,7 +25,7 @@ export const COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage: "ahood view <owner>/<skill> [--json] [--web]",
-    desc: "Show a single skill's details without installing it.",
+    desc: "Show a single skill's details (tags, license, homepage, repository, dates, etc.) without installing it. Alias: ahood show.",
     flags: [
       "--json   Emit the raw skill object instead of formatted lines.",
       "--web    Open the skill's page in your browser instead of printing.",
@@ -99,8 +99,11 @@ export const COMMANDS_HELP: CommandHelp[] = [
   },
 ];
 
+const COMMAND_ALIASES: Record<string, string> = { show: "view" };
+
 export function findCommandHelp(command: string): CommandHelp | undefined {
-  return COMMANDS_HELP.find((c) => c.usage.startsWith(`ahood ${command} `) || c.usage === `ahood ${command}`);
+  const resolved = COMMAND_ALIASES[command] ?? command;
+  return COMMANDS_HELP.find((c) => c.usage.startsWith(`ahood ${resolved} `) || c.usage === `ahood ${resolved}`);
 }
 
 export function formatCommandHelp(entry: CommandHelp): string {

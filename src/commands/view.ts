@@ -5,13 +5,26 @@ import { parseOwnerSkill } from "../spec.js";
 
 const USAGE = "Usage: ahood view <owner>/<skill> [--json] [--web]";
 
+// Matches GET /api/v1/skills/{owner}/{skill}'s actual response shape
+// (app/api/v1/skills/[owner]/[skill]/route.ts): visibility is always
+// present (resolveSkillByOwnerSlug's base column set), the rest is the
+// route's explicit selectColumns list plus the owner/is_starred fields it
+// adds after the query.
 type SkillDetail = {
   slug: string;
   name: string;
   tagline: string | null;
+  license: string | null;
   visibility: string;
+  tags: string[];
+  homepage: string | null;
+  repository: string | null;
   downloads_count: number;
   stars_count: number;
+  created_at: string;
+  updated_at: string;
+  owner: string;
+  is_starred: boolean | null;
   skill_versions: { version: string; checksum_sha256: string } | null;
 };
 
@@ -53,10 +66,21 @@ export async function view(args: string[]): Promise<void> {
     console.log(JSON.stringify(detail));
     return;
   }
-  console.log(`${owner}/${detail.slug} (${detail.visibility})`);
-  console.log(detail.name);
-  if (detail.tagline) console.log(detail.tagline);
-  console.log(`${detail.downloads_count} downloads, ${detail.stars_count} stars`);
-  console.log(detail.skill_versions ? `latest version: ${detail.skill_versions.version}` : "no published version");
+
+  const field = (label: string, value: string) => console.log(`  ${label.padEnd(13)}${value}`);
+  console.log(`${detail.owner}/${detail.slug}`);
+  field("name:", detail.name);
+  if (detail.tagline) field("tagline:", detail.tagline);
+  field("tags:", detail.tags.length > 0 ? detail.tags.join(", ") : "-");
+  field("license:", detail.license ?? "-");
+  field("visibility:", detail.visibility);
+  field("homepage:", detail.homepage ?? "-");
+  field("repository:", detail.repository ?? "-");
+  field("version:", detail.skill_versions ? detail.skill_versions.version : "no published version");
+  field("downloads:", String(detail.downloads_count));
+  field("stars:", String(detail.stars_count));
+  field("created:", detail.created_at);
+  field("updated:", detail.updated_at);
+  if (detail.is_starred !== null) field("starred:", detail.is_starred ? "yes" : "no");
   console.log(url);
 }
