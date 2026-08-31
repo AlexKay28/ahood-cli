@@ -25,6 +25,18 @@ describe("view", () => {
     await expect(view(["alice/.."])).rejects.toThrow(/Invalid skill/);
   });
 
+  // ahood-cli#38: a validly-charset-formatted but pathologically long segment
+  // used to sail past parseOwnerSkill and reach the network, where a truly
+  // huge (e.g. 10,000-char) path can hit a raw infra/CDN-layer 502 instead of
+  // a clean client-side error. Assert no fetch happens at all.
+  it("rejects an oversized owner/skill spec client-side with no network call (ahood-cli#38)", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(view([`alexkay/${"a".repeat(10_000)}`])).rejects.toThrow(/too long/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("--json prints the raw skill object", async () => {
     const detail = {
       slug: "demo",

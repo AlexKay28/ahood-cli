@@ -7,10 +7,27 @@ import { join } from "node:path";
 const SEGMENT_RE = /^[a-z0-9][a-z0-9._-]*$/i;
 export const SEMVER_RE = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
+// The backend enforces these same caps on write (app/api/v1/profile/route.ts's
+// MAX_USERNAME_LENGTH for owner usernames; lib/skills/mutations.ts's
+// createSkill 3-64 check for skill slugs), so a segment over these lengths
+// can never match a real owner/skill anyway. Rejecting it here -- before any
+// request is built -- turns a validly-charset-formatted but absurdly long
+// segment into a clean local error instead of a network round trip that, at
+// a truly pathological length (thousands of characters), hits a raw infra/
+// CDN-layer URL-length limit and 502s before the backend's own routing ever
+// runs (ahood-cli#38).
+const MAX_SEGMENT_LENGTH: Record<"owner" | "skill", number> = { owner: 32, skill: 64 };
+
 export function validateSegment(value: string, kind: "owner" | "skill", spec: string): void {
   if (!SEGMENT_RE.test(value) || value === "." || value === "..") {
     throw new Error(
       `Invalid ${kind} "${value}" in "${spec}" -- must start with a letter/digit and contain only letters, digits, ".", "_", or "-".`,
+    );
+  }
+  const maxLength = MAX_SEGMENT_LENGTH[kind];
+  if (value.length > maxLength) {
+    throw new Error(
+      `Invalid ${kind} in "${spec.slice(0, 60)}${spec.length > 60 ? "..." : ""}" -- ${kind} segment is too long (${value.length} characters; must be at most ${maxLength}).`,
     );
   }
 }
