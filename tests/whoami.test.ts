@@ -16,6 +16,7 @@ describe("whoami", () => {
 
   beforeEach(() => {
     process.env.AHOOD_API_URL = API_URL;
+    delete process.env.AHOOD_TOKEN;
     process.exitCode = 0;
   });
 

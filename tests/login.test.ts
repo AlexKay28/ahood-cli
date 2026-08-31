@@ -49,7 +49,7 @@ describe("login", () => {
     );
 
     const loginPromise = login();
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.runAllTimersAsync();
     await loginPromise;
 
     expect(calls.some((u) => u.startsWith(EVIL_URL))).toBe(false);
@@ -82,7 +82,7 @@ describe("login", () => {
     );
 
     const loginPromise = login();
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.runAllTimersAsync();
     await loginPromise;
 
     expect(existsSync(join(dir, ".config", "ahood", "credentials.json"))).toBe(true);
