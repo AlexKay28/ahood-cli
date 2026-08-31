@@ -4,18 +4,28 @@
 // file -- README.md is plain markdown and the docs page is a separate
 // Next.js app) -- a comment in each of those two places points back here so
 // a future command addition doesn't update only one.
-export type CommandHelp = { usage: string; desc: string; flags?: string[]; examples?: string[] };
+// `summary` is a genuinely one-sentence blurb used only by the top-level
+// `ahood --help` listing. `desc` is the full (possibly multi-sentence)
+// description rendered in full by `ahood help <command>`. Keep `summary`
+// self-contained -- it must not depend on the reader having also seen `desc`.
+export type CommandHelp = { usage: string; summary: string; desc: string; flags?: string[]; examples?: string[] };
 
 export const COMMANDS_HELP: CommandHelp[] = [
-  { usage: "ahood login", desc: "Device-code browser login, stores a token locally." },
-  { usage: "ahood logout", desc: "Removes the stored token." },
+  {
+    usage: "ahood login",
+    summary: "Device-code browser login, stores a token locally.",
+    desc: "Device-code browser login, stores a token locally.",
+  },
+  { usage: "ahood logout", summary: "Removes the stored token.", desc: "Removes the stored token." },
   {
     usage: "ahood whoami [--json]",
+    summary: "Reports whether your stored token still authenticates.",
     desc: "Reports whether your stored token still authenticates.",
     flags: ["--json    Emit a machine-readable result instead of prose."],
   },
   {
     usage: "ahood search <query> [--json] [--limit <n>]",
+    summary: "Search published skills.",
     desc: "Search published skills.",
     flags: [
       "--json        Emit the raw skill objects instead of formatted lines.",
@@ -25,6 +35,8 @@ export const COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage: "ahood view <owner>/<skill> [--json] [--web]",
+    summary:
+      "Show a single skill's details -- tags, license, homepage, repository, dates, and more -- without installing it (alias: ahood show).",
     desc: "Show a single skill's details (tags, license, homepage, repository, dates, etc.) without installing it. Alias: ahood show.",
     flags: [
       "--json   Emit the raw skill object instead of formatted lines.",
@@ -33,21 +45,29 @@ export const COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage: "ahood list-mine [--json]",
+    summary: "List your own skills, public and private.",
     desc: "List your own skills, public and private.",
     flags: ["--json    Emit the raw skill objects instead of formatted lines."],
   },
   {
     usage: "ahood add <owner>/<skill>[@version]",
+    summary: "Install a skill into .claude/skills/, pinned in the lockfile.",
     desc: "Install a skill into .claude/skills/, pinned in the lockfile.",
     examples: ["ahood add alice/pdf-tools", "ahood add alice/pdf-tools@1.2.0"],
   },
   {
     usage: "ahood update [<owner>/<skill> ...]",
+    summary: "Move the lockfile pin(s) forward to the latest version, for one skill or all installed skills at once.",
     desc: "Move the lockfile pin(s) forward to the latest version. With no argument, updates every installed skill; one failure doesn't stop the rest.",
   },
-  { usage: "ahood remove <owner>/<skill>", desc: "Uninstall and unpin (local only)." },
+  {
+    usage: "ahood remove <owner>/<skill>",
+    summary: "Uninstall and unpin a skill (local only).",
+    desc: "Uninstall and unpin (local only).",
+  },
   {
     usage: "ahood edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+    summary: "Update a skill you own, changing only the flags you pass.",
     desc: "Update a skill you own. Only the flags you pass are changed.",
     flags: [
       "--tagline <text>              Short one-line description.",
@@ -61,13 +81,21 @@ export const COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage: "ahood unpublish <owner>/<skill> [--yes]",
+    summary:
+      "Delete a skill from the registry for every consumer, not just your local install (prompts for confirmation unless --yes is passed).",
     desc: "Delete a skill from the registry for every consumer (not just your local install). Prompts for a typed \"yes\" unless --yes is passed.",
     flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
   },
-  { usage: "ahood star <owner>/<skill>", desc: "Star a skill." },
-  { usage: "ahood unstar <owner>/<skill>", desc: "Remove your star from a skill." },
+  { usage: "ahood star <owner>/<skill>", summary: "Star a skill.", desc: "Star a skill." },
+  {
+    usage: "ahood unstar <owner>/<skill>",
+    summary: "Remove your star from a skill.",
+    desc: "Remove your star from a skill.",
+  },
   {
     usage: "ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>]",
+    summary:
+      "Publish a new version of a skill from a folder containing SKILL.md, creating the skill first if it doesn't already exist.",
     desc:
       "Publish a new version of a skill from a folder containing SKILL.md. If the skill doesn't exist yet, this " +
       "creates it first -- pass --name (required in that case) and optionally --tagline/--tags/--license/--homepage/--repository. " +
@@ -89,11 +117,13 @@ export const COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage: "ahood token create <name>|list [--json]|revoke <id>",
+    summary: "Manage personal API tokens.",
     desc: "Manage personal API tokens. `create` requires an existing browser-backed session.",
     examples: ["ahood token create ci-runner", "ahood token list --json", "ahood token revoke <id>"],
   },
   {
     usage: "ahood completion <bash|zsh|fish>",
+    summary: "Print a shell completion script for the command names.",
     desc: "Print a shell completion script for the command names.",
     examples: ["ahood completion bash >> ~/.bashrc"],
   },
@@ -115,7 +145,7 @@ export function formatCommandHelp(entry: CommandHelp): string {
 
 export function formatHelp(): string {
   const width = Math.max(...COMMANDS_HELP.map((c) => c.usage.length));
-  const lines = COMMANDS_HELP.map((c) => `  ${c.usage.padEnd(width + 2)}${c.desc.split(". ")[0].replace(/\.$/, "")}.`);
+  const lines = COMMANDS_HELP.map((c) => `  ${c.usage.padEnd(width + 2)}${c.summary}`);
   return [
     "ahood -- CLI for the ahood skills registry (https://ahood.vercel.app)",
     "",
