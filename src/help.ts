@@ -69,6 +69,7 @@ export const COMMANDS_HELP: CommandHelp[] = [
     desc:
       "Publish a new version of a skill from a folder containing SKILL.md. If the skill doesn't exist yet, this " +
       "creates it first -- pass --name (required in that case) and optionally --tagline/--tags/--license. " +
+      "Processing happens server-side after upload; this command polls and reports the final published/failed status. " +
       "The legacy form `ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted.",
     flags: [
       "--name <text>                 Required only when creating the skill on this publish.",

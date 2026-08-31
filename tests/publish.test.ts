@@ -41,6 +41,13 @@ function stubApi(uploadCapture: { body?: Uint8Array }) {
         return new Response(null, { status: 200 });
       }
       if (url.endsWith("/versions/complete")) {
+        return new Response(JSON.stringify({ version_id: "v1", version: "1.0.0", status: "processing" }), { status: 202 });
+      }
+      // GET .../skills/<owner>/<skill>/versions/<version> -- polled after
+      // complete's 202. Publishes immediately in this stub so tests don't
+      // wait through a real poll interval; a dedicated test below exercises
+      // the actual multi-poll loop with fake timers.
+      if (/\/versions\/[^/]+$/.test(url) && !url.endsWith("/versions/init") && !url.endsWith("/versions/complete")) {
         return new Response(JSON.stringify({ version: "1.0.0", status: "published" }), { status: 200 });
       }
       return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
@@ -83,6 +90,9 @@ function stubApiFirstPublish(
         return new Response(null, { status: 200 });
       }
       if (url.endsWith("/versions/complete")) {
+        return new Response(JSON.stringify({ version_id: "v1", version: "1.0.0", status: "processing" }), { status: 202 });
+      }
+      if (/\/versions\/[^/]+$/.test(url) && !url.endsWith("/versions/init") && !url.endsWith("/versions/complete")) {
         return new Response(JSON.stringify({ version: "1.0.0", status: "published" }), { status: 200 });
       }
       return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
@@ -262,5 +272,75 @@ describe("publish", () => {
     await expect(
       publish(["alice/demo@1.0.0", "--path", dir, "--name", "Demo Skill"]),
     ).rejects.toThrow(/skills are always created under your own account \(realuser\)/);
+  });
+
+  it("polls the version's status after complete's 202 until it leaves 'processing'", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    let pollCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/versions/init")) {
+          return new Response(
+            JSON.stringify({ upload_url: "http://upload.test/put", storage_path: "x", version_id: "v1" }),
+            { status: 200 },
+          );
+        }
+        if (url === "http://upload.test/put") return new Response(null, { status: 200 });
+        if (url.endsWith("/versions/complete")) {
+          return new Response(JSON.stringify({ version_id: "v1", version: "1.0.0", status: "processing" }), { status: 202 });
+        }
+        if (/\/versions\/[^/]+$/.test(url) && !url.endsWith("/versions/init") && !url.endsWith("/versions/complete")) {
+          pollCalls++;
+          if (pollCalls < 3) {
+            return new Response(JSON.stringify({ version: "1.0.0", status: "processing" }), { status: 200 });
+          }
+          return new Response(JSON.stringify({ version: "1.0.0", status: "published" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const publishPromise = publish([`alice/demo@1.0.0`, "--path", dir]);
+    await vi.runAllTimersAsync();
+    await publishPromise;
+    vi.useRealTimers();
+
+    expect(pollCalls).toBe(3);
+    expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
+  });
+
+  it("throws a clear error including the failure reason when the version ends up 'failed'", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/versions/init")) {
+          return new Response(
+            JSON.stringify({ upload_url: "http://upload.test/put", storage_path: "x", version_id: "v1" }),
+            { status: 200 },
+          );
+        }
+        if (url === "http://upload.test/put") return new Response(null, { status: 200 });
+        if (url.endsWith("/versions/complete")) {
+          return new Response(JSON.stringify({ version_id: "v1", version: "1.0.0", status: "processing" }), { status: 202 });
+        }
+        if (/\/versions\/[^/]+$/.test(url) && !url.endsWith("/versions/init") && !url.endsWith("/versions/complete")) {
+          return new Response(
+            JSON.stringify({ version: "1.0.0", status: "failed", failure_reason: "Archive could not be extracted -- is it a valid .tar.gz file?" }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+
+    await expect(publish([`alice/demo@1.0.0`, "--path", dir])).rejects.toThrow(
+      /Publish failed: Archive could not be extracted/,
+    );
   });
 });

@@ -8,6 +8,32 @@ import { parseOwnerSkill, SEMVER_RE } from "../spec.js";
 
 type InitResponse = { upload_url: string; storage_path: string; version_id: string };
 type CreateResponse = { id: string; slug: string; owner: string };
+type VersionStatusResponse = { version: string; status: string; failure_reason?: string | null };
+
+// Processing (decompress/validate/checksum/scan/upload) now happens in a
+// background workflow, not inline in versions/complete's response (server
+// issue #120) -- complete returns 202 immediately, so this polls
+// GET .../versions/{version} (which now returns {status, failure_reason}
+// even for a non-published row) until the version leaves 'processing'.
+const POLL_INTERVAL_MS = 1500;
+const POLL_TIMEOUT_MS = 120_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollVersionStatus(owner: string, skill: string, version: string): Promise<VersionStatusResponse> {
+  const path = `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/${encodeURIComponent(version)}`;
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const result = await apiJson<VersionStatusResponse>(path);
+    if (result.status !== "processing") return result;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(
+    `Still processing after ${POLL_TIMEOUT_MS / 1000}s -- check \`ahood view ${owner}/${skill}\` later for the result.`,
+  );
+}
 
 const USAGE =
   "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>]\n" +
@@ -220,7 +246,7 @@ export async function publish(args: string[]): Promise<void> {
     );
   }
 
-  const complete = await apiJson<{ version: string; status: string }>(
+  await apiJson<{ version_id: string; version: string; status: string }>(
     `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/complete`,
     {
       method: "POST",
@@ -229,5 +255,10 @@ export async function publish(args: string[]): Promise<void> {
     },
   );
 
-  console.log(`Published ${owner}/${skill}@${complete.version} (${complete.status})`);
+  console.log(`Uploaded ${owner}/${skill}@${version} -- processing...`);
+  const result = await pollVersionStatus(owner, skill, version);
+  if (result.status === "failed") {
+    throw new Error(`Publish failed: ${result.failure_reason ?? "unknown reason"}`);
+  }
+  console.log(`Published ${owner}/${skill}@${result.version} (${result.status})`);
 }
