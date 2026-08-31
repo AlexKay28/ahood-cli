@@ -100,6 +100,14 @@ describe("edit", () => {
     await expect(edit([`${OWNER}/${SKILL}`, "--tagline", "t"])).rejects.toThrow(/publish/);
   });
 
+  it("accepts a --tagline=value with a leading -- via the explicit-equals form", async () => {
+    const calls = stubApi(200, { slug: SKILL, tagline: "--fast and cheap", license: null, visibility: "public", tags: [] });
+
+    await edit([`${OWNER}/${SKILL}`, "--tagline=--fast and cheap"]);
+
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({ tagline: "--fast and cheap" });
+  });
+
   it("errors instead of swallowing the next flag as this one's value", async () => {
     await expect(
       edit([`${OWNER}/${SKILL}`, "--tagline", "--visibility", "public"]),
