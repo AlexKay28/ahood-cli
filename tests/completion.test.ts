@@ -22,4 +22,15 @@ describe("completion", () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("complete -c ahood"));
     logSpy.mockRestore();
   });
+
+  it("includes the 'show' alias for 'view' in bash, zsh, and fish completion", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await completion(["bash"]);
+    await completion(["zsh"]);
+    await completion(["fish"]);
+    for (const [output] of logSpy.mock.calls) {
+      expect(output).toContain("show");
+    }
+    logSpy.mockRestore();
+  });
 });
