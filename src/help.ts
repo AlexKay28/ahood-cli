@@ -20,6 +20,8 @@ export const COMMANDS_HELP: CommandHelp[] = [
     desc: "Update a skill you own.",
   },
   { usage: "ahood unpublish <owner>/<skill>", desc: "Delete a skill from the registry (asks for confirmation)." },
+  { usage: "ahood star <owner>/<skill>", desc: "Star a skill." },
+  { usage: "ahood unstar <owner>/<skill>", desc: "Remove your star from a skill." },
   {
     usage: "ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>",
     desc: "Publish a new version of an existing skill.",

@@ -43,6 +43,8 @@ For CI or any non-interactive environment, set `AHOOD_TOKEN` instead of running 
 | `ahood remove <owner>/<skill>` | Uninstall and unpin (local only -- does not affect the published skill). |
 | `ahood edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility]` | Update a skill you own. Only the flags you pass are changed; requires the `publish` scope. |
 | `ahood unpublish <owner>/<skill>` | Deletes the skill from the registry for every consumer, not just your local install -- prompts for a typed "yes" confirmation first. |
+| `ahood star <owner>/<skill>` | Star a skill. |
+| `ahood unstar <owner>/<skill>` | Remove your star from a skill. |
 | `ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>` | Publish a new version of an existing skill from a folder containing `SKILL.md`. The skill itself is created from the web UI first. |
 | `ahood token create\|list\|revoke` | Manage personal API tokens. Creating a token requires an existing logged-in session -- see the docs. |
 

@@ -11,6 +11,7 @@ import { token } from "./commands/token.js";
 import { edit } from "./commands/edit.js";
 import { unpublish } from "./commands/unpublish.js";
 import { listMine } from "./commands/list-mine.js";
+import { star, unstar } from "./commands/star.js";
 import { formatHelp, findCommandHelp } from "./help.js";
 
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
@@ -26,6 +27,8 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   edit: (args) => edit(args),
   unpublish: (args) => unpublish(args),
   "list-mine": () => listMine(),
+  star: (args) => star(args),
+  unstar: (args) => unstar(args),
 };
 
 async function main() {
