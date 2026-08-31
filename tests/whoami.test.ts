@@ -1,4 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { whoami } from "../src/commands/whoami.js";
 
 const API_URL = "http://ahood.test";
@@ -13,8 +16,18 @@ function stubApi(status: number, body: unknown = {}) {
 describe("whoami", () => {
   const originalApiUrl = process.env.AHOOD_API_URL;
   const originalToken = process.env.AHOOD_TOKEN;
+  const originalHome = process.env.HOME;
+  const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
+  let dir: string;
 
   beforeEach(() => {
+    // resolveToken() falls back to ~/.config/ahood/credentials.json when
+    // AHOOD_TOKEN is unset -- point HOME at an empty temp dir so that
+    // fallback can never pick up a real (or another test's) file, whatever
+    // order/worker this file happens to run in.
+    dir = mkdtempSync(join(tmpdir(), "ahood-whoami-test-"));
+    process.env.HOME = dir;
+    delete process.env.XDG_CONFIG_HOME;
     process.env.AHOOD_API_URL = API_URL;
     delete process.env.AHOOD_TOKEN;
     process.exitCode = 0;
@@ -23,6 +36,11 @@ describe("whoami", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    rmSync(dir, { recursive: true, force: true });
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
     if (originalApiUrl === undefined) delete process.env.AHOOD_API_URL;
     else process.env.AHOOD_API_URL = originalApiUrl;
     if (originalToken === undefined) delete process.env.AHOOD_TOKEN;

@@ -16,11 +16,17 @@ describe("login", () => {
     dir = mkdtempSync(join(tmpdir(), "ahood-login-test-"));
     process.env.HOME = dir;
     process.env.AHOOD_API_URL = API_URL;
-    vi.useFakeTimers();
+    // Real timers, not fake ones: login()'s poll loop does a real network
+    // round-trip (via apiJson) before its first sleep(2000), and how many
+    // microtask hops that takes before the first fake timer gets registered
+    // is sensitive to Node version / event-loop scheduling under load --
+    // exactly the kind of thing that's fast and reliable locally but flaky
+    // on a loaded CI runner. These tests only need ONE real 2s sleep each
+    // (both stub the first poll response as immediately "approved"), so
+    // paying that wall-clock cost buys determinism.
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     vi.unstubAllGlobals();
     rmSync(dir, { recursive: true, force: true });
     process.env.HOME = originalHome;
@@ -48,9 +54,7 @@ describe("login", () => {
       }),
     );
 
-    const loginPromise = login();
-    await vi.runAllTimersAsync();
-    await loginPromise;
+    await login();
 
     expect(calls.some((u) => u.startsWith(EVIL_URL))).toBe(false);
     expect(calls.some((u) => u.startsWith(`${API_URL}/api/v1/auth/cli/device/`))).toBe(true);
@@ -81,9 +85,7 @@ describe("login", () => {
       }),
     );
 
-    const loginPromise = login();
-    await vi.runAllTimersAsync();
-    await loginPromise;
+    await login();
 
     expect(existsSync(join(dir, ".config", "ahood", "credentials.json"))).toBe(true);
   });
