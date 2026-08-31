@@ -251,6 +251,42 @@ describe("publish", () => {
     expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
   });
 
+  // ahood-cli#34: a javascript:/data: --homepage or --repository must be
+  // rejected client-side, before any network call -- these only ever reach
+  // the server via the create-skill body, which stores them verbatim and
+  // the web frontend renders as a raw <a href>.
+  it("rejects a javascript: --homepage before making any request", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      publish([
+        "alice/demo@1.0.0",
+        "--path", dir,
+        "--name", "Demo Skill",
+        "--homepage", "javascript:alert(1)",
+      ]),
+    ).rejects.toThrow(/--homepage must use http:\/\/ or https:\/\//);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a data: --repository before making any request", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      publish([
+        "alice/demo@1.0.0",
+        "--path", dir,
+        "--name", "Demo Skill",
+        "--repository", "data:text/html,<script>alert(1)</script>",
+      ]),
+    ).rejects.toThrow(/--repository must use http:\/\/ or https:\/\//);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not attempt to create the skill when versions/init succeeds on the first try (existing-skill regression check)", async () => {
     writeFileSync(join(dir, "SKILL.md"), "# demo");
     const capture: { body?: Uint8Array } = {};

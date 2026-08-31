@@ -4,7 +4,7 @@ import { pack } from "tar-stream";
 import { createGzip } from "node:zlib";
 import { apiJson, ApiError } from "../http.js";
 import { flagValue } from "../flags.js";
-import { parseOwnerSkill, SEMVER_RE } from "../spec.js";
+import { parseOwnerSkill, SEMVER_RE, validateExternalUrl } from "../spec.js";
 
 type InitResponse = { upload_url: string; storage_path: string; version_id: string };
 type CreateResponse = { id: string; slug: string; owner: string };
@@ -154,6 +154,11 @@ function parsePublishArgs(args: string[]): {
   if (!SEMVER_RE.test(version)) {
     throw new Error(`--version must be a semver like 1.2.3 (got "${version}").\n${USAGE}`);
   }
+  // Validated here, before any network call (including the tar/gzip of the
+  // skill directory) -- these only ever reach the server via
+  // createSkillForPublish's create-skill body (ahood-cli#34).
+  if (homepage !== undefined) validateExternalUrl(homepage, "--homepage");
+  if (repository !== undefined) validateExternalUrl(repository, "--repository");
   return { owner, skill, version, path: pathFlag ?? legacyPath ?? ".", name, tagline, tags, license, homepage, repository };
 }
 

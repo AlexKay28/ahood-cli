@@ -123,4 +123,39 @@ describe("edit", () => {
     await expect(edit([`${OWNER}/${SKILL}`, "--visibility", "publik"])).rejects.toThrow(/must be "public" or "private"/);
     expect(calls).toHaveLength(0);
   });
+
+  // ahood-cli#34: a javascript:/data: --homepage or --repository must be
+  // rejected client-side, before any network call -- the server stores
+  // these verbatim and the web frontend renders them as a raw <a href>.
+  it("rejects a javascript: --homepage before making a request", async () => {
+    const calls = stubApi(200, {});
+    await expect(
+      edit([`${OWNER}/${SKILL}`, "--homepage", "javascript:alert(1)"]),
+    ).rejects.toThrow(/--homepage must use http:\/\/ or https:\/\//);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects a data: --repository before making a request", async () => {
+    const calls = stubApi(200, {});
+    await expect(
+      edit([`${OWNER}/${SKILL}`, "--repository", "data:text/html,<script>alert(1)</script>"]),
+    ).rejects.toThrow(/--repository must use http:\/\/ or https:\/\//);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("still accepts a normal https:// --homepage", async () => {
+    const calls = stubApi(200, {
+      slug: SKILL,
+      tagline: null,
+      license: null,
+      visibility: "public",
+      tags: [],
+      homepage: "https://example.com",
+    });
+
+    await edit([`${OWNER}/${SKILL}`, "--homepage", "https://example.com"]);
+
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({ homepage: "https://example.com" });
+  });
 });

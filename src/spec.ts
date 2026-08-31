@@ -43,6 +43,30 @@ export function parseOwnerSkillVersion(
   return { owner, skill, version };
 }
 
+// Applied to --homepage/--repository in edit and publish (ahood-cli#34):
+// these are arbitrary user-supplied external links that the API stores
+// verbatim and the web frontend renders as a raw <a href> -- a
+// javascript:/data: value would be a stored-XSS vector the moment that
+// page renders it. Rejecting anything but http(s) here, before any network
+// call, mirrors config.ts's getApiUrl() validation pattern but with no
+// localhost special-casing (there's no "trusted local dev" case for a
+// public link). An empty string is allowed through un-validated so
+// `edit --homepage ""` can still be used to clear a previously-set value.
+export function validateExternalUrl(value: string, flag: string): void {
+  if (value === "") return;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${flag} must be a valid http:// or https:// URL (got "${value}").`);
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error(
+      `${flag} must use http:// or https:// (got scheme "${url.protocol}" from "${value}").`,
+    );
+  }
+}
+
 export const SKILLS_ROOT = join(".claude", "skills");
 export const LOCKFILE_PATH = join(".claude", "skills.lock.json");
 
