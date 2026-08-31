@@ -5,7 +5,7 @@ import { join } from "node:path";
 // "/", "\", or a leading dot -- this is what closes the path-traversal hole in add/remove
 // (a spec like "alice/.." previously resolved outside .claude/skills/ entirely).
 const SEGMENT_RE = /^[a-z0-9][a-z0-9._-]*$/i;
-export const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+export const SEMVER_RE = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 export function validateSegment(value: string, kind: "owner" | "skill", spec: string): void {
   if (!SEGMENT_RE.test(value) || value === "." || value === "..") {
