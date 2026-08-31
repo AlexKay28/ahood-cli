@@ -48,7 +48,9 @@ export const COMMANDS_HELP: CommandHelp[] = [
   { usage: "ahood remove <owner>/<skill>", desc: "Uninstall and unpin (local only)." },
   {
     usage: "ahood edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
-    desc: "Update a skill you own. Only the flags you pass are changed.",
+    desc:
+      "Update a skill you own. Only the flags you pass are changed. Every flag also accepts " +
+      "the --flag=value form (e.g. --tagline=--fast and cheap), needed when a value itself starts with --.",
     flags: [
       "--tagline <text>              Short one-line description.",
       "--tags <comma,separated>      Replaces the skill's tag list.",
@@ -72,7 +74,8 @@ export const COMMANDS_HELP: CommandHelp[] = [
       "Publish a new version of a skill from a folder containing SKILL.md. If the skill doesn't exist yet, this " +
       "creates it first -- pass --name (required in that case) and optionally --tagline/--tags/--license/--homepage/--repository. " +
       "Processing happens server-side after upload; this command polls and reports the final published/failed status. " +
-      "The legacy form `ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted.",
+      "The legacy form `ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted. " +
+      "Every flag also accepts the --flag=value form, needed when a value itself starts with --.",
     flags: [
       "--name <text>                 Required only when creating the skill on this publish.",
       "--tagline <text>              Short one-line description, used only when creating.",
