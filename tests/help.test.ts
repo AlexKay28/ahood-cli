@@ -15,6 +15,31 @@ describe("formatHelp", () => {
     const help = formatHelp();
     expect(help).toMatch(/ahood view\|show\b/);
   });
+
+  it("does not silently truncate multi-sentence descriptions on the first '. '", () => {
+    const help = formatHelp();
+    const publishLine = help.split("\n").find((l) => l.trim().startsWith("ahood publish "));
+    expect(publishLine).toBeDefined();
+    expect(publishLine).toMatch(/creat(es|ing) the skill( first)? if it doesn't (already )?exist/);
+  });
+
+  it("prints every command's summary in full on its listing line", () => {
+    const help = formatHelp();
+    const commandsSection = help.slice(help.indexOf("Commands:"));
+    const lines = commandsSection.split("\n").filter((l) => l.trim().length > 0 && l !== "Commands:");
+    for (const { usage, summary } of COMMANDS_HELP) {
+      const line = lines.find((l) => l.trim().startsWith(usageWithAliases({ usage, summary, desc: "" }) + " ") || l.trim() === usageWithAliases({ usage, summary, desc: "" }));
+      expect(line, `expected a listing line for ${usage}`).toBeDefined();
+      expect(line).toContain(summary);
+    }
+  });
+
+  it("every command's summary is a genuinely single sentence", () => {
+    for (const { usage, summary } of COMMANDS_HELP) {
+      expect(summary, `${usage} summary should not embed a second sentence`).not.toContain(". ");
+      expect(summary, `${usage} summary should end with exactly one period`).toMatch(/[^.]\.$/);
+    }
+  });
 });
 
 describe("findCommandHelp", () => {
