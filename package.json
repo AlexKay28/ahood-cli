@@ -1,9 +1,13 @@
 {
-  "name": "@alexkay/ahood-cli",
-  "version": "0.1.2",
+  "name": "@ahood/cli",
+  "version": "0.1.0",
   "description": "CLI for ahood, a registry for installing and publishing Claude Code skills.",
   "license": "MIT",
-  "homepage": "https://ahood.vercel.app/docs",
+  "homepage": "https://github.com/AlexKay28/ahood-cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexKay28/ahood-cli.git"
+  },
   "keywords": [
     "ahood",
     "claude",
