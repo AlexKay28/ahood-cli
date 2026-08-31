@@ -1,6 +1,6 @@
 import { apiJson } from "../http.js";
 import { flagValue } from "../flags.js";
-import { parseOwnerSkill } from "../spec.js";
+import { parseOwnerSkill, validateExternalUrl } from "../spec.js";
 
 type UpdateResponse = {
   slug: string;
@@ -40,9 +40,15 @@ export async function edit(args: string[]): Promise<void> {
     body.visibility = visibility;
   }
   const homepage = flagValue(args, "--homepage");
-  if (homepage !== undefined) body.homepage = homepage;
+  if (homepage !== undefined) {
+    validateExternalUrl(homepage, "--homepage");
+    body.homepage = homepage;
+  }
   const repository = flagValue(args, "--repository");
-  if (repository !== undefined) body.repository = repository;
+  if (repository !== undefined) {
+    validateExternalUrl(repository, "--repository");
+    body.repository = repository;
+  }
 
   if (Object.keys(body).length === 0) {
     throw new Error(
