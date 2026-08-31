@@ -190,4 +190,53 @@ describe("add", () => {
     expect(readFileSync(join(dir, ".claude", "skills", OWNER, SKILL, "SKILL.md"), "utf-8")).toBe("# demo\n");
   });
 
+  it("stops streaming and throws once the running total crosses the download cap, even with no content-length header (#37)", async () => {
+    // The header pre-check can't catch this case -- there is no header at
+    // all, exactly like a chunked-transfer response or a mutated/redirected
+    // presigned storage URL. Only a streaming byte-count check catches it
+    // without first buffering the whole body.
+    const CHUNK_SIZE = 1024 * 1024; // 1 MB
+    const MAX_CHUNKS = 200; // offers up to 200 MB -- 4x the 50 MB cap
+    let pullCount = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pullCount++;
+        if (pullCount > MAX_CHUNKS) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(new Uint8Array(CHUNK_SIZE));
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}`) {
+          return new Response(
+            JSON.stringify({
+              skill_versions: { version: VERSION, manifest: [{ path: "SKILL.md" }], checksum_sha256: "0".repeat(64) },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}/download?version=${VERSION}`) {
+          // Deliberately NO content-length header set.
+          return new Response(stream, { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected request: ${url}` }), { status: 404 });
+      }),
+    );
+
+    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/over the 50 MB limit/);
+
+    // The crux of #37: the mock offers up to 200 MB (200 chunks) total. Code
+    // that buffers the full body before checking its size (arrayBuffer() then
+    // compare) would drain every chunk -- pullCount would land at
+    // MAX_CHUNKS + 1 (201). A fix that checks the running total AS bytes
+    // arrive stops within a few chunks of crossing the 50 MB cap (~51).
+    expect(pullCount).toBeLessThan(60);
+  });
+
 });

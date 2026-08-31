@@ -44,6 +44,44 @@ async function fetchVersionMeta(owner: string, skill: string, version: string): 
   );
 }
 
+// Reads a fetch Response body while enforcing MAX_DOWNLOAD_BYTES AS bytes
+// arrive, instead of buffering the whole thing via arrayBuffer() and checking
+// afterwards (ahood-cli#37). A content-length header, when present and
+// already over cap, lets us bail before reading a single byte; but the header
+// is attacker/server-controlled and sometimes just absent (chunked transfer,
+// a mutated/redirected presigned URL), so it's a fast-path optimization only
+// -- the streaming check below is what actually bounds memory in every case.
+async function readBoundedBody(res: Response, maxBytes: number): Promise<Buffer> {
+  const contentLength = Number(res.headers.get("content-length") ?? NaN);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    await res.body?.cancel().catch(() => {});
+    throw new Error(
+      `Download is ${contentLength} bytes, over the ${maxBytes / (1024 * 1024)} MB limit -- refusing to install.`,
+    );
+  }
+  if (!res.body) return Buffer.alloc(0);
+
+  const chunks: Buffer[] = [];
+  let total = 0;
+  // Throwing out of a `for await` loop over a ReadableStream runs the async
+  // iterator's implicit `return()`, which cancels the underlying stream and
+  // releases its reader lock -- no separate res.body.cancel() call needed
+  // (and calling one here would fail anyway: the stream is locked to this
+  // loop's internal reader). This is what actually stops reading mid-download
+  // rather than draining the rest of a huge/malicious body first.
+  for await (const chunk of res.body) {
+    const buf = Buffer.from(chunk as Uint8Array);
+    total += buf.length;
+    if (total > maxBytes) {
+      throw new Error(
+        `Downloaded archive is over the ${maxBytes / (1024 * 1024)} MB limit -- refusing to install.`,
+      );
+    }
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
+}
+
 export async function extractTarGz(buffer: Buffer, destDir: string): Promise<void> {
   let decompressed: Buffer;
   try {
@@ -184,18 +222,7 @@ export async function add(args: string[]): Promise<void> {
     const body = await downloadRes.text().catch(() => "");
     throw new Error(`Download failed with status ${downloadRes.status}${body ? `: ${body}` : ""}`);
   }
-  const contentLength = Number(downloadRes.headers.get("content-length") ?? NaN);
-  if (Number.isFinite(contentLength) && contentLength > MAX_DOWNLOAD_BYTES) {
-    throw new Error(
-      `Download is ${contentLength} bytes, over the ${MAX_DOWNLOAD_BYTES / (1024 * 1024)} MB limit -- refusing to install.`,
-    );
-  }
-  const buffer = Buffer.from(await downloadRes.arrayBuffer());
-  if (buffer.length > MAX_DOWNLOAD_BYTES) {
-    throw new Error(
-      `Downloaded archive is ${buffer.length} bytes, over the ${MAX_DOWNLOAD_BYTES / (1024 * 1024)} MB limit -- refusing to install.`,
-    );
-  }
+  const buffer = await readBoundedBody(downloadRes, MAX_DOWNLOAD_BYTES);
 
   const actualChecksum = createHash("sha256").update(buffer).digest("hex");
   if (actualChecksum !== meta.checksum_sha256) {
