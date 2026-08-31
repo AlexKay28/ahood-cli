@@ -1,5 +1,5 @@
 {
-  "name": "ahood",
+  "name": "@alexkay/ahood-cli",
   "version": "0.1.0",
   "description": "CLI for ahood, a registry for installing and publishing Claude Code skills.",
   "license": "MIT",
