@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { listMine } from "../src/commands/list-mine.js";
+import { listSkills } from "../src/commands/list.js";
 
 const API_URL = "http://ahood.test";
 
@@ -15,7 +15,7 @@ function stubApi(status: number, body: unknown) {
   return calls;
 }
 
-describe("listMine", () => {
+describe("listSkills", () => {
   const originalApiUrl = process.env.AHOOD_API_URL;
   const originalToken = process.env.AHOOD_TOKEN;
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -38,7 +38,7 @@ describe("listMine", () => {
   it("calls GET /api/v1/skills?mine=true", async () => {
     const calls = stubApi(200, { skills: [] });
 
-    await listMine();
+    await listSkills();
 
     expect(calls).toEqual([`${API_URL}/api/v1/skills?mine=true`]);
   });
@@ -46,7 +46,7 @@ describe("listMine", () => {
   it("prints a friendly message when the caller has no skills", async () => {
     stubApi(200, { skills: [] });
 
-    await listMine();
+    await listSkills();
 
     expect(logSpy).toHaveBeenCalledWith("You haven't published any skills yet.");
   });
@@ -59,7 +59,7 @@ describe("listMine", () => {
       ],
     });
 
-    await listMine();
+    await listSkills();
 
     expect(logSpy).toHaveBeenCalledWith("alice/demo (public) - Demo: a demo (5 downloads, 2 stars)");
     expect(logSpy).toHaveBeenCalledWith("alice/secret (private) - Secret (0 downloads, 0 stars)");
@@ -71,7 +71,7 @@ describe("listMine", () => {
     ];
     stubApi(200, { skills });
 
-    await listMine(["--json"]);
+    await listSkills(["--json"]);
 
     expect(logSpy).toHaveBeenCalledWith(JSON.stringify(skills));
   });
@@ -79,6 +79,6 @@ describe("listMine", () => {
   it("surfaces the server's error message on a non-2xx response", async () => {
     stubApi(401, { error: "Unauthorized" });
 
-    await expect(listMine()).rejects.toThrow(/Unauthorized/);
+    await expect(listSkills()).rejects.toThrow(/Unauthorized/);
   });
 });

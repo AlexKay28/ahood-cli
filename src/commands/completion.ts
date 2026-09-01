@@ -1,43 +1,68 @@
-import { COMMANDS_HELP, COMMAND_ALIASES } from "../help.js";
+import { TOP_LEVEL_COMMANDS_HELP, SKILL_COMMANDS_HELP, COMMAND_ALIASES } from "../help.js";
 
 const USAGE = "Usage: ahood completion <bash|zsh|fish>";
 
-// Includes alias names (e.g. "show" for "view") alongside the primary
-// command names, so shell completion offers every name a user might type,
-// not just the ones with their own COMMANDS_HELP entry.
-function commandNames(): string[] {
-  const primary = COMMANDS_HELP.map((c) => c.usage.split(" ")[1]);
+// Position 1 (the word right after "ahood"): every top-level command plus
+// the "skill" entity group itself.
+function topLevelNames(): string[] {
+  return [...TOP_LEVEL_COMMANDS_HELP.map((c) => c.usage.split(" ")[1]), "skill"];
+}
+
+// Position 2+, once "skill" has been typed: every skill verb, plus alias
+// names (e.g. "show" for "view") so completion offers every name a user
+// might type, not just the ones with their own SKILL_COMMANDS_HELP entry.
+function skillNames(): string[] {
+  const primary = SKILL_COMMANDS_HELP.map((c) => c.usage.split(" ")[2]);
   return [...primary, ...Object.keys(COMMAND_ALIASES)];
 }
 
 function bashCompletion(): string {
-  const names = commandNames().join(" ");
+  const top = topLevelNames().join(" ");
+  const skill = skillNames().join(" ");
   return [
     "_ahood_completions() {",
     '  local cur="${COMP_WORDS[COMP_CWORD]}"',
-    `  COMPREPLY=($(compgen -W "${names}" -- "$cur"))`,
+    `  local top_words="${top}"`,
+    `  local skill_words="${skill}"`,
+    '  if [[ "${COMP_WORDS[1]}" == "skill" && $COMP_CWORD -ge 2 ]]; then',
+    '    COMPREPLY=($(compgen -W "$skill_words" -- "$cur"))',
+    "  else",
+    '    COMPREPLY=($(compgen -W "$top_words" -- "$cur"))',
+    "  fi",
     "}",
     "complete -F _ahood_completions ahood",
   ].join("\n");
 }
 
 function zshCompletion(): string {
-  const names = commandNames().join(" ");
+  const top = topLevelNames().join(" ");
+  const skill = skillNames().join(" ");
   return [
     "#compdef ahood",
-    `_arguments '1: :(${names})'`,
+    "local -a top_cmds skill_cmds",
+    `top_cmds=(${top})`,
+    `skill_cmds=(${skill})`,
+    "case $words[2] in",
+    "  skill)",
+    '    _describe "skill command" skill_cmds',
+    "    ;;",
+    "  *)",
+    '    _describe "command" top_cmds',
+    "    ;;",
+    "esac",
   ].join("\n");
 }
 
 function fishCompletion(): string {
-  return commandNames()
-    .map((name) => `complete -c ahood -n "__fish_use_subcommand" -a "${name}"`)
-    .join("\n");
+  return [
+    ...topLevelNames().map((name) => `complete -c ahood -n "__fish_use_subcommand" -a "${name}"`),
+    ...skillNames().map((name) => `complete -c ahood -n "__fish_seen_subcommand_from skill" -a "${name}"`),
+  ].join("\n");
 }
 
-// Command-name completion only (not per-command flags) -- still the primary
-// way users discover the available subcommands without reading docs, which
-// this CLI otherwise has no mechanism for at all.
+// Position-aware command-name completion (not per-command flags) -- still
+// the primary way users discover the available subcommands without reading
+// docs, which this CLI otherwise has no mechanism for at all.
 export async function completion(args: string[]): Promise<void> {
   const shell = args[0];
   switch (shell) {
