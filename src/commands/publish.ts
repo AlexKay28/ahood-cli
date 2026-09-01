@@ -36,8 +36,8 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
 }
 
 const USAGE =
-  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>]\n" +
-  "   or: ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>";
+  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]\n" +
+  "   or: ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
 // `vendor/thing/.git` is skipped the same as a top-level one. Not a
@@ -172,7 +172,8 @@ async function createSkillForPublish(
   owner: string,
   skill: string,
   opts: { name?: string; tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string },
-): Promise<void> {
+  jsonOutput: boolean,
+): Promise<CreateResponse> {
   if (!opts.name) {
     throw new Error(
       `${owner}/${skill} doesn't exist yet -- pass --name to create it as part of this publish (e.g. --name "My Skill").`,
@@ -201,7 +202,10 @@ async function createSkillForPublish(
         `ahood publish ${created.owner}/${skill}@<version>.`,
     );
   }
-  console.log(`Created ${created.owner}/${created.slug} -- publishing its first version now.`);
+  if (!jsonOutput) {
+    console.log(`Created ${created.owner}/${created.slug} -- publishing its first version now.`);
+  }
+  return created;
 }
 
 async function initVersion(
@@ -210,67 +214,104 @@ async function initVersion(
   version: string,
   packageSizeBytes: number,
   createOpts: { name?: string; tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string },
-): Promise<InitResponse> {
+  jsonOutput: boolean,
+): Promise<{ init: InitResponse; created?: CreateResponse }> {
   const path = `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/init`;
   const body = JSON.stringify({ version, package_size_bytes: packageSizeBytes });
   try {
-    return await apiJson<InitResponse>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    const init = await apiJson<InitResponse>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    return { init };
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) throw error;
-    await createSkillForPublish(owner, skill, createOpts);
+    const created = await createSkillForPublish(owner, skill, createOpts, jsonOutput);
     // Retry exactly once. If this ALSO 404s (e.g. a race, or the create
     // silently didn't take), let that error propagate rather than looping.
-    return await apiJson<InitResponse>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    const init = await apiJson<InitResponse>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    return { init, created };
   }
 }
 
+// --json mode (ahood-cli#57): a CI/script caller needs one machine-readable
+// object on stdout, not the human progress lines below scraped with a
+// regex. jsonOutput therefore gates every intermediate console.log in this
+// flow, and the whole body is wrapped in a try/catch so ANY failure --
+// validation, network, or a rejected publish -- still yields exactly one
+// JSON object (`{error}`) rather than a human message, while still
+// rethrowing so index.ts's exit-code mapping (exitCodeFor) is unaffected.
 export async function publish(args: string[]): Promise<void> {
-  const { owner, skill, version, path, name, tagline, tags, license, homepage, repository } = parsePublishArgs(args);
-  const skillMdPath = join(path, "SKILL.md");
-  if (!existsSync(skillMdPath)) {
-    throw new Error(`No SKILL.md found at ${skillMdPath} -- publish must point at a skill folder's root.`);
-  }
+  const jsonOutput = args.includes("--json");
+  try {
+    const { owner, skill, version, path, name, tagline, tags, license, homepage, repository } = parsePublishArgs(args);
+    const skillMdPath = join(path, "SKILL.md");
+    if (!existsSync(skillMdPath)) {
+      throw new Error(`No SKILL.md found at ${skillMdPath} -- publish must point at a skill folder's root.`);
+    }
 
-  const archive = await tarGzDirectory(path);
+    const archive = await tarGzDirectory(path);
 
-  const init = await initVersion(owner, skill, version, archive.length, { name, tagline, tags, license, homepage, repository });
-
-  // TS's lib.dom BodyInit (in scope here since tsconfig has no explicit
-  // "lib" override, so DOM is included alongside the Node types) type-checks
-  // Buffer/Uint8Array against `Uint8Array<ArrayBuffer>` specifically as of
-  // TS 5.7+'s ArrayBufferLike generics, which a Node Buffer's
-  // `Uint8Array<ArrayBufferLike>` doesn't structurally satisfy even though
-  // it is a valid BufferSource at runtime (this is exactly what Node's own
-  // fetch/undici accepts) -- see undici-types' BodyInit, which includes
-  // `NodeJS.ArrayBufferView` (i.e. Buffer) directly with no such
-  // restriction. Asserting through BodyInit here, rather than reshaping
-  // tsconfig's "lib" for the whole package, keeps this fix local to the one
-  // call site.
-  const putRes = await fetch(init.upload_url, {
-    method: "PUT",
-    body: archive as unknown as BodyInit,
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!putRes.ok) {
-    const body = await putRes.text().catch(() => "");
-    throw new Error(
-      `Upload failed with status ${putRes.status}${body ? `: ${body}` : ""} (version_id: ${init.version_id}, retry with the same command once the underlying issue is fixed).`,
+    const { init, created } = await initVersion(
+      owner,
+      skill,
+      version,
+      archive.length,
+      { name, tagline, tags, license, homepage, repository },
+      jsonOutput,
     );
-  }
 
-  await apiJson<{ version_id: string; version: string; status: string }>(
-    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/complete`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version_id: init.version_id }),
-    },
-  );
+    // TS's lib.dom BodyInit (in scope here since tsconfig has no explicit
+    // "lib" override, so DOM is included alongside the Node types) type-checks
+    // Buffer/Uint8Array against `Uint8Array<ArrayBuffer>` specifically as of
+    // TS 5.7+'s ArrayBufferLike generics, which a Node Buffer's
+    // `Uint8Array<ArrayBufferLike>` doesn't structurally satisfy even though
+    // it is a valid BufferSource at runtime (this is exactly what Node's own
+    // fetch/undici accepts) -- see undici-types' BodyInit, which includes
+    // `NodeJS.ArrayBufferView` (i.e. Buffer) directly with no such
+    // restriction. Asserting through BodyInit here, rather than reshaping
+    // tsconfig's "lib" for the whole package, keeps this fix local to the one
+    // call site.
+    const putRes = await fetch(init.upload_url, {
+      method: "PUT",
+      body: archive as unknown as BodyInit,
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!putRes.ok) {
+      const body = await putRes.text().catch(() => "");
+      throw new Error(
+        `Upload failed with status ${putRes.status}${body ? `: ${body}` : ""} (version_id: ${init.version_id}, retry with the same command once the underlying issue is fixed).`,
+      );
+    }
 
-  console.log(`Uploaded ${owner}/${skill}@${version} -- processing...`);
-  const result = await pollVersionStatus(owner, skill, version);
-  if (result.status === "failed") {
-    throw new Error(`Publish failed: ${result.failure_reason ?? "unknown reason"}`);
+    await apiJson<{ version_id: string; version: string; status: string }>(
+      `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/complete`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version_id: init.version_id }),
+      },
+    );
+
+    if (!jsonOutput) console.log(`Uploaded ${owner}/${skill}@${version} -- processing...`);
+    const result = await pollVersionStatus(owner, skill, version);
+    if (result.status === "failed") {
+      throw new Error(`Publish failed: ${result.failure_reason ?? "unknown reason"}`);
+    }
+
+    if (jsonOutput) {
+      const output: { version: string; status: string; failure_reason?: string; created?: CreateResponse } = {
+        version: result.version,
+        status: result.status,
+      };
+      if (result.failure_reason) output.failure_reason = result.failure_reason;
+      if (created) output.created = created;
+      console.log(JSON.stringify(output));
+    } else {
+      console.log(`Published ${owner}/${skill}@${result.version} (${result.status})`);
+    }
+  } catch (error) {
+    if (jsonOutput) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(JSON.stringify({ error: message }));
+    }
+    throw error;
   }
-  console.log(`Published ${owner}/${skill}@${result.version} (${result.status})`);
 }

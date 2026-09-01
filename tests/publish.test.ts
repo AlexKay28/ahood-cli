@@ -402,4 +402,102 @@ describe("publish", () => {
       /Publish failed: Archive could not be extracted/,
     );
   });
+
+  // ahood-cli#57: --json must emit exactly one JSON object on stdout and
+  // none of the human "Created/Uploaded/Published" progress lines, so a CI
+  // caller can pipe stdout straight into `jq` without scraping text.
+  describe("--json", () => {
+    it("emits exactly one JSON object with {version, status} on success and no human progress lines", async () => {
+      writeFileSync(join(dir, "SKILL.md"), "# demo");
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      logSpy.mockClear(); // spyOn on an already-spied console.log reuses the same mock (no restore between tests in this file), so clear any calls accumulated by earlier tests.
+
+      await publish([`alice/demo@1.0.0`, "--path", dir, "--json"]);
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      const [line] = logSpy.mock.calls[0] as [string];
+      expect(() => JSON.parse(line)).not.toThrow();
+      expect(JSON.parse(line)).toEqual({ version: "1.0.0", status: "published" });
+      // None of the human progress lines leaked onto stdout.
+      const allOutput = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(allOutput).not.toMatch(/Uploaded|Published alice\/demo/);
+    });
+
+    it("includes the create-step result when a new skill was created during this call", async () => {
+      writeFileSync(join(dir, "SKILL.md"), "# demo");
+      const captures: { uploadBody?: Uint8Array; createBody?: unknown } = {};
+      stubApiFirstPublish(captures);
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      logSpy.mockClear();
+
+      await publish(["alice/demo@1.0.0", "--path", dir, "--name", "Demo Skill", "--json"]);
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      const [line] = logSpy.mock.calls[0] as [string];
+      const parsed = JSON.parse(line);
+      expect(parsed).toEqual({
+        version: "1.0.0",
+        status: "published",
+        created: { id: "s1", slug: "demo", owner: "alice" },
+      });
+    });
+
+    it("emits a single {error} JSON object on stdout and preserves the exit-relevant error on a rejected publish", async () => {
+      writeFileSync(join(dir, "SKILL.md"), "# demo");
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.endsWith("/versions/init")) {
+            return new Response(
+              JSON.stringify({ upload_url: "http://upload.test/put", storage_path: "x", version_id: "v1" }),
+              { status: 200 },
+            );
+          }
+          if (url === "http://upload.test/put") return new Response(null, { status: 200 });
+          if (url.endsWith("/versions/complete")) {
+            return new Response(JSON.stringify({ version_id: "v1", version: "1.0.0", status: "processing" }), { status: 202 });
+          }
+          if (/\/versions\/[^/]+$/.test(url) && !url.endsWith("/versions/init") && !url.endsWith("/versions/complete")) {
+            return new Response(
+              JSON.stringify({ version: "1.0.0", status: "failed", failure_reason: "Archive could not be extracted -- is it a valid .tar.gz file?" }),
+              { status: 200 },
+            );
+          }
+          return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+        }),
+      );
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      logSpy.mockClear();
+
+      await expect(publish([`alice/demo@1.0.0`, "--path", dir, "--json"])).rejects.toThrow(
+        /Publish failed: Archive could not be extracted/,
+      );
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      const [line] = logSpy.mock.calls[0] as [string];
+      const parsed = JSON.parse(line);
+      expect(parsed.error).toMatch(/Publish failed: Archive could not be extracted/);
+    });
+
+    it("emits a single {error} JSON object for a client-side validation failure (bad --version), before any network call", async () => {
+      writeFileSync(join(dir, "SKILL.md"), "# demo");
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      logSpy.mockClear();
+
+      await expect(
+        publish([dir, "--owner", "alice", "--slug", "demo", "--version", "not-semver", "--json"]),
+      ).rejects.toThrow(/must be a semver/);
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      const [line] = logSpy.mock.calls[0] as [string];
+      const parsed = JSON.parse(line);
+      expect(parsed.error).toMatch(/must be a semver/);
+    });
+  });
 });
