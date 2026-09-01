@@ -2,7 +2,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pack } from "tar-stream";
 import { createGzip } from "node:zlib";
-import { apiJson, ApiError } from "../http.js";
+import { apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
 import { flagValue } from "../flags.js";
 import { parseOwnerSkill, SEMVER_RE, validateExternalUrl } from "../spec.js";
 
@@ -252,7 +252,12 @@ export async function publish(args: string[]): Promise<void> {
     signal: AbortSignal.timeout(120_000),
   });
   if (!putRes.ok) {
-    const body = await putRes.text().catch(() => "");
+    // The signed URL points at Supabase Storage directly, a different host
+    // than the API, so this never goes through apiJson -- sanitize by hand
+    // here for the same reason apiJson does (ahood-cli#31/#50): a raw
+    // proxy/WAF error page must not be spliced verbatim into a thrown Error.
+    const rawBody = await putRes.text().catch(() => "");
+    const body = rawBody ? sanitizeErrorMessage(rawBody) : "";
     throw new Error(
       `Upload failed with status ${putRes.status}${body ? `: ${body}` : ""} (version_id: ${init.version_id}, retry with the same command once the underlying issue is fixed).`,
     );

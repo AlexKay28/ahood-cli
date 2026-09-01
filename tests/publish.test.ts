@@ -372,6 +372,80 @@ describe("publish", () => {
     expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
   });
 
+  // ahood-cli#50: the signed upload URL points at Supabase Storage, a
+  // different host than the API, so this PUT never goes through apiJson --
+  // it must sanitize the raw response body itself the same way apiJson does
+  // for every other HTTP call (ahood-cli#31), or an HTML block page (or any
+  // oversized body) from a proxy/WAF in front of storage would be dumped
+  // straight into the thrown error and onto a user's terminal.
+  it("sanitizes an HTML-shaped error body from the storage-upload PUT instead of leaking it raw", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const htmlBody =
+      "<!DOCTYPE html><html><head><title>Cloudflare Ray ID: abc123 Error</title></head><body>Attention Required! secret-internal-detail</body></html>";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/versions/init")) {
+          return new Response(
+            JSON.stringify({ upload_url: "http://upload.test/put", storage_path: "x", version_id: "v1" }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === "http://upload.test/put") {
+          return new Response(htmlBody, { status: 502 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+
+    let caught: Error | undefined;
+    try {
+      await publish([`alice/demo@1.0.0`, "--path", dir]);
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught!.message).toContain("Upload failed with status 502");
+    expect(caught!.message).not.toContain("Cloudflare Ray ID");
+    expect(caught!.message).not.toContain("secret-internal-detail");
+    expect(caught!.message).not.toContain("<html>");
+  });
+
+  // Same protection, but for a plausible-looking (non-HTML) body that's just
+  // implausibly long -- e.g. a giant stack trace from an upstream proxy.
+  it("sanitizes an oversized non-HTML error body from the storage-upload PUT instead of leaking it raw", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const oversizedBody = "x".repeat(2000);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/versions/init")) {
+          return new Response(
+            JSON.stringify({ upload_url: "http://upload.test/put", storage_path: "x", version_id: "v1" }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === "http://upload.test/put") {
+          return new Response(oversizedBody, { status: 500 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+
+    let caught: Error | undefined;
+    try {
+      await publish([`alice/demo@1.0.0`, "--path", dir]);
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught!.message).toContain("Upload failed with status 500");
+    expect(caught!.message).not.toContain(oversizedBody);
+    expect(caught!.message.length).toBeLessThan(oversizedBody.length);
+  });
+
   it("throws a clear error including the failure reason when the version ends up 'failed'", async () => {
     writeFileSync(join(dir, "SKILL.md"), "# demo");
     vi.stubGlobal(
