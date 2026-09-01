@@ -15,6 +15,7 @@ import { star, unstar } from "./commands/star.js";
 import { view } from "./commands/view.js";
 import { versions } from "./commands/versions.js";
 import { completion } from "./commands/completion.js";
+import { init } from "./commands/init.js";
 import { formatHelp, formatCommandHelp, findCommandHelp } from "./help.js";
 import { ApiError } from "./http.js";
 import { exitCodeFor } from "./exit-code.js";
@@ -29,6 +30,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   update,
   remove,
   publish,
+  init,
   token,
   edit,
   unpublish,

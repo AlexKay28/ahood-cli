@@ -48,6 +48,7 @@ For CI or any non-interactive environment, set `AHOOD_TOKEN` instead of running 
 | `ahood unpublish <owner>/<skill> [--yes]` | Deletes the skill from the registry for every consumer, not just your local install -- prompts for a typed "yes" confirmation, or pass `--yes` for scripts/CI. |
 | `ahood star <owner>/<skill>` | Star a skill. |
 | `ahood unstar <owner>/<skill>` | Remove your star from a skill. |
+| `ahood init [name]` | Scaffold a new skill folder with a minimal, valid `SKILL.md` -- `./<name>/SKILL.md` if a name is given, `./SKILL.md` otherwise. Refuses to overwrite an existing `SKILL.md`. |
 | `ahood publish <owner>/<skill>@<version> [--path <dir>] [--name] [--tagline] [--tags] [--license] [--homepage] [--repository]` | Publish a new version of a skill from a folder containing `SKILL.md` (defaults to the current directory). If the skill doesn't exist yet, creates it first -- `--name` is required in that case; `--tagline`/`--tags`/`--license`/`--homepage`/`--repository` are optional and only used at creation. Processing (validation, checksumming, secret scanning) happens server-side after upload; this command polls and reports the final published/failed status. The legacy form `ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted. |
 | `ahood token create <name>\|list [--json]\|revoke <id>` | Manage personal API tokens. Creating a token requires an existing logged-in session -- see the docs. |
 | `ahood completion <bash\|zsh\|fish>` | Print a shell completion script for the command names. |
