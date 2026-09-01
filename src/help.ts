@@ -93,10 +93,14 @@ export const COMMANDS_HELP: CommandHelp[] = [
     examples: ['ahood edit alice/pdf-tools --tagline "Merge and split PDFs"'],
   },
   {
-    usage: "ahood unpublish <owner>/<skill> [--yes]",
+    usage: "ahood unpublish <owner>/<skill>[@version] [--yes]",
     summary:
-      "Delete a skill from the registry for every consumer, not just your local install (prompts for confirmation unless --yes is passed).",
-    desc: "Delete a skill from the registry for every consumer (not just your local install). Prompts for a typed \"yes\" unless --yes is passed.",
+      "Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed).",
+    desc:
+      "Without @version: delete a skill from the registry for every consumer (not just your local install). " +
+      "With @version (e.g. alice/foo@1.2.3): yank that single version instead of deleting the whole skill -- " +
+      "it is marked yanked, not removed. Existing lockfile pins still resolve and verify against it, but new " +
+      "installs are warned off it. Prompts for a typed \"yes\" unless --yes is passed.",
     flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
   },
   { usage: "ahood star <owner>/<skill>", summary: "Star a skill.", desc: "Star a skill." },

@@ -119,4 +119,66 @@ describe("unpublish", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].init.method).toBe("DELETE");
   });
+
+  describe("with an @version suffix", () => {
+    const VERSION = "1.2.3";
+    const SPEC = `${OWNER}/${SKILL}@${VERSION}`;
+
+    it("calls DELETE on the specific version (not the whole-skill DELETE) once confirmed", async () => {
+      const calls = stubApi(200, { yanked_at: "2026-08-31T00:00:00.000Z" });
+      const stdio = stubStdio("yes");
+
+      await unpublish([SPEC]);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toBe(`${API_URL}/api/v1/skills/${OWNER}/${SKILL}/versions/${VERSION}`);
+      expect(calls[0].init.method).toBe("DELETE");
+      expect(stdio.promptedWith()).toMatch(/Yank/);
+      expect(stdio.promptedWith()).not.toMatch(/permanently delete/);
+    });
+
+    it("does not call the API when the user does not type exactly 'yes'", async () => {
+      const calls = stubApi(200);
+      stubStdio("y");
+
+      await unpublish([SPEC]);
+
+      expect(calls).toHaveLength(0);
+    });
+
+    it("--yes bypasses the prompt entirely, for scripted/CI use", async () => {
+      const calls = stubApi(200);
+
+      await unpublish([SPEC, "--yes"]);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toBe(`${API_URL}/api/v1/skills/${OWNER}/${SKILL}/versions/${VERSION}`);
+      expect(calls[0].init.method).toBe("DELETE");
+    });
+
+    it("surfaces the server's error message on a non-2xx response", async () => {
+      stubApi(400, { error: "Version 1.2.3 is already yanked" });
+      stubStdio("yes");
+
+      await expect(unpublish([SPEC])).rejects.toThrow(/already yanked/);
+    });
+
+    it("rejects an invalid version format before making any API call", async () => {
+      const calls = stubApi(200);
+
+      await expect(unpublish([`${OWNER}/${SKILL}@not-a-version`, "--yes"])).rejects.toThrow(/Invalid version/);
+
+      expect(calls).toHaveLength(0);
+    });
+  });
+
+  it("still performs the whole-skill DELETE when the spec has no @version", async () => {
+    const calls = stubApi(200);
+
+    await unpublish([`${OWNER}/${SKILL}`, "--yes"]);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(`${API_URL}/api/v1/skills/${OWNER}/${SKILL}`);
+    expect(calls[0].init.method).toBe("DELETE");
+  });
 });
