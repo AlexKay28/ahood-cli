@@ -38,6 +38,10 @@ describe("update", () => {
     process.chdir(dir);
     process.env.HOME = dir;
     process.env.AHOOD_API_URL = API_URL;
+    // A previous test asserting exitCode === 1 can leave it set if it fails
+    // before reaching its own reset -- start every test from a known state
+    // rather than relying on run order.
+    process.exitCode = 0;
   });
 
   afterEach(() => {
@@ -100,6 +104,115 @@ describe("update", () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("bob/broken"));
     expect(process.exitCode).toBe(1);
     process.exitCode = 0;
+  });
+
+  it("skips an explicitly-named skill that isn't installed, without calling add() or writing anything", async () => {
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`unexpected fetch: ${String(input)}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const lockfilePath = join(dir, ".claude", "skills.lock.json");
+
+    await update(["alice/never-installed"]);
+
+    expect(warnSpy).toHaveBeenCalledWith("Skipping alice/never-installed: not currently installed.");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(existsSync(join(dir, ".claude", "skills", "alice", "never-installed"))).toBe(false);
+    // No lockfile was ever written -- `update` on a target that was never
+    // installed must not create one, let alone pin an entry into it.
+    expect(existsSync(lockfilePath)).toBe(false);
+    expect(process.exitCode).not.toBe(1);
+    process.exitCode = 0;
+  });
+
+  it("updates only the explicitly-named skills that are installed, and skips the rest with a warning", async () => {
+    const goodArchive = await tarGz({ "SKILL.md": "# good\n" });
+    const goodChecksum = sha256(goodArchive);
+
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/good", {
+      version: "1.0.0",
+      checksum_sha256: "old",
+    });
+
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${API_URL}/api/v1/skills/alice/good`) {
+        return new Response(
+          JSON.stringify({ skill_versions: { version: "1.1.0", manifest: [{ path: "SKILL.md" }], checksum_sha256: goodChecksum } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url === `${API_URL}/api/v1/skills/alice/good/download?version=1.1.0`) {
+        return new Response(new Uint8Array(goodArchive), { status: 200 });
+      }
+      // bob/never-installed must never be resolved or fetched at all -- it
+      // isn't in the lockfile, so it should be skipped before add() is called.
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await update(["alice/good", "bob/never-installed"]);
+
+    expect(readFileSync(join(dir, ".claude", "skills", "alice", "good", "SKILL.md"), "utf-8")).toBe("# good\n");
+    expect(warnSpy).toHaveBeenCalledWith("Skipping bob/never-installed: not currently installed.");
+    expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("bob/never-installed"))).toBe(false);
+    expect(process.exitCode).not.toBe(1);
+    process.exitCode = 0;
+  });
+
+  it("no-args update of every currently-installed skill is unaffected by the not-installed guard", async () => {
+    const goodArchive = await tarGz({ "SKILL.md": "# good\n" });
+    const goodChecksum = sha256(goodArchive);
+    const otherArchive = await tarGz({ "SKILL.md": "# other\n" });
+    const otherChecksum = sha256(otherArchive);
+
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/good", {
+      version: "1.0.0",
+      checksum_sha256: "old",
+    });
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/other", {
+      version: "1.0.0",
+      checksum_sha256: "old",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `${API_URL}/api/v1/skills/alice/good`) {
+          return new Response(
+            JSON.stringify({ skill_versions: { version: "1.1.0", manifest: [{ path: "SKILL.md" }], checksum_sha256: goodChecksum } }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === `${API_URL}/api/v1/skills/alice/good/download?version=1.1.0`) {
+          return new Response(new Uint8Array(goodArchive), { status: 200 });
+        }
+        if (url === `${API_URL}/api/v1/skills/alice/other`) {
+          return new Response(
+            JSON.stringify({ skill_versions: { version: "1.2.0", manifest: [{ path: "SKILL.md" }], checksum_sha256: otherChecksum } }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === `${API_URL}/api/v1/skills/alice/other/download?version=1.2.0`) {
+          return new Response(new Uint8Array(otherArchive), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected request: ${url}` }), { status: 404 });
+      }),
+    );
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await update([]);
+
+    // Every skill in the lockfile passes the "is it installed" check, so the
+    // not-installed guard must never fire on the no-args path.
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(readFileSync(join(dir, ".claude", "skills", "alice", "good", "SKILL.md"), "utf-8")).toBe("# good\n");
+    expect(readFileSync(join(dir, ".claude", "skills", "alice", "other", "SKILL.md"), "utf-8")).toBe("# other\n");
+    expect(process.exitCode).not.toBe(1);
   });
 
   describe("--dry-run", () => {
