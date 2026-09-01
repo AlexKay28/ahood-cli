@@ -28,6 +28,7 @@ describe("edit", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     if (originalApiUrl === undefined) delete process.env.AHOOD_API_URL;
     else process.env.AHOOD_API_URL = originalApiUrl;
     if (originalToken === undefined) delete process.env.AHOOD_TOKEN;
@@ -157,5 +158,36 @@ describe("edit", () => {
 
     expect(calls).toHaveLength(1);
     expect(JSON.parse(calls[0].init.body as string)).toEqual({ homepage: "https://example.com" });
+  });
+
+  // ahood-cli#68: updateSkill (lib/skills/mutations.ts) can return ok:true
+  // with a tags_warning attached when a follow-up step involving tags
+  // failed. Same class of bug as unpublish's latest_version_warning -- the
+  // response body must not be discarded silently.
+  it("prints a visible warning when the PATCH response includes tags_warning", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    stubApi(200, {
+      slug: SKILL,
+      tagline: null,
+      license: null,
+      visibility: "public",
+      tags: ["a"],
+      tags_warning: "Failed to normalize tags; some tags may not have been saved.",
+    });
+
+    await edit([`${OWNER}/${SKILL}`, "--tags", "a"]);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "WARNING: Failed to normalize tags; some tags may not have been saved.",
+    );
+  });
+
+  it("prints nothing extra beyond the success line when tags_warning is absent (normal case)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    stubApi(200, { slug: SKILL, tagline: "t", license: null, visibility: "public", tags: [] });
+
+    await edit([`${OWNER}/${SKILL}`, "--tagline", "t"]);
+
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });

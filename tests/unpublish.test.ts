@@ -179,6 +179,34 @@ describe("unpublish", () => {
       expect(calls).toHaveLength(1);
       expect(calls[0].init.method).toBe("DELETE");
     });
+
+    // ahood-cli#68: yankVersion (lib/skills/mutations.ts) still returns
+    // ok:true when the yank succeeded but the follow-up latest_version_id
+    // recompute failed -- it attaches latest_version_warning instead of
+    // failing the request. The CLI used to discard the DELETE response body
+    // entirely, so this warning never reached the terminal.
+    it("prints a visible warning when the DELETE response includes latest_version_warning", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      stubApi(200, {
+        yanked_at: "2026-08-31T00:00:00.000Z",
+        latest_version_warning: "Failed to recompute latest_version_id; it may now point at a yanked version.",
+      });
+
+      await unpublish([SPEC, "--yes"]);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        "WARNING: Failed to recompute latest_version_id; it may now point at a yanked version.",
+      );
+    });
+
+    it("prints nothing extra beyond the success line when latest_version_warning is absent (normal case)", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      stubApi(200, { yanked_at: "2026-08-31T00:00:00.000Z" });
+
+      await unpublish([SPEC, "--yes"]);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
   });
 
   // ahood-cli#62: "ahood unpublish owner/skill@latest --yes" (and the
