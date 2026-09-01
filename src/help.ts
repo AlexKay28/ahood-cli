@@ -114,7 +114,8 @@ export const COMMANDS_HELP: CommandHelp[] = [
     examples: ["ahood init pdf-tools", "ahood init"],
   },
   {
-    usage: "ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>]",
+    usage:
+      "ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]",
     summary:
       "Publish a new version of a skill from a folder containing SKILL.md, creating the skill first if it doesn't already exist.",
     desc:
@@ -130,6 +131,7 @@ export const COMMANDS_HELP: CommandHelp[] = [
       "--license <id>                An SPDX license identifier, e.g. MIT, used only when creating.",
       "--homepage <url>              The skill's homepage URL, used only when creating.",
       "--repository <url>            The skill's source repository URL, used only when creating.",
+      "--json                        Suppress human progress lines; print one {version,status,...} JSON object on completion (or {error} on failure).",
     ],
     examples: [
       "ahood publish alice/pdf-tools@1.1.0",
