@@ -36,7 +36,10 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
   {
     usage: "ahood token create <name>|list [--json]|revoke <id> [--yes]",
     summary: "Manage personal API tokens.",
-    desc: "Manage personal API tokens. `create` requires an existing browser-backed session.",
+    desc:
+      "Manage personal API tokens. All three subcommands require an existing browser-backed session -- a CLI " +
+      "session authenticated with a bearer token can't manage tokens end-to-end; use /settings/tokens in the " +
+      "browser instead.",
     flags: ["--yes    (revoke only) Skip the confirmation prompt and revoke immediately."],
     examples: ["ahood token create ci-runner", "ahood token list --json", "ahood token revoke <id>", "ahood token revoke <id> --yes"],
   },
