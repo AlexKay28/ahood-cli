@@ -25,7 +25,12 @@ type SkillDetail = {
   updated_at: string;
   owner: string;
   is_starred: boolean | null;
-  skill_versions: { version: string; checksum_sha256: string } | null;
+  skill_versions: {
+    version: string;
+    checksum_sha256: string;
+    yanked_at?: string | null;
+    yanked_reason?: string | null;
+  } | null;
 };
 
 // Spawned with argv as an array (not a shell string), so a crafted owner/skill
@@ -69,6 +74,15 @@ export async function view(args: string[]): Promise<void> {
 
   const field = (label: string, value: string) => console.log(`  ${label.padEnd(13)}${value}`);
   console.log(`${detail.owner}/${detail.slug}`);
+  // Mirrors the wording/tone of `ahood add`'s yanked warning (src/commands/add.ts)
+  // and the website's skill detail page banner -- this is the one CLI surface
+  // whose entire job is "let me check this out before deciding to install it",
+  // so it must not be the one place that stays silent about a yanked version.
+  if (detail.skill_versions?.yanked_at) {
+    console.warn(
+      `WARNING: ${detail.owner}/${detail.slug}@${detail.skill_versions.version} has been yanked${detail.skill_versions.yanked_reason ? `: ${detail.skill_versions.yanked_reason}` : "."}`,
+    );
+  }
   field("name:", detail.name);
   if (detail.tagline) field("tagline:", detail.tagline);
   field("tags:", detail.tags.length > 0 ? detail.tags.join(", ") : "-");
