@@ -170,6 +170,90 @@ describe("unpublish", () => {
 
       expect(calls).toHaveLength(0);
     });
+
+    it("does not perform any resolution lookup for an explicit @version -- only the DELETE is called", async () => {
+      const calls = stubApi(200);
+
+      await unpublish([SPEC, "--yes"]);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].init.method).toBe("DELETE");
+    });
+  });
+
+  // ahood-cli#62: "ahood unpublish owner/skill@latest --yes" (and the
+  // equivalent bare "owner/skill@latest") used to send the literal string
+  // "latest" straight through to DELETE .../versions/{version}, which does
+  // an exact match against skill_versions.version -- there's no "latest" row
+  // there, so it always 404'd with a generic "Not found", even though
+  // "latest" is exactly what someone reaches for right after a bad publish.
+  describe("with an @latest suffix (ahood-cli#62)", () => {
+    const REAL_VERSION = "2.4.0";
+    const SPEC = `${OWNER}/${SKILL}@latest`;
+
+    // Mirrors add.ts's fetchVersionMeta resolution path: GET
+    // /api/v1/skills/{owner}/{skill} returns a `skill_versions` field joined
+    // against the skill's latest_version_id, giving the real version string.
+    function stubApiWithLatestResolution(versionResponses: {
+      metaStatus?: number;
+      metaBody?: unknown;
+      deleteStatus?: number;
+      deleteBody?: unknown;
+    }) {
+      const { metaStatus = 200, metaBody = { skill_versions: { version: REAL_VERSION } }, deleteStatus = 200, deleteBody = { yanked_at: "2026-08-31T00:00:00.000Z" } } =
+        versionResponses;
+      const calls: { url: string; init: RequestInit }[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+          const url = String(input);
+          calls.push({ url, init });
+          if (!init.method || init.method === "GET") {
+            return new Response(JSON.stringify(metaBody), {
+              status: metaStatus,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return new Response(JSON.stringify(deleteBody), {
+            status: deleteStatus,
+            headers: { "Content-Type": "application/json" },
+          });
+        }),
+      );
+      return calls;
+    }
+
+    it("resolves @latest to the real latest version and sends the DELETE for that resolved version, not the literal 'latest'", async () => {
+      const calls = stubApiWithLatestResolution({});
+
+      await unpublish([SPEC, "--yes"]);
+
+      expect(calls).toHaveLength(2);
+      // Resolution lookup: GET .../skills/{owner}/{skill} (no "latest" literal
+      // anywhere in this URL).
+      expect(calls[0].url).toBe(`${API_URL}/api/v1/skills/${OWNER}/${SKILL}`);
+      expect(calls[0].init.method === "GET" || calls[0].init.method === undefined).toBe(true);
+      // Yank request: the resolved real version, never the literal "latest".
+      expect(calls[1].url).toBe(`${API_URL}/api/v1/skills/${OWNER}/${SKILL}/versions/${REAL_VERSION}`);
+      expect(calls[1].url).not.toContain("/versions/latest");
+      expect(calls[1].init.method).toBe("DELETE");
+    });
+
+    it("resolves @latest before prompting, so the confirmation shows the real version instead of the word 'latest'", async () => {
+      stubApiWithLatestResolution({});
+      const stdio = stubStdio("yes");
+
+      await unpublish([SPEC]);
+
+      expect(stdio.promptedWith()).toContain(`${OWNER}/${SKILL}@${REAL_VERSION}`);
+      expect(stdio.promptedWith()).not.toContain("@latest");
+    });
+
+    it("surfaces a clear error, not a confusing 'Not found', when the skill has no published versions at all", async () => {
+      stubApiWithLatestResolution({ metaBody: { skill_versions: null } });
+
+      await expect(unpublish([SPEC, "--yes"])).rejects.toThrow(/has no published version/);
+    });
   });
 
   it("still performs the whole-skill DELETE when the spec has no @version", async () => {

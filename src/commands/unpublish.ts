@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import { apiJson } from "../http.js";
 import { parseOwnerSkill, parseOwnerSkillVersion } from "../spec.js";
+import { fetchVersionMeta } from "./add.js";
 
 const USAGE = "Usage: ahood unpublish <owner>/<skill>[@version] [--yes]";
 
@@ -45,7 +46,26 @@ export async function unpublish(args: string[]): Promise<void> {
   if (!spec) throw new Error(USAGE);
 
   if (isVersioned(spec)) {
-    const { owner, skill, version } = parseOwnerSkillVersion(spec, USAGE);
+    const { owner, skill, version: parsedVersion } = parseOwnerSkillVersion(spec, USAGE);
+
+    // parseOwnerSkillVersion only validates *syntax* -- an omitted "@version"
+    // or an explicit "@latest" both parse to the literal string "latest".
+    // But the yank request below hits DELETE .../versions/{version}, which
+    // does an exact match against skill_versions.version (ahood-cli#62):
+    // there is no "latest" row there, only the download endpoint resolves
+    // that literal server-side. So "latest" has to be resolved to a real
+    // version string client-side, up front, or the DELETE just 404s with a
+    // generic "Not found" that gives no hint the problem is the word
+    // "latest". add.ts's fetchVersionMeta already solves exactly this (GET
+    // /api/v1/skills/{owner}/{skill}, whose response is joined against
+    // latest_version_id) for its own metadata lookup -- reused verbatim here
+    // rather than duplicating the resolution logic, and it already throws a
+    // clear "<owner>/<skill> has no published version" error for the
+    // no-versions-yet edge case instead of leaving that to a confusing 404.
+    // An explicit @1.2.3 skips this lookup entirely -- it's already a
+    // literal the DELETE endpoint understands, so no extra request is made.
+    const version =
+      parsedVersion === "latest" ? (await fetchVersionMeta(owner, skill, "latest")).version : parsedVersion;
     const key = `${owner}/${skill}@${version}`;
 
     // Yanking is less destructive than a whole-skill delete (existing
