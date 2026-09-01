@@ -8,12 +8,19 @@ const USAGE = "Usage: ahood versions <owner>/<skill> [--json]";
 // select() list backing the MCP list_skill_versions tool. The route filters
 // to status "published" and orders most-recent first server-side, so this
 // command doesn't re-sort or re-filter.
+//
+// yanked_at/yanked_reason (ahood-cli#58) are optional/nullable: an older API
+// response predating that select() addition simply omits them, which must
+// degrade to "not yanked" rather than a runtime crash -- same convention as
+// add.ts's VersionMeta.changelog_md.
 type SkillVersion = {
   version: string;
   changelog_md: string | null;
   package_size_bytes: number;
   status: string;
   created_at: string;
+  yanked_at?: string | null;
+  yanked_reason?: string | null;
 };
 
 type VersionsResponse = { versions: SkillVersion[] };
@@ -58,5 +65,11 @@ export async function versions(args: string[]): Promise<void> {
     field("published:", v.created_at);
     field("size:", formatSize(v.package_size_bytes));
     field("changelog:", v.changelog_md ? v.changelog_md : "-");
+    // Marked right after the version's other details, only when the API
+    // actually flags it (issue #58) -- non-yanked versions print exactly as
+    // before, no "status:" line at all.
+    if (v.yanked_at) {
+      field("status:", v.yanked_reason ? `YANKED -- ${v.yanked_reason}` : "YANKED");
+    }
   }
 }
