@@ -12,11 +12,18 @@ const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB compressed
 const MAX_EXTRACTED_BYTES = 200 * 1024 * 1024; // 200 MB decompressed
 const MAX_ENTRY_COUNT = 10_000;
 
-type VersionMeta = {
+// `changelog_md` is optional/nullable here (rather than a plain `string`)
+// because this type is shared with callers -- like `update --dry-run`'s
+// preview -- that only ever read it, never require it: an older API
+// response, or a version published before changelogs existed, may simply
+// omit it, and that must degrade to "no changelog available" rather than a
+// runtime crash.
+export type VersionMeta = {
   version: string;
   manifest: Array<{ path: string }>;
   checksum_sha256: string;
   yanked_at: string | null;
+  changelog_md?: string | null;
 };
 
 // GET /api/v1/skills/{owner}/{skill}/versions/{version} matches the version
@@ -31,7 +38,7 @@ type VersionMeta = {
 // version in this codebase), so the yanked-skill warning below only fires
 // for an explicit @version -- confirmed by reading both route.ts files
 // rather than assumed.
-async function fetchVersionMeta(owner: string, skill: string, version: string): Promise<VersionMeta> {
+export async function fetchVersionMeta(owner: string, skill: string, version: string): Promise<VersionMeta> {
   if (version === "latest") {
     const { skill_versions } = await apiJson<{ skill_versions: Omit<VersionMeta, "yanked_at"> | null }>(
       `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`,

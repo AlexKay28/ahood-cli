@@ -62,9 +62,14 @@ export const COMMANDS_HELP: CommandHelp[] = [
     examples: ["ahood add alice/pdf-tools", "ahood add alice/pdf-tools@1.2.0"],
   },
   {
-    usage: "ahood update [<owner>/<skill> ...]",
+    usage: "ahood update [<owner>/<skill> ...] [--dry-run] [--json]",
     summary: "Move the lockfile pin(s) forward to the latest version, for one skill or all installed skills at once.",
     desc: "Move the lockfile pin(s) forward to the latest version. With no argument, updates every installed skill; one failure doesn't stop the rest.",
+    flags: [
+      "--dry-run   Preview current vs. latest version (and the changelog for anything behind) without installing anything.",
+      "--json      With --dry-run, emit structured preview objects instead of a formatted table.",
+    ],
+    examples: ["ahood update --dry-run", "ahood update alice/pdf-tools --dry-run --json"],
   },
   {
     usage: "ahood remove <owner>/<skill>",
