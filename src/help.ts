@@ -73,6 +73,16 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     ],
   },
   {
+    usage: "ahood skill read <owner>/<skill> [--json]",
+    summary: "Print a skill's full SKILL.md content, without installing it.",
+    desc:
+      "Print a skill's full SKILL.md content (the prompt itself) without installing it via `ahood skill add`. " +
+      "Plain mode prints the raw content verbatim to stdout -- no formatting, no labels -- so it's safe to pipe " +
+      "into a file or another tool.",
+    flags: ["--json    Emit {version, content} as a single line instead of the raw content."],
+    examples: ["ahood skill read alice/pdf-tools", "ahood skill read alice/pdf-tools --json"],
+  },
+  {
     usage: "ahood skill versions <owner>/<skill> [--json]",
     summary: "List a skill's published-version history -- version, changelog, size, and publish date.",
     desc: "List a skill's published-version history: version, changelog, size, and publish date. Most-recent first.",

@@ -103,6 +103,15 @@ alice/pdf-tools
   version:     1.4.0
   ...
 
+$ ahood skill read alice/pdf-tools
+---
+name: pdf-tools
+description: Merge, split, and compress PDFs from the command line
+---
+
+# PDF Tools
+...
+
 $ ahood skill add alice/pdf-tools@1.4.0
 Installed alice/pdf-tools@1.4.0 to .claude/skills/alice/pdf-tools
 ```
@@ -196,6 +205,7 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | --- | --- |
 | `ahood skill search <query> [--json] [--limit <n>]` | Search published skills. |
 | `ahood skill view\|show <owner>/<skill> [--json] [--web]` | Show a single skill's details -- tags, license, homepage, repository, dates, and more -- without installing it (alias: ahood skill show). |
+| `ahood skill read <owner>/<skill> [--json]` | Print a skill's full SKILL.md content, without installing it. |
 | `ahood skill versions <owner>/<skill> [--json]` | List a skill's published-version history -- version, changelog, size, and publish date. |
 | `ahood skill list [--json]` | List your own skills, public and private. |
 | `ahood skill add <owner>/<skill>[@version]` | Install a skill into .claude/skills/, pinned in the lockfile. |
