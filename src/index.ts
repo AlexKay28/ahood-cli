@@ -14,6 +14,7 @@ import { listMine } from "./commands/list-mine.js";
 import { star, unstar } from "./commands/star.js";
 import { view } from "./commands/view.js";
 import { completion } from "./commands/completion.js";
+import { init } from "./commands/init.js";
 import { formatHelp, formatCommandHelp, findCommandHelp } from "./help.js";
 import { ApiError } from "./http.js";
 import { exitCodeFor } from "./exit-code.js";
@@ -28,6 +29,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   update,
   remove,
   publish,
+  init,
   token,
   edit,
   unpublish,

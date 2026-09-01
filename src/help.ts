@@ -95,6 +95,14 @@ export const COMMANDS_HELP: CommandHelp[] = [
     desc: "Remove your star from a skill.",
   },
   {
+    usage: "ahood init [name]",
+    summary: "Scaffold a new skill folder with a minimal, valid SKILL.md.",
+    desc:
+      "Scaffold a new skill folder with a minimal, valid SKILL.md. Creates ./<name>/SKILL.md if a name is given, " +
+      "or ./SKILL.md in the current directory otherwise. Refuses to overwrite an existing SKILL.md at the target path.",
+    examples: ["ahood init pdf-tools", "ahood init"],
+  },
+  {
     usage: "ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>]",
     summary:
       "Publish a new version of a skill from a folder containing SKILL.md, creating the skill first if it doesn't already exist.",
