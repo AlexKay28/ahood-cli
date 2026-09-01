@@ -42,7 +42,7 @@ For CI or any non-interactive environment, set `AHOOD_TOKEN` instead of running 
 | `ahood view <owner>/<skill> [--json] [--web]` (alias: `show`) | Show a single skill's details -- tags, license, homepage, repository, dates, etc. -- without installing it, or open its page in a browser. |
 | `ahood list-mine [--json]` | List your own skills, public and private, with their visibility and download/star counts. |
 | `ahood add <owner>/<skill>[@version]` | Install into `.claude/skills/<owner>/<skill>/`, pinned in `.claude/skills.lock.json`. |
-| `ahood update [<owner>/<skill> ...]` | Move the lockfile pin(s) forward to the latest version. One skill failing to update doesn't stop the rest. |
+| `ahood update [<owner>/<skill> ...] [--dry-run] [--json]` | Move the lockfile pin(s) forward to the latest version. One skill failing to update doesn't stop the rest. `--dry-run` previews current vs. latest version (plus the changelog for anything behind) without installing anything; add `--json` for structured output. |
 | `ahood remove <owner>/<skill>` | Uninstall and unpin (local only -- does not affect the published skill). |
 | `ahood edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a skill you own. Only the flags you pass are changed; requires the `publish` scope. |
 | `ahood unpublish <owner>/<skill> [--yes]` | Deletes the skill from the registry for every consumer, not just your local install -- prompts for a typed "yes" confirmation, or pass `--yes` for scripts/CI. |
