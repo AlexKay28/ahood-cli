@@ -44,7 +44,7 @@ const MAX_ERROR_MESSAGE_LENGTH = 500;
 // -- a regression on any endpoint would otherwise dump multi-KB infra details
 // straight to a user's terminal. Anything HTML-shaped or implausibly long for
 // a normal error string is replaced with a short, safe summary instead.
-function sanitizeErrorMessage(message: string): string {
+export function sanitizeErrorMessage(message: string): string {
   const looksLikeHtml = /<!DOCTYPE|<html[\s>]/i.test(message);
   if (!looksLikeHtml && message.length <= MAX_ERROR_MESSAGE_LENGTH) return message;
   // No preview of the raw content: an HTML-shaped body's first bytes are
