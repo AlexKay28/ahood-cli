@@ -18,7 +18,7 @@ export async function search(args: string[]): Promise<void> {
   }
 
   const qs = new URLSearchParams({ q: query });
-  if (limit !== undefined) qs.set("limit", limit);
+  if (limit !== undefined) qs.set("per_page", limit);
   const { skills } = await apiJson<SearchResult>(`/api/v1/skills?${qs}`);
 
   if (jsonOutput) {
