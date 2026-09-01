@@ -61,6 +61,35 @@ describe("ahood skill dispatch (built CLI)", () => {
   });
 });
 
+describe("ahood group dispatch (built CLI)", () => {
+  it("`ahood group` with no args prints the group help and exits 0", () => {
+    const { stdout, status } = runCli(["group"]);
+    expect(status).toBe(0);
+    expect(stdout).toContain("ahood group -- create private groups");
+    expect(stdout).toContain("ahood group create");
+  });
+
+  it("`ahood group badverb` prints 'Unknown group command', a did-you-mean, and exits 2", () => {
+    const { stderr, status } = runCli(["group", "badverb"]);
+    expect(status).toBe(2);
+    expect(stderr).toContain("Unknown group command: badverb");
+    expect(stderr).toContain("Run `ahood group --help` for a list of commands.");
+  });
+
+  it("`ahood group create --help` prints that command's specific help, not the group help", () => {
+    const { stdout, status } = runCli(["group", "create", "--help"]);
+    expect(status).toBe(0);
+    expect(stdout).toContain("ahood group create <name>");
+    expect(stdout).not.toContain("ahood group -- create private groups");
+  });
+
+  it("`ahood group` is registered alongside `ahood skill` at the top level", () => {
+    const { stdout, status } = runCli(["--help"]);
+    expect(status).toBe(0);
+    expect(stdout).toContain("ahood group <command>");
+  });
+});
+
 describe("invocation via a symlink (how npm's installed `ahood` bin actually works)", () => {
   // Regression test for a real incident: npm's installed bin is a symlink
   // to dist/index.js (`npm install -g` / npx both create one), not a copy.
@@ -102,5 +131,17 @@ describe("dispatchSkill (in-process)", () => {
     await dispatchSkill(["add", "alice/pdf-tools", "--json"]);
 
     expect(add).toHaveBeenCalledWith(["alice/pdf-tools", "--json"]);
+  });
+});
+
+describe("dispatchGroup (in-process)", () => {
+  it("`ahood group list ...` invokes the underlying handler with the sliced args", async () => {
+    const { dispatchGroup, GROUP_VERBS } = await import("../src/index.js");
+    const spy = vi.spyOn(GROUP_VERBS, "list").mockImplementation(async () => {});
+
+    await dispatchGroup(["list", "--json"]);
+
+    expect(spy).toHaveBeenCalledWith(["--json"]);
+    spy.mockRestore();
   });
 });

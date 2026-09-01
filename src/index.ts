@@ -13,11 +13,22 @@ import { edit } from "./commands/edit.js";
 import { unpublish } from "./commands/unpublish.js";
 import { listSkills } from "./commands/list.js";
 import { star, unstar } from "./commands/star.js";
+import { share, unshare } from "./commands/share.js";
 import { view } from "./commands/view.js";
 import { versions } from "./commands/versions.js";
 import { completion } from "./commands/completion.js";
 import { init } from "./commands/init.js";
-import { formatHelp, formatSkillHelp, formatCommandHelp, findCommandHelp } from "./help.js";
+import {
+  createGroup,
+  listGroups,
+  groupMembers,
+  inviteLink,
+  joinGroup,
+  removeMember,
+  leaveGroup,
+  deleteGroup,
+} from "./commands/group.js";
+import { formatHelp, formatSkillHelp, formatGroupHelp, formatCommandHelp, findCommandHelp } from "./help.js";
 import { ApiError } from "./http.js";
 import { exitCodeFor } from "./exit-code.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
@@ -37,14 +48,31 @@ const SKILL_COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   unpublish,
   star,
   unstar,
+  share,
+  unshare,
   init,
   publish,
 };
 
+// Every group-entity verb, reached only as `ahood group <verb>` -- see
+// dispatchGroup() below. Named GROUP_VERBS (not GROUP_COMMANDS) specifically
+// to avoid colliding with the pre-existing GROUP_COMMANDS Set below, which
+// means something unrelated ("entities that own their own sub-dispatch").
+const GROUP_VERBS: Record<string, (args: string[]) => Promise<void>> = {
+  create: createGroup,
+  list: listGroups,
+  members: groupMembers,
+  "invite-link": inviteLink,
+  join: joinGroup,
+  "remove-member": removeMember,
+  leave: leaveGroup,
+  delete: deleteGroup,
+};
+
 // Top level is now just account/auth-scoped commands (not entity-specific --
 // same reasoning `gh auth login` isn't `gh account login`) plus the `skill`
-// entity group. Future entities (e.g. "personality", "protocols") get their
-// own entry here alongside "skill".
+// and `group` entity groups. Future entities (e.g. "personality",
+// "protocols") get their own entry here alongside these two.
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   login: () => login(),
   logout: () => logout(),
@@ -52,13 +80,17 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   token,
   completion,
   skill: dispatchSkill,
+  group: dispatchGroup,
 };
 
 // Commands whose handler owns its own --help handling (at both the group
-// level, e.g. `ahood skill --help`, and the per-verb level, e.g.
-// `ahood skill add --help`) instead of the generic top-level interception
-// in main().
-const GROUP_COMMANDS = new Set(["skill"]);
+// level, e.g. `ahood skill --help` / `ahood group --help`, and the per-verb
+// level, e.g. `ahood skill add --help` / `ahood group create --help`)
+// instead of the generic top-level interception in main(). Despite the
+// name, this Set has nothing to do with the "Groups" feature -- "group"
+// here just means "a command that owns its own sub-verb dispatch", the same
+// sense "skill" already used before "group" (the entity) existed.
+const GROUP_COMMANDS = new Set(["skill", "group"]);
 
 function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
@@ -93,6 +125,10 @@ function closestSkillCommand(input: string): string | undefined {
   return closestOf(input, Object.keys(SKILL_COMMANDS));
 }
 
+function closestGroupVerb(input: string): string | undefined {
+  return closestOf(input, Object.keys(GROUP_VERBS));
+}
+
 // `ahood skill <verb> [...]` -- owns its own help handling at both the
 // group level (`ahood skill` / `ahood skill --help`) and the per-verb level
 // (`ahood skill <verb> --help`), since neither should fall through to
@@ -123,6 +159,35 @@ async function dispatchSkill(args: string[]): Promise<void> {
   await handler(rest);
 }
 
+// `ahood group <verb> [...]` -- owns its own help handling at both the
+// group level (`ahood group` / `ahood group --help`) and the per-verb level
+// (`ahood group <verb> --help`), exactly mirroring dispatchSkill() above.
+async function dispatchGroup(args: string[]): Promise<void> {
+  const [sub, ...rest] = args;
+
+  if (!sub || sub === "--help" || sub === "-h") {
+    console.log(formatGroupHelp());
+    return;
+  }
+
+  const handler = GROUP_VERBS[sub];
+  if (!handler) {
+    console.error(`Unknown group command: ${sub}`);
+    const suggestion = closestGroupVerb(sub);
+    if (suggestion) console.error(`Did you mean '${suggestion}'?`);
+    console.error("Run `ahood group --help` for a list of commands.");
+    process.exit(2);
+  }
+
+  if (rest.includes("--help") || rest.includes("-h")) {
+    const entry = findCommandHelp("group", sub);
+    console.log(entry ? formatCommandHelp(entry) : formatGroupHelp());
+    return;
+  }
+
+  await handler(rest);
+}
+
 async function main() {
   const [command, ...args] = process.argv.slice(2);
 
@@ -137,6 +202,12 @@ async function main() {
       const verb = args[1];
       const entry = verb ? findCommandHelp("skill", verb) : undefined;
       console.log(entry ? formatCommandHelp(entry) : formatSkillHelp());
+      return;
+    }
+    if (sub === "group") {
+      const verb = args[1];
+      const entry = verb ? findCommandHelp("group", verb) : undefined;
+      console.log(entry ? formatCommandHelp(entry) : formatGroupHelp());
       return;
     }
     const entry = sub ? findCommandHelp(sub) : undefined;
@@ -205,4 +276,4 @@ if (isEntrypoint) {
 }
 
 // Exported for tests only -- the CLI itself only ever calls main() above.
-export { main, dispatchSkill, COMMANDS, SKILL_COMMANDS };
+export { main, dispatchSkill, dispatchGroup, COMMANDS, SKILL_COMMANDS, GROUP_VERBS };

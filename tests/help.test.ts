@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   formatHelp,
   formatSkillHelp,
+  formatGroupHelp,
   findCommandHelp,
   TOP_LEVEL_COMMANDS_HELP,
   SKILL_COMMANDS_HELP,
+  GROUP_COMMANDS_HELP,
   usageWithAliases,
 } from "../src/help.js";
 
@@ -87,6 +89,40 @@ describe("formatSkillHelp", () => {
   });
 });
 
+describe("formatGroupHelp", () => {
+  it("includes every group command's usage line", () => {
+    const help = formatGroupHelp();
+    for (const entry of GROUP_COMMANDS_HELP) {
+      expect(help).toContain(usageWithAliases(entry));
+    }
+  });
+
+  it("has a group header and a per-command --help footer", () => {
+    const help = formatGroupHelp();
+    expect(help).toContain("ahood group -- create private groups");
+    expect(help).toContain("ahood group <command> --help");
+  });
+
+  it("every group command's summary is a genuinely single sentence", () => {
+    for (const { usage, summary } of GROUP_COMMANDS_HELP) {
+      expect(summary, `${usage} summary should not embed a second sentence`).not.toContain(". ");
+      expect(summary, `${usage} summary should end with exactly one period`).toMatch(/[^.]\.$/);
+    }
+  });
+});
+
+describe("formatHelp with the group entity", () => {
+  it("points at `ahood group --help` for the full group command list, without listing group verbs individually", () => {
+    const help = formatHelp();
+    expect(help).toContain("ahood group <command>");
+    expect(help).toContain("ahood group --help");
+    const commandsSection = help.slice(help.indexOf("Commands:"));
+    for (const entry of GROUP_COMMANDS_HELP) {
+      expect(commandsSection).not.toContain(entry.usage);
+    }
+  });
+});
+
 describe("usageWithAliases", () => {
   it("folds an alias into the verb position for a skill-entity usage string", () => {
     const entry = SKILL_COMMANDS_HELP.find((c) => c.usage.startsWith("ahood skill view "));
@@ -130,5 +166,14 @@ describe("findCommandHelp", () => {
   it("does not find old flat skill-command names at the top level", () => {
     expect(findCommandHelp("search")).toBeUndefined();
     expect(findCommandHelp("add")).toBeUndefined();
+  });
+
+  it("finds a group verb via the two-token form", () => {
+    expect(findCommandHelp("group", "create")?.usage).toMatch(/^ahood group create /);
+    expect(findCommandHelp("group", "list")?.usage).toMatch(/^ahood group list/);
+  });
+
+  it("returns undefined for a group verb with no help entry", () => {
+    expect(findCommandHelp("group", "nonexistent")).toBeUndefined();
   });
 });

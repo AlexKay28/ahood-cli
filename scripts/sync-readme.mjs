@@ -31,7 +31,7 @@ execFileSync(existsSync(tscBin) ? tscBin : "npx", existsSync(tscBin) ? ["-p", "t
   stdio: "inherit",
 });
 
-const { TOP_LEVEL_COMMANDS_HELP, SKILL_COMMANDS_HELP, usageWithAliases } = await import(
+const { TOP_LEVEL_COMMANDS_HELP, SKILL_COMMANDS_HELP, GROUP_COMMANDS_HELP, usageWithAliases } = await import(
   path.join(rootDir, "dist", "help.js")
 );
 
@@ -49,8 +49,9 @@ function renderTable(entries) {
   return ["| Command | What it does |", "| --- | --- |", ...rows].join("\n");
 }
 
-// Two tables, gh-style: account-scoped commands (login/logout/whoami/token/
-// completion) stay flat; everything else is reached as `ahood skill <verb>`.
+// Three tables, gh-style: account-scoped commands (login/logout/whoami/
+// token/completion) stay flat; skill-entity commands are reached as
+// `ahood skill <verb>`; group-entity commands as `ahood group <verb>`.
 function renderTables() {
   return [
     "### Account",
@@ -60,6 +61,10 @@ function renderTables() {
     "### Skill",
     "",
     renderTable(SKILL_COMMANDS_HELP),
+    "",
+    "### Group",
+    "",
+    renderTable(GROUP_COMMANDS_HELP),
   ].join("\n");
 }
 

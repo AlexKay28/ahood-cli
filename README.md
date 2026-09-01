@@ -154,6 +154,25 @@ ahood skill publish alice/pdf-tools@1.5.1 --path ./pdf-tools --json
 ```
 </details>
 
+<details>
+<summary><strong>Create a private group and share a skill with it</strong></summary>
+
+```
+$ ahood group create "Design Team" --description "Shared skills for the design team"
+Created group Design Team (design-team).
+
+$ ahood group invite-link design-team
+https://ahood.vercel.app/groups/join?token=abc123...
+Expires: 2026-09-14T00:00:00.000Z
+This link (and its token) is shown only this once -- save it now, it cannot be retrieved again.
+
+$ ahood skill share alice/pdf-tools --group design-team
+Shared alice/pdf-tools with design-team.
+```
+
+Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private visibility, it just makes it visible to everyone in `design-team` too. On the other side, whoever received the link runs `ahood group join <the link>` to join.
+</details>
+
 ## Commands
 
 <!-- Generated from src/help.ts's COMMANDS_HELP by scripts/sync-readme.mjs --
@@ -186,11 +205,26 @@ ahood skill publish alice/pdf-tools@1.5.1 --path ./pdf-tools --json
 | `ahood skill unpublish <owner>/<skill>[@version] [--yes]` | Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed). |
 | `ahood skill star <owner>/<skill>` | Star a skill. |
 | `ahood skill unstar <owner>/<skill>` | Remove your star from a skill. |
+| `ahood skill share <owner>/<skill> --group <group>` | Share a skill you own with a group, without changing its public/private visibility. |
+| `ahood skill unshare <owner>/<skill> --group <group>` | Stop sharing a skill you own with a group. |
 | `ahood skill init [name]` | Scaffold a new skill folder with a minimal, valid SKILL.md. |
 | `ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]` | Publish a new version of a skill from a folder containing SKILL.md, creating the skill first if it doesn't already exist. |
+
+### Group
+
+| Command | What it does |
+| --- | --- |
+| `ahood group create <name> [--description <text>]` | Create a private group. You become its owner. |
+| `ahood group list [--json]` | List groups you own or belong to. |
+| `ahood group members <group> [--json]` | List a group's members and their role (owner-only visible to members). |
+| `ahood group invite-link <group> [--json]` | Create (or regenerate) a shareable invite link for a group you own. |
+| `ahood group join <invite-url-or-token>` | Join a group using an invite link or its raw token. |
+| `ahood group remove-member <group> <username>` | Remove a member from a group you own. |
+| `ahood group leave <group>` | Leave a group you belong to. |
+| `ahood group delete <group> [--yes]` | Permanently delete a group you own (prompts for confirmation unless --yes is passed). |
 <!-- COMMANDS_TABLE_END -->
 
-Run `ahood --help`, `ahood skill --help`, or `ahood <command> --help` (also `ahood help <command>` / `ahood help skill <verb>`) for the same reference — including per-command flags and examples — directly in your terminal. `ahood --version` prints the installed CLI version.
+Run `ahood --help`, `ahood skill --help`, `ahood group --help`, or `ahood <command> --help` (also `ahood help <command>` / `ahood help skill <verb>` / `ahood help group <verb>`) for the same reference — including per-command flags and examples — directly in your terminal. `ahood --version` prints the installed CLI version.
 
 ## Exit codes
 
