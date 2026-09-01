@@ -1,7 +1,25 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 
 const USAGE = "Usage: ahood init [name]";
+
+// Mirrors the server's slug convention referenced by ahood-cli#60 (and the
+// same shape as spec.ts's SEGMENT_RE, minus "." and "_" -- skill slugs are
+// strictly lowercase-alnum-and-hyphen). A name that already matches this is
+// left untouched; one that doesn't gets normalized rather than rejected,
+// since `init` is meant to be the friendly first-run command.
+const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+// Lowercases and collapses any run of non-alphanumeric characters (spaces,
+// punctuation, path separators that survived the containment check, etc.)
+// into a single hyphen, then trims leading/trailing hyphens. E.g.
+// "Bad Name!" -> "bad-name".
+function normalizeToSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 // publish.ts's only client-side check on SKILL.md is that the file exists
 // (see publish.ts's `existsSync(skillMdPath)`) -- actual frontmatter
@@ -44,8 +62,38 @@ function skillNameFor(dirPath: string): string {
 }
 
 export async function init(args: string[]): Promise<void> {
-  const name = args[0];
+  let name = args[0];
   if (name !== undefined && name.startsWith("-")) throw new Error(USAGE);
+
+  if (name) {
+    // Path containment first (ahood-cli#61), mirroring spec.ts's
+    // validateSegment containment discipline used by add/remove: a resolved
+    // path that escapes the current directory is a hard rejection, since
+    // normalizing something meant to escape the directory doesn't make
+    // sense -- this has to run on the raw name, before any slug
+    // normalization would mangle "/" and ".." into harmless hyphens.
+    const cwd = resolve(process.cwd());
+    const resolvedName = resolve(cwd, name);
+    if (resolvedName !== cwd && !resolvedName.startsWith(cwd + sep)) {
+      throw new Error(
+        `Invalid name "${name}" -- resolves to "${resolvedName}", which is outside the current directory (${cwd}). Refusing to create files outside the project directory.`,
+      );
+    }
+
+    // Then slug normalization (ahood-cli#60): a name that stays within cwd
+    // but isn't already a valid slug gets normalized with a note, rather
+    // than rejected outright.
+    if (!SLUG_RE.test(name)) {
+      const normalized = normalizeToSlug(name);
+      if (!normalized) {
+        throw new Error(
+          `Invalid name "${name}" -- could not derive a valid name from it (must contain at least one letter or digit).`,
+        );
+      }
+      console.log(`Note: normalized "${name}" to "${normalized}".`);
+      name = normalized;
+    }
+  }
 
   const targetDir = name ? resolve(name) : process.cwd();
   const skillMdPath = join(targetDir, "SKILL.md");

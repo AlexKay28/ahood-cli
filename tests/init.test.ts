@@ -118,6 +118,56 @@ describe("init", () => {
     expect(fields.description.length).toBeGreaterThan(0);
   });
 
+  it("rejects a name that escapes the current directory via '..' (ahood-cli#61)", async () => {
+    await expect(init(["../init-traversal-escaped"])).rejects.toThrow(/outside the current directory/);
+
+    expect(existsSync(join(dir, "..", "init-traversal-escaped", "SKILL.md"))).toBe(false);
+    expect(existsSync(join(dir, "SKILL.md"))).toBe(false);
+  });
+
+  it("rejects an absolute path name that escapes the current directory (ahood-cli#61)", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "ahood-init-outside-"));
+    try {
+      await expect(init([join(outside, "foo")])).rejects.toThrow(/outside the current directory/);
+
+      expect(existsSync(join(outside, "foo", "SKILL.md"))).toBe(false);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes a name with spaces/punctuation to a valid slug and notes it (ahood-cli#60)", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await init(["Bad Name!"]);
+
+    expect(logSpy).toHaveBeenCalledWith('Note: normalized "Bad Name!" to "bad-name".');
+    logSpy.mockRestore();
+
+    const skillMdPath = join(dir, "bad-name", "SKILL.md");
+    expect(existsSync(skillMdPath)).toBe(true);
+    expect(existsSync(join(dir, "Bad Name!"))).toBe(false);
+
+    const content = readFileSync(skillMdPath, "utf8");
+    expect(content).toMatch(/\nname: bad-name\n/);
+  });
+
+  it("leaves an already-valid slug name completely unaffected (ahood-cli#60)", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await init(["pdf-tools"]);
+
+    for (const call of logSpy.mock.calls) {
+      expect(String(call[0])).not.toMatch(/^Note: normalized/);
+    }
+    logSpy.mockRestore();
+
+    const skillMdPath = join(dir, "pdf-tools", "SKILL.md");
+    expect(existsSync(skillMdPath)).toBe(true);
+    const content = readFileSync(skillMdPath, "utf8");
+    expect(content).toMatch(/\nname: pdf-tools\n/);
+  });
+
   it("a freshly-scaffolded skill folder passes ahood publish's own SKILL.md check end-to-end", async () => {
     await init(["pdf-tools"]);
     const uploadCapture: { body?: Uint8Array } = {};
