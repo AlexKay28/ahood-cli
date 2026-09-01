@@ -5,6 +5,11 @@ import { apiJson } from "../http.js";
 // join -- printing owner/slug (not just the bare slug) is what makes this
 // output directly reusable by add/edit/star/remove/unpublish, which all
 // require the full "<owner>/<skill>" form.
+//
+// Always lists the caller's own skills (public and private) -- this is
+// "ahood skill list", the entity-scoped rename of the old flat "ahood
+// list-mine". No owner argument or other filtering; that's out of scope
+// for the rename.
 type OwnSkill = {
   slug: string;
   name: string;
@@ -15,7 +20,7 @@ type OwnSkill = {
   profiles: { username: string };
 };
 
-export async function listMine(args: string[] = []): Promise<void> {
+export async function listSkills(args: string[] = []): Promise<void> {
   const jsonOutput = args.includes("--json");
   const { skills } = await apiJson<{ skills: OwnSkill[] }>("/api/v1/skills?mine=true");
 

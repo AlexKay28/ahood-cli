@@ -31,7 +31,9 @@ execFileSync(existsSync(tscBin) ? tscBin : "npx", existsSync(tscBin) ? ["-p", "t
   stdio: "inherit",
 });
 
-const { COMMANDS_HELP, usageWithAliases } = await import(path.join(rootDir, "dist", "help.js"));
+const { TOP_LEVEL_COMMANDS_HELP, SKILL_COMMANDS_HELP, usageWithAliases } = await import(
+  path.join(rootDir, "dist", "help.js")
+);
 
 // Markdown table cells split on every unescaped `|`, even inside a code
 // span, so any `|` in a usage string (e.g. "view|show" aliases, or
@@ -40,11 +42,25 @@ function escapeForTableCell(text) {
   return text.replace(/\|/g, "\\|");
 }
 
-function renderTable() {
-  const rows = COMMANDS_HELP.map(
+function renderTable(entries) {
+  const rows = entries.map(
     (entry) => `| \`${escapeForTableCell(usageWithAliases(entry))}\` | ${escapeForTableCell(entry.summary)} |`,
   );
   return ["| Command | What it does |", "| --- | --- |", ...rows].join("\n");
+}
+
+// Two tables, gh-style: account-scoped commands (login/logout/whoami/token/
+// completion) stay flat; everything else is reached as `ahood skill <verb>`.
+function renderTables() {
+  return [
+    "### Account",
+    "",
+    renderTable(TOP_LEVEL_COMMANDS_HELP),
+    "",
+    "### Skill",
+    "",
+    renderTable(SKILL_COMMANDS_HELP),
+  ].join("\n");
 }
 
 function withTableReplaced(readme, table) {
@@ -59,7 +75,7 @@ function withTableReplaced(readme, table) {
 }
 
 const readme = readFileSync(readmePath, "utf8");
-const updated = withTableReplaced(readme, renderTable());
+const updated = withTableReplaced(readme, renderTables());
 const checkMode = process.argv.includes("--check");
 
 if (checkMode) {
