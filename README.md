@@ -214,7 +214,7 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 
 | Command | What it does |
 | --- | --- |
-| `ahood group create <name> [--description <text>]` | Create a private group. You become its owner. |
+| `ahood group create <name> [--description <text>]` | Create a private group, becoming its owner. |
 | `ahood group list [--json]` | List groups you own or belong to. |
 | `ahood group members <group> [--json]` | List a group's members and their role (owner-only visible to members). |
 | `ahood group invite-link <group> [--json]` | Create (or regenerate) a shareable invite link for a group you own. |
