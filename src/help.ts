@@ -144,10 +144,11 @@ export const COMMANDS_HELP: CommandHelp[] = [
     ],
   },
   {
-    usage: "ahood token create <name>|list [--json]|revoke <id>",
+    usage: "ahood token create <name>|list [--json]|revoke <id> [--yes]",
     summary: "Manage personal API tokens.",
     desc: "Manage personal API tokens. `create` requires an existing browser-backed session.",
-    examples: ["ahood token create ci-runner", "ahood token list --json", "ahood token revoke <id>"],
+    flags: ["--yes    (revoke only) Skip the confirmation prompt and revoke immediately."],
+    examples: ["ahood token create ci-runner", "ahood token list --json", "ahood token revoke <id>", "ahood token revoke <id> --yes"],
   },
   {
     usage: "ahood completion <bash|zsh|fish>",
