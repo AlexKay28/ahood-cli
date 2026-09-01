@@ -5,6 +5,13 @@ import { fetchVersionMeta } from "./add.js";
 
 const USAGE = "Usage: ahood unpublish <owner>/<skill>[@version] [--yes]";
 
+// yankVersion's response is `ok: true` plus an optional latest_version_warning
+// when the post-yank latest_version_id recompute failed -- see the comment at
+// its call site below.
+type YankResponse = {
+  latest_version_warning?: string;
+};
+
 // A bare "owner/skill" has no "@" at all, so lastIndexOf("@") is -1 and this
 // is a whole-skill unpublish (preserves the exact pre-existing behavior).
 // "owner/skill@1.2.3" has an "@" at index > 0 and is a single-version yank
@@ -65,11 +72,21 @@ export async function unpublish(args: string[]): Promise<void> {
     // just scoped one level down to skill_versions.yanked_at/yanked_reason
     // instead of skills.deleted_at. Mirroring that existing verb/path
     // convention rather than inventing a new one.
-    await apiJson(
+    const result = await apiJson<YankResponse>(
       `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/${encodeURIComponent(version)}`,
       { method: "DELETE" },
     );
     console.log(`Yanked ${key}. Existing lockfile pins still resolve; new installs will be warned off it.`);
+    // yankVersion (lib/skills/mutations.ts) still returns ok:true here even
+    // when the yank itself succeeded but the latest_version_id recompute
+    // that follows it failed -- it attaches this field instead of failing
+    // the whole request, since the yank already took effect. Discarding the
+    // response body would silently drop that signal (ahood-cli#68): the
+    // pointer could now be stale with nothing in the terminal to say so, and
+    // a later `ahood add owner/skill` trusts latest_version_id completely.
+    if (result.latest_version_warning) {
+      console.warn(`WARNING: ${result.latest_version_warning}`);
+    }
     return;
   }
 

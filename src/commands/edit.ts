@@ -10,6 +10,12 @@ type UpdateResponse = {
   tags: string[];
   homepage?: string | null;
   repository?: string | null;
+  // updateSkill (lib/skills/mutations.ts) still returns ok:true when the
+  // update itself succeeded but a follow-up step involving tags failed --
+  // it attaches this field instead of failing the whole request. Discarding
+  // it would silently drop that signal, same class of bug as ahood-cli#68's
+  // latest_version_warning on yank.
+  tags_warning?: string;
 };
 
 const USAGE =
@@ -66,4 +72,7 @@ export async function edit(args: string[]): Promise<void> {
   );
 
   console.log(`Updated ${owner}/${updated.slug}: tagline=${JSON.stringify(updated.tagline)}, license=${JSON.stringify(updated.license)}, visibility=${updated.visibility}, tags=[${updated.tags.join(", ")}]`);
+  if (updated.tags_warning) {
+    console.warn(`WARNING: ${updated.tags_warning}`);
+  }
 }
