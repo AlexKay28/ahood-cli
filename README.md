@@ -1,6 +1,39 @@
 # ahood
 
-CLI for [ahood](https://ahood.vercel.app), a registry for installing and publishing Claude Code skills.
+**The command-line client for [ahood](https://ahood.vercel.app) — a registry for installing and publishing [Claude Code](https://claude.com/claude-code) Skills.**
+
+[![npm version](https://img.shields.io/npm/v/@ahood/cli.svg?color=blue)](https://www.npmjs.com/package/@ahood/cli)
+[![npm downloads](https://img.shields.io/npm/dm/@ahood/cli.svg)](https://www.npmjs.com/package/@ahood/cli)
+[![CI](https://github.com/AlexKay28/ahood-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/AlexKay28/ahood-cli/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/npm/l/@ahood/cli.svg)](LICENSE)
+[![Node.js](https://img.shields.io/node/v/@ahood/cli.svg)](package.json)
+
+`ahood` is `npm` for Claude Code Skills: publish a skill folder to the registry with one command, install anyone else's with another, and pin exact versions in a lockfile so a team (or a fleet of agents) all run the same thing. It's built to be driven by humans and AI agents equally — every command has a `--json` mode, exit codes are stable and documented, and the whole thing works headlessly with a single environment variable.
+
+```
+$ ahood search pdf
+alice/pdf-tools        Merge, split, and compress PDFs from the command line
+bob/pdf-form-filler     Fill PDF form fields from a JSON or CSV data source
+
+$ ahood add alice/pdf-tools
+Installed alice/pdf-tools@1.4.0 to .claude/skills/alice/pdf-tools
+```
+
+---
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Install](#install)
+- [Why ahood](#why-ahood)
+- [Configuration](#configuration)
+- [Usage examples](#usage-examples)
+- [Commands](#commands)
+- [Exit codes](#exit-codes)
+- [Shell completion](#shell-completion)
+- [Using ahood from an AI agent](#using-ahood-from-an-ai-agent)
+- [Development](#development)
+- [License](#license)
 
 ## Quick start
 
@@ -10,22 +43,116 @@ npx @ahood/cli@latest search <something>
 npx @ahood/cli@latest add <owner>/<skill>
 ```
 
+That's it — `login` opens a device-code flow in your browser and stores a token locally; every command after that just works.
+
 ## Install
+
+Run it on demand with `npx`, no install step required:
 
 ```
 npx @ahood/cli@latest <command>
 ```
 
-or install it globally, so the plain `ahood` command works without `npx`:
+Or install it globally so the plain `ahood` command works everywhere:
 
 ```
 npm i -g @ahood/cli
 ahood <command>
 ```
 
-For CI or any non-interactive environment, set `AHOOD_TOKEN` instead of running `login` -- every command checks it first.
+Requires Node.js 18 or later.
 
-`AHOOD_API_URL` overrides the registry endpoint (defaults to `https://ahood.vercel.app`). It must be `https://`, except for `localhost`/`127.0.0.1` or an `.test`/`.invalid`/`.example`/`.localhost` host, which may use plain `http://` for local development.
+## Why ahood
+
+- **One command to publish, one to install.** `ahood publish owner/skill@1.0.0 --path ./my-skill` uploads a folder containing a `SKILL.md`; `ahood add owner/skill` installs it into `.claude/skills/`. No registry account setup beyond `ahood login`.
+- **Real versioning, not just a snapshot.** Every publish is a semver version with its own changelog (`ahood versions`), and installs are pinned by checksum in a lockfile (`.claude/skills.lock.json`) so `ahood update` only ever moves forward on purpose.
+- **Mistakes are recoverable.** Published the wrong version? `ahood unpublish owner/skill@1.2.3` yanks just that one — existing installs keep working, new ones are warned off it — without deleting the skill's whole history.
+- **Public or private, your call.** `ahood edit owner/skill --visibility private` scopes a skill to just you; `ahood list-mine` shows both.
+- **Scriptable by design.** Every read command and most write commands support `--json`; `ahood publish --json` emits a single structured result object instead of progress text, and exit codes (below) are stable enough to branch on in a script.
+- **Headless-first.** Set `AHOOD_TOKEN` and skip `login` entirely — every command checks it first, which is what CI pipelines and AI agents both actually want.
+
+## Configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `AHOOD_TOKEN` | A personal API token (create one with `ahood token create <name>` after logging in once). When set, every command uses it instead of the stored browser-login credentials — the standard way to authenticate in CI or any non-interactive environment. |
+| `AHOOD_API_URL` | Overrides the registry endpoint (default: `https://ahood.vercel.app`). Must be `https://`, except for `localhost`/`127.0.0.1` or a `.test`/`.invalid`/`.example`/`.localhost` host, which may use plain `http://` for local development. |
+| `XDG_CONFIG_HOME` | If set, browser-login credentials are stored under `$XDG_CONFIG_HOME/ahood/credentials.json` instead of the default `~/.config/ahood/credentials.json`. |
+
+Two files `ahood` reads and writes in your project, neither of which needs to be gitignored (the lockfile is meant to be committed, same as `package-lock.json`):
+
+| Path | What's in it |
+| --- | --- |
+| `.claude/skills/<owner>/<skill>/` | Installed skill files. |
+| `.claude/skills.lock.json` | Exact installed version + checksum per skill, written by `add`/`update`, read by every install to verify integrity. |
+
+## Usage examples
+
+<details>
+<summary><strong>Search, inspect, then install</strong></summary>
+
+```
+$ ahood search pdf --json | jq '.[0]'
+{"slug": "pdf-tools", "owner": "alice", "tagline": "Merge, split, and compress PDFs", ...}
+
+$ ahood view alice/pdf-tools
+alice/pdf-tools
+  name:        PDF Tools
+  tagline:     Merge, split, and compress PDFs from the command line
+  license:     MIT
+  version:     1.4.0
+  ...
+
+$ ahood add alice/pdf-tools@1.4.0
+Installed alice/pdf-tools@1.4.0 to .claude/skills/alice/pdf-tools
+```
+</details>
+
+<details>
+<summary><strong>Scaffold and publish a new skill</strong></summary>
+
+```
+$ ahood init my-skill
+Created ./my-skill/SKILL.md
+
+$ ahood publish alice/my-skill@1.0.0 --path my-skill --name "My Skill" --tagline "Does a thing"
+Created alice/my-skill -- publishing its first version now.
+Uploaded alice/my-skill@1.0.0 -- processing...
+Published alice/my-skill@1.0.0 (published)
+```
+</details>
+
+<details>
+<summary><strong>Preview and apply updates safely</strong></summary>
+
+```
+$ ahood update --dry-run
+SKILL                 CURRENT  LATEST  STATUS
+alice/pdf-tools        1.4.0    1.5.0   update available
+bob/pdf-form-filler     2.0.0    2.0.0   up to date
+
+$ ahood update
+Updated alice/pdf-tools to 1.5.0.
+```
+</details>
+
+<details>
+<summary><strong>Yank a bad publish without deleting everything</strong></summary>
+
+```
+$ ahood unpublish alice/pdf-tools@1.5.0 --yes
+Yanked alice/pdf-tools@1.5.0. Existing lockfile pins still resolve; new installs will be warned off it.
+```
+</details>
+
+<details>
+<summary><strong>CI / non-interactive use</strong></summary>
+
+```
+export AHOOD_TOKEN=ahd_your_token_here
+ahood publish alice/pdf-tools@1.5.1 --path ./pdf-tools --json
+```
+</details>
 
 ## Commands
 
@@ -56,9 +183,11 @@ For CI or any non-interactive environment, set `AHOOD_TOKEN` instead of running 
 | `ahood completion <bash\|zsh\|fish>` | Print a shell completion script for the command names. |
 <!-- COMMANDS_TABLE_END -->
 
-Run `ahood help`, `ahood help <command>`, or `ahood <command> --help` for the same reference directly in your terminal. `ahood --version` prints the installed CLI version.
+Run `ahood help`, `ahood help <command>`, or `ahood <command> --help` for the same reference — including per-command flags and examples — directly in your terminal. `ahood --version` prints the installed CLI version.
 
-### Exit codes
+## Exit codes
+
+Stable across releases, safe to branch on in a script:
 
 | Code | Meaning |
 | --- | --- |
@@ -69,4 +198,42 @@ Run `ahood help`, `ahood help <command>`, or `ahood <command> --help` for the sa
 | `5` | Not found |
 | `6` | Network/transport error, or an upstream server (5xx) error |
 
-Full reference, including personal API tokens, CI usage, the public REST API, and the MCP server: **https://ahood.vercel.app/docs**
+## Shell completion
+
+```
+# bash
+ahood completion bash >> ~/.bashrc
+
+# zsh
+ahood completion zsh >> ~/.zshrc
+
+# fish
+ahood completion fish > ~/.config/fish/completions/ahood.fish
+```
+
+## Using ahood from an AI agent
+
+`ahood` is built to be driven by an AI agent (Claude Code or otherwise) as comfortably as by a human at a terminal:
+
+- **No interactive login required.** Set `AHOOD_TOKEN` once (a personal API token from `ahood token create <name>`) and every command works non-interactively.
+- **Structured output everywhere.** `--json` is available on every read command and on `publish`/`update`, so an agent never has to scrape human-formatted text.
+- **Predictable failure.** A stable, documented [exit code](#exit-codes) per failure class, and error messages that never leak raw upstream infrastructure details — safe to surface directly to an agent's reasoning loop.
+- **A real "start here."** `ahood init <name>` scaffolds a valid `SKILL.md` an agent can extend, rather than requiring it to know the frontmatter format up front.
+
+## Development
+
+```
+git clone https://github.com/AlexKay28/ahood-cli.git
+cd ahood-cli
+npm install
+npm run build   # compile TypeScript -> dist/
+npm test        # run the vitest suite
+```
+
+If you add or change a command, update `src/help.ts`'s `COMMANDS_HELP` and then run `npm run sync-readme` to regenerate the table above — CI fails (`node scripts/sync-readme.mjs --check`) if it's out of sync.
+
+Full reference, including personal API tokens, the public REST API, and the MCP server: **https://ahood.vercel.app/docs**
+
+## License
+
+[MIT](LICENSE)
