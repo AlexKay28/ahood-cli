@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -56,6 +58,39 @@ describe("ahood skill dispatch (built CLI)", () => {
     expect(status).toBe(2);
     expect(stderr).toContain("Unknown command: search");
     expect(stderr).toContain("Did you mean 'ahood skill search'?");
+  });
+});
+
+describe("invocation via a symlink (how npm's installed `ahood` bin actually works)", () => {
+  // Regression test for a real incident: npm's installed bin is a symlink
+  // to dist/index.js (`npm install -g` / npx both create one), not a copy.
+  // Node resolves the symlink when computing import.meta.url but does NOT
+  // resolve it in process.argv[1] -- an entrypoint guard that compares
+  // those two raw strings (`import.meta.url === file://${process.argv[1]}`)
+  // silently NEVER matches for any real npm-installed invocation, so
+  // main() never ran: every command exited 0 with zero output. This test
+  // invokes the built CLI through a real symlink, exactly reproducing how
+  // npm links the `ahood` binary, so this class of bug can't ship silently
+  // again -- runCli() above (invoking dist/index.js directly) cannot catch
+  // it, since process.argv[1] equals import.meta.url's path exactly when
+  // there's no symlink in between.
+  it("prints real output when invoked through a symlink, not silently no-op", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "ahood-symlink-test-"));
+    const linkPath = path.join(dir, "ahood");
+    try {
+      symlinkSync(cliPath, linkPath);
+      // Invoking `node <symlink>` (rather than executing the symlink
+      // directly via its shebang) reproduces the identical argv[1]-vs-
+      // import.meta.url mismatch without depending on the sandbox allowing
+      // direct execution of a freshly created temp binary -- process.argv[1]
+      // is the unresolved symlink path either way, which is the only thing
+      // that matters for this regression.
+      const stdout = execFileSync(process.execPath, [linkPath, "--version"], { encoding: "utf8" });
+      expect(stdout.trim().length).toBeGreaterThan(0);
+      expect(stdout).toMatch(/^@ahood\/cli \d+\.\d+\.\d+/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { login } from "./commands/login.js";
 import { logout } from "./commands/logout.js";
 import { whoami } from "./commands/whoami.js";
@@ -190,8 +191,15 @@ async function main() {
 // Only auto-run when this module is the actual entrypoint (i.e. invoked as
 // `ahood ...` / `node dist/index.js ...`), not when it's imported by a test
 // -- process.argv[1] is dist/index.js in the former case, something else
-// (the test runner) in the latter.
-const isEntrypoint = process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`;
+// (the test runner) in the latter. Comparing realpaths (not raw argv[1])
+// is required here: npm's installed `ahood` binary is a symlink to
+// dist/index.js, so process.argv[1] is the symlink's path while
+// import.meta.url resolves through the symlink to the real file -- a raw
+// string comparison never matches for any real npm-installed invocation,
+// which silently skipped main() entirely (every command exited 0 with no
+// output, since nothing ever ran).
+const isEntrypoint =
+  process.argv[1] !== undefined && import.meta.url === `file://${realpathSync(process.argv[1])}`;
 if (isEntrypoint) {
   main();
 }
