@@ -13,6 +13,7 @@ import { unpublish } from "./commands/unpublish.js";
 import { listMine } from "./commands/list-mine.js";
 import { star, unstar } from "./commands/star.js";
 import { view } from "./commands/view.js";
+import { versions } from "./commands/versions.js";
 import { completion } from "./commands/completion.js";
 import { formatHelp, formatCommandHelp, findCommandHelp } from "./help.js";
 import { ApiError } from "./http.js";
@@ -36,6 +37,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   unstar,
   view,
   show: view, // alias -- "ahood show" is the name issue #30 proposed; same command as "view"
+  versions,
   completion,
 };
 

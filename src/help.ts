@@ -44,6 +44,12 @@ export const COMMANDS_HELP: CommandHelp[] = [
     ],
   },
   {
+    usage: "ahood versions <owner>/<skill> [--json]",
+    summary: "List a skill's published-version history -- version, changelog, size, and publish date.",
+    desc: "List a skill's published-version history: version, changelog, size, and publish date. Most-recent first.",
+    flags: ["--json    Emit the raw version objects instead of formatted text."],
+  },
+  {
     usage: "ahood list-mine [--json]",
     summary: "List your own skills, public and private.",
     desc: "List your own skills, public and private.",
