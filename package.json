@@ -28,7 +28,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepublishOnly": "npm run build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sync-readme": "node scripts/sync-readme.mjs"
   },
   "dependencies": {
     "tar-stream": "^3.2.1"
