@@ -1,4 +1,5 @@
 import { apiJson } from "../http.js";
+import { confirm } from "../confirm.js";
 
 type TokenRow = { id: string; name: string; token_prefix: string; scopes: string[]; revoked_at: string | null; created_at: string };
 
@@ -12,7 +13,7 @@ export async function token(args: string[]): Promise<void> {
     case "revoke":
       return tokenRevoke(rest);
     default:
-      throw new Error("Usage: ahood token create <name>|list [--json]|revoke <id>");
+      throw new Error("Usage: ahood token create <name>|list [--json]|revoke <id> [--yes]");
   }
 }
 
@@ -54,8 +55,40 @@ async function tokenList(args: string[]): Promise<void> {
 }
 
 async function tokenRevoke(args: string[]): Promise<void> {
-  const id = args[0];
-  if (!id) throw new Error("Usage: ahood token revoke <id>");
+  const yes = args.includes("--yes");
+  const id = args.find((a) => !a.startsWith("--"));
+  if (!id) throw new Error("Usage: ahood token revoke <id> [--yes]");
+
+  // --yes bypasses both the lookup and the prompt entirely, preserving the
+  // original one-shot behavior (a single DELETE call) for scripts/CI that
+  // already call `ahood token revoke <id> --yes` unattended.
+  if (!yes) {
+    const confirmed = await confirm(`${await revokePrompt(id)} Type "yes" to confirm: `);
+    if (!confirmed) {
+      console.log("Aborted.");
+      return;
+    }
+  }
+
   await apiJson(`/api/v1/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
   console.log(`Revoked ${id}`);
+}
+
+// Looks up the token's name/prefix via the same list endpoint tokenList
+// uses, so the confirmation prompt shows something a human recognizes
+// (e.g. `Revoke token "ci-runner" (ahd_ab...)?`) instead of a bare opaque
+// UUID copied from `ahood token list` output -- easy to mistype with
+// nothing to catch it. The lookup is best-effort: if it fails for any
+// reason (network hiccup, the id not being present in the list, ...) this
+// falls back to the bare id rather than blocking the revoke on a lookup
+// that isn't itself the destructive operation.
+async function revokePrompt(id: string): Promise<string> {
+  try {
+    const { tokens } = await apiJson<{ tokens: TokenRow[] }>("/api/v1/auth/tokens");
+    const match = tokens.find((t) => t.id === id);
+    if (match) return `Revoke token "${match.name}" (${match.token_prefix}...)?`;
+  } catch {
+    // Fall through to the bare-id form below.
+  }
+  return `Revoke token ${id}?`;
 }
