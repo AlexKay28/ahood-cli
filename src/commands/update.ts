@@ -111,9 +111,12 @@ export async function update(args: string[]): Promise<void> {
 
   const failures: string[] = [];
   for (const ownerSlashSkill of skillKeys) {
-    if (!lockfile[ownerSlashSkill] && targets.length === 0) {
-      // Only reachable when targets came from the lockfile itself, so this
-      // would mean the lockfile changed under us mid-loop -- skip, don't abort.
+    if (!lockfile[ownerSlashSkill]) {
+      // Reachable two ways: an explicitly-named skill that was never
+      // installed (`ahood add` is the right command for that -- `update`
+      // must not silently install and pin it), or -- when targets came from
+      // the lockfile itself -- the lockfile changing out from under us
+      // mid-loop. Either way: skip, don't abort.
       console.warn(`Skipping ${ownerSlashSkill}: not currently installed.`);
       continue;
     }
