@@ -60,6 +60,8 @@ npm i -g @ahood/cli
 ahood <command>
 ```
 
+**The `-g` flag matters.** `npm i @ahood/cli` (no `-g`) installs into the current directory's `node_modules/` instead, and `ahood` won't be on your `PATH` -- you'll get `ahood: command not found`. If that happens, either re-run with `-g`, or use `npx @ahood/cli@latest <command>` from that directory instead.
+
 Requires Node.js 18 or later.
 
 ## Why ahood
