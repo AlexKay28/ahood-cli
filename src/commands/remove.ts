@@ -1,7 +1,7 @@
-import { existsSync, readdirSync, rmSync, rmdirSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, rmdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { removeLockfileEntry } from "../lockfile.js";
-import { LOCKFILE_PATH, parseOwnerSkill, skillDir } from "../spec.js";
+import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath } from "../spec.js";
 
 const USAGE = "Usage: ahood remove <owner>/<skill>";
 
@@ -22,9 +22,19 @@ export async function remove(args: string[]): Promise<void> {
   const ownerDir = dirname(dir);
   if (existsSync(ownerDir) && readdirSync(ownerDir).length === 0) rmdirSync(ownerDir);
 
+  // An agent installs as a single flat file (.claude/agents/<owner>@<skill>.md),
+  // never a directory under .claude/skills/ -- skillDir's rmSync above never
+  // touches it. Without this, removing an installed agent silently left the
+  // file on disk (still loaded by Claude Code forever) while reporting
+  // success and clearing the lockfile entry, so a later `update` wouldn't
+  // catch it either (ahood-cli final review finding #2).
+  const agentFile = agentPath(owner, skill);
+  const agentExisted = existsSync(agentFile);
+  if (agentExisted) unlinkSync(agentFile);
+
   const hadLockfileEntry = removeLockfileEntry(LOCKFILE_PATH, key);
 
-  if (!dirExisted && !hadLockfileEntry) {
+  if (!dirExisted && !agentExisted && !hadLockfileEntry) {
     console.error(`${key} was not installed -- nothing to remove.`);
     process.exitCode = 1;
     return;

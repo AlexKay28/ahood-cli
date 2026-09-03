@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { remove } from "../src/commands/remove.js";
 import { writeLockfileEntry, readLockfile } from "../src/lockfile.js";
+import { agentPath } from "../src/spec.js";
 
 describe("remove", () => {
   let dir: string;
@@ -53,6 +54,29 @@ describe("remove", () => {
   it("reports failure instead of a false 'Removed' when nothing was installed", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     await remove(["nobody/nothing"]);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/was not installed/));
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+  });
+
+  it("removes an installed agent file and its lockfile entry", async () => {
+    mkdirSync(join(dir, ".claude", "agents"), { recursive: true });
+    const dest = join(dir, agentPath("alice", "reviewer"));
+    writeFileSync(dest, "# reviewer agent\n");
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/reviewer", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+    });
+
+    await remove(["alice/reviewer"]);
+
+    expect(existsSync(dest)).toBe(false);
+    expect(readLockfile(join(dir, ".claude", "skills.lock.json"))).toEqual({});
+  });
+
+  it("still reports 'not installed' for a nonexistent agent (doesn't false-positive on the new agent check)", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await remove(["nobody/no-such-agent"]);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/was not installed/));
     expect(process.exitCode).toBe(1);
     process.exitCode = 0;
