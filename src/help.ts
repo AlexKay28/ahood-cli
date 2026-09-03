@@ -99,7 +99,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     summary: "Install a skill into .claude/skills/, pinned in the lockfile.",
     desc:
       "Install a skill into .claude/skills/, pinned in the lockfile. An artifact published with --kind agent " +
-      "installs instead as a single file at .claude/agents/<owner>--<skill>.md (Claude Code's own subagent " +
+      "installs instead as a single file at .claude/agents/<owner>@<skill>.md (Claude Code's own subagent " +
       "loader scans .claude/agents/*.md as flat files), not a .claude/skills/ directory.",
     examples: ["ahood skill add alice/pdf-tools", "ahood skill add alice/pdf-tools@1.2.0"],
   },

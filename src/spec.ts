@@ -95,15 +95,18 @@ export function skillDir(owner: string, skill: string): string {
 // (non-recursive), unlike .claude/skills/<owner>/<skill>/ which nests by
 // owner -- a bare .claude/agents/<skill>.md would let two different owners'
 // same-named agent collide and silently overwrite each other. Joining the
-// owner into the filename with a DOUBLE hyphen keeps the layout flat (so
-// Claude Code still finds it) while staying collision-resistant: a single
-// hyphen would be ambiguous, since SEGMENT_RE-valid slugs can themselves
-// contain internal hyphens (owner="al-ice"/skill="bob" and
-// owner="al"/skill="ice-bob" would both join to "al-ice-bob"). "--" can
-// never appear inside a valid slug (an alphanumeric must follow every
-// hyphen), so it's an unambiguous separator.
+// owner into the filename with "@" keeps the layout flat (so Claude Code
+// still finds it) while staying collision-resistant: SEGMENT_RE's character
+// class is exactly [a-z0-9._-] (case-insensitive), which does not include
+// "@" -- so "@" can never appear inside a valid owner or skill segment, and
+// the joined filename always contains exactly one "@", at the boundary
+// between the two segments. That makes the join unambiguous for any pair of
+// SEGMENT_RE-valid values, including ones containing hyphens (e.g.
+// owner="al-ice"/skill="bob" joins to "al-ice@bob.md", which cannot also be
+// produced by any other valid owner/skill pair). "@" is a valid filename
+// character on Linux, macOS, and Windows.
 export const AGENTS_ROOT = join(".claude", "agents");
 
 export function agentPath(owner: string, skill: string): string {
-  return join(AGENTS_ROOT, `${owner}--${skill}.md`);
+  return join(AGENTS_ROOT, `${owner}@${skill}.md`);
 }

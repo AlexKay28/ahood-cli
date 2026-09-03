@@ -197,7 +197,19 @@ async function extractFreshVersion(buffer: Buffer, destDir: string): Promise<voi
 // AGENT.md's content from the downloaded tarball rather than writing every
 // entry to disk the way extractFreshVersion does for skills.
 async function extractSingleFileContent(buffer: Buffer, entryName: string): Promise<Buffer> {
-  const decompressed = gunzipSync(buffer);
+  let decompressed: Buffer;
+  try {
+    // Same decompression-bomb guard as extractTarGz above: a highly-
+    // compressed payload whose checksum matches (that check runs on the
+    // compressed bytes) must not be allowed to allocate unboundedly on
+    // decompression.
+    decompressed = gunzipSync(buffer, { maxOutputLength: MAX_EXTRACTED_BYTES });
+  } catch (error) {
+    throw new Error(
+      `Archive decompresses to more than ${MAX_EXTRACTED_BYTES / (1024 * 1024)} MB, or is not valid gzip -- refusing to extract.`,
+      { cause: error },
+    );
+  }
   const extract = tarStream.extract();
   let found: Buffer | null = null;
   await new Promise<void>((resolvePromise, reject) => {

@@ -243,7 +243,7 @@ describe("add", () => {
     expect(pullCount).toBeLessThan(60);
   });
 
-  it("installs an agent as a single file at .claude/agents/<owner>--<skill>.md, not a directory", async () => {
+  it("installs an agent as a single file at .claude/agents/<owner>@<skill>.md, not a directory", async () => {
     const archive = await tarGz({ "AGENT.md": "# reviewer agent\n" });
     stubApi(archive, sha256(archive), [{ path: "AGENT.md" }], VERSION, "agent");
 
@@ -268,6 +268,42 @@ describe("add", () => {
 
     expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# demo\n");
     expect(existsSync(join(dir, ".claude", "agents"))).toBe(false);
+  });
+
+  it("refuses to decompress an agent archive whose expanded size is over the cap (decompression-bomb guard)", async () => {
+    // Mirrors the extractTarGz decompression-bomb test above, but exercises
+    // the agent-install path (extractSingleFileContent) end-to-end through
+    // add(), so a missing maxOutputLength on that call's gunzipSync would
+    // allocate unboundedly instead of throwing cleanly.
+    const bomb = gzipSync(Buffer.alloc(210 * 1024 * 1024));
+    stubApi(bomb, sha256(bomb), [{ path: "AGENT.md" }], VERSION, "agent");
+
+    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/decompresses to more than/);
+    // Must fail before anything is written to disk.
+    expect(existsSync(join(dir, ".claude", "agents"))).toBe(false);
+    expect(existsSync(join(dir, ".claude", "skills.lock.json"))).toBe(false);
+  });
+
+  it("installs an agent through the explicit @version resolution path (GET .../versions/{version}), not just latest", async () => {
+    // Every other agent test in this file omits a version, which only
+    // exercises fetchVersionMeta's "latest" branch (GET .../skills/{owner}/
+    // {skill}). This one pins an explicit version so the OTHER branch (GET
+    // .../versions/{version}) is what actually resolves the agent install.
+    const archive = await tarGz({ "AGENT.md": "# reviewer agent\n" });
+    const calls = stubApi(archive, sha256(archive), [{ path: "AGENT.md" }], VERSION, "agent");
+
+    await add([`${OWNER}/${SKILL}@${VERSION}`]);
+
+    expect(calls).toContain(`${API_URL}/api/v1/skills/${OWNER}/${SKILL}/versions/${VERSION}`);
+    expect(calls).not.toContain(`${API_URL}/api/v1/skills/${OWNER}/${SKILL}`);
+
+    const dest = join(dir, agentPath(OWNER, SKILL));
+    expect(existsSync(dest)).toBe(true);
+    expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
+    expect(existsSync(join(dir, ".claude", "skills", OWNER, SKILL))).toBe(false);
+    expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
+      [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: sha256(archive) },
+    });
   });
 
 });

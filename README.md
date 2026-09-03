@@ -86,7 +86,7 @@ Paths `ahood` reads and writes in your project, none of which need to be gitigno
 | Path | What's in it |
 | --- | --- |
 | `.claude/skills/<owner>/<skill>/` | Installed skill files. |
-| `.claude/agents/<owner>--<skill>.md` | An installed agent, as a single file (double-hyphen owner/skill separator, since Claude Code's own subagent loader scans `.claude/agents/*.md` flat, non-recursively). |
+| `.claude/agents/<owner>@<skill>.md` | An installed agent, as a single file (`@` owner/skill separator, since Claude Code's own subagent loader scans `.claude/agents/*.md` flat, non-recursively). |
 | `.claude/skills.lock.json` | Exact installed version + checksum per skill or agent, written by `add`/`update`, read by every install to verify integrity. |
 
 ## Usage examples
