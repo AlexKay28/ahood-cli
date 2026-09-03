@@ -41,11 +41,18 @@ export type VersionMeta = {
 // rather than assumed.
 export async function fetchVersionMeta(owner: string, skill: string, version: string): Promise<VersionMeta> {
   if (version === "latest") {
-    const { skill_versions } = await apiJson<{ skill_versions: Omit<VersionMeta, "yanked_at"> | null }>(
-      `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`,
-    );
+    // `kind` comes back as a TOP-LEVEL sibling of `skill_versions` on this
+    // route (GET /api/v1/skills/{owner}/{skill}), not nested inside it --
+    // confirmed against the real route.ts response shape. Destructuring only
+    // `skill_versions` (as this used to do) silently drops `kind`, which
+    // makes an agent install fall through to the skill-directory path with
+    // no error anywhere (ahood-cli final review finding #1).
+    const { skill_versions, kind } = await apiJson<{
+      skill_versions: Omit<VersionMeta, "yanked_at" | "kind"> | null;
+      kind?: "skill" | "agent";
+    }>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`);
     if (!skill_versions) throw new Error(`${owner}/${skill} has no published version`);
-    return { ...skill_versions, yanked_at: null };
+    return { ...skill_versions, kind, yanked_at: null };
   }
   return apiJson<VersionMeta>(
     `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/${encodeURIComponent(version)}`,
@@ -214,7 +221,23 @@ async function extractSingleFileContent(buffer: Buffer, entryName: string): Prom
   let found: Buffer | null = null;
   await new Promise<void>((resolvePromise, reject) => {
     extract.on("entry", (header, stream, next) => {
-      if (header.name !== entryName) {
+      // Normalize a leading "./" the same way extractTarGz and the server's
+      // extract-and-checksum.ts normalizeEntryPath do -- a plain `tar czf`
+      // commonly prefixes entries with "./", which would otherwise pass
+      // server-side validation/publish but then fail to install here with
+      // "AGENT.md not found" (ahood-cli final review finding #3).
+      const normalizedName = header.name.replace(/^\.\//, "");
+      if (normalizedName !== entryName) {
+        stream.resume();
+        next();
+        return;
+      }
+      // Only take the FIRST matching entry, mirroring the server side's
+      // `files.find(...)` lookup -- otherwise a tar with two entries at the
+      // same normalized name would resolve to whichever one happens to come
+      // last here, diverging from what the server validated against
+      // (ahood-cli final review finding #4).
+      if (found !== null) {
         stream.resume();
         next();
         return;
@@ -260,8 +283,13 @@ export async function add(args: string[]): Promise<void> {
   }
   // scripts/ warning: mirrors the web detail page's banner (platform ADR's
   // Open Risk #7) -- a CLI-only user installing via `add` would otherwise
-  // never see this at all.
-  if (meta.manifest.some((f) => f.path.startsWith("scripts/"))) {
+  // never see this at all. Skipped for an agent install: only AGENT.md's
+  // content is ever extracted/written on that path (extractSingleFileContent
+  // never touches anything else in the archive), so a scripts/ entry in the
+  // manifest can never actually land on disk there -- the warning would be
+  // both mislabeled ("skill") and about a risk that can't materialize
+  // (ahood-cli final review finding #5).
+  if (meta.kind !== "agent" && meta.manifest.some((f) => f.path.startsWith("scripts/"))) {
     console.warn("WARNING: this skill includes a scripts/ directory. Review its contents before use.");
   }
 

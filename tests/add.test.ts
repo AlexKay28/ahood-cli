@@ -34,6 +34,23 @@ function sha256(buffer: Buffer): string {
   return createHash("sha256").update(buffer).digest("hex");
 }
 
+// Like tarGz, but takes an ordered list of [name, content] pairs instead of
+// a Record -- needed for the duplicate-entry-name test below, which a
+// Record's unique keys can't represent.
+function tarGzEntries(files: Array<[string, string]>): Promise<Buffer> {
+  const tar = pack();
+  for (const [name, content] of files) {
+    tar.entry({ name }, content);
+  }
+  tar.finalize();
+  const chunks: Buffer[] = [];
+  return new Promise((resolvePromise, reject) => {
+    tar.on("data", (chunk) => chunks.push(chunk as Buffer));
+    tar.on("end", () => resolvePromise(gzipSync(Buffer.concat(chunks))));
+    tar.on("error", reject);
+  });
+}
+
 /**
  * Serves exactly the two requests `add` makes: the skill-detail route it
  * resolves "latest" through, and the download redirect it pulls the archive
@@ -54,9 +71,13 @@ function stubApi(
       const url = String(input);
       calls.push(url);
       if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}`) {
+        // Real server shape: `kind` is a TOP-LEVEL sibling of `skill_versions`,
+        // not nested inside it (GET /api/v1/skills/{owner}/{skill} route.ts) --
+        // nesting it here would mask the exact bug this fixture exists to pin.
         return new Response(
           JSON.stringify({
-            skill_versions: { version, manifest, checksum_sha256: checksum, ...(kind ? { kind } : {}) },
+            skill_versions: { version, manifest, checksum_sha256: checksum },
+            ...(kind ? { kind } : {}),
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -284,6 +305,25 @@ describe("add", () => {
     expect(existsSync(join(dir, ".claude", "skills.lock.json"))).toBe(false);
   });
 
+  it("installs an agent through the 'latest' resolution path (GET .../skills/{owner}/{skill}), reading kind from the TOP level of the response, not nested inside skill_versions", async () => {
+    // Regression test for the finding: the real server returns `kind` as a
+    // sibling of `skill_versions`, not nested inside it. stubApi's
+    // skill-detail response now matches that real shape (kind top-level) --
+    // this pins the fix in fetchVersionMeta's "latest" branch.
+    const archive = await tarGz({ "AGENT.md": "# reviewer agent\n" });
+    const calls = stubApi(archive, sha256(archive), [{ path: "AGENT.md" }], VERSION, "agent");
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect(calls).toContain(`${API_URL}/api/v1/skills/${OWNER}/${SKILL}`);
+    expect(calls).not.toContain(`${API_URL}/api/v1/skills/${OWNER}/${SKILL}/versions/${VERSION}`);
+
+    const dest = join(dir, agentPath(OWNER, SKILL));
+    expect(existsSync(dest)).toBe(true);
+    expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
+    expect(existsSync(join(dir, ".claude", "skills", OWNER, SKILL))).toBe(false);
+  });
+
   it("installs an agent through the explicit @version resolution path (GET .../versions/{version}), not just latest", async () => {
     // Every other agent test in this file omits a version, which only
     // exercises fetchVersionMeta's "latest" branch (GET .../skills/{owner}/
@@ -304,6 +344,69 @@ describe("add", () => {
     expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
       [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: sha256(archive) },
     });
+  });
+
+  it("installs an agent whose AGENT.md tar entry is named './AGENT.md' (a plain `tar czf` commonly adds this prefix)", async () => {
+    // Same normalization extractTarGz and the server's normalizeEntryPath
+    // already apply -- without it, a "./AGENT.md" entry passes server-side
+    // publish/validation fine but fails to install here with "AGENT.md not
+    // found in the downloaded archive" (final review finding #3).
+    const archive = await tarGz({ "./AGENT.md": "# reviewer agent\n" });
+    stubApi(archive, sha256(archive), [{ path: "AGENT.md" }], VERSION, "agent");
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    const dest = join(dir, agentPath(OWNER, SKILL));
+    expect(existsSync(dest)).toBe(true);
+    expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
+  });
+
+  it("uses the FIRST matching entry when an archive has two entries at the same normalized name, matching the server's files.find(...) lookup", async () => {
+    const archive = await tarGzEntries([
+      ["AGENT.md", "# first\n"],
+      ["AGENT.md", "# second\n"],
+    ]);
+    stubApi(archive, sha256(archive), [{ path: "AGENT.md" }], VERSION, "agent");
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    const dest = join(dir, agentPath(OWNER, SKILL));
+    expect(readFileSync(dest, "utf-8")).toBe("# first\n");
+  });
+
+  it("does not print the scripts/ warning for an agent install, even if the manifest lists a scripts/ path", async () => {
+    // Only AGENT.md's content is ever written for an agent install -- a
+    // scripts/ entry in the manifest can't materialize on disk there, so the
+    // skill-worded warning is both wrong and pointless here (finding #5).
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const archive = await tarGz({ "AGENT.md": "# reviewer agent\n" });
+    stubApi(
+      archive,
+      sha256(archive),
+      [{ path: "AGENT.md" }, { path: "scripts/run.sh" }],
+      VERSION,
+      "agent",
+    );
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringMatching(/scripts\//));
+  });
+
+  it("still prints the scripts/ warning for a skill install with a scripts/ path (unchanged)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const archive = await tarGz({ "SKILL.md": "# demo\n", "scripts/run.sh": "echo hi\n" });
+    stubApi(
+      archive,
+      sha256(archive),
+      [{ path: "SKILL.md" }, { path: "scripts/run.sh" }],
+      VERSION,
+      "skill",
+    );
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/scripts\//));
   });
 
 });
