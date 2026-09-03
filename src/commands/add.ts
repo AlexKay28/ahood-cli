@@ -5,7 +5,7 @@ import * as tarStream from "tar-stream";
 import { gunzipSync } from "node:zlib";
 import { apiFetch, apiJson } from "../http.js";
 import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, AGENTS_ROOT, MCP_CONFIG_PATH } from "../spec.js";
-import { readLockfile, writeLockfileEntry } from "../lockfile.js";
+import { readLockfile, writeLockfileEntry, withLock, writeJsonFileAtomic } from "../lockfile.js";
 import { promptSecret } from "../secret-prompt.js";
 
 const USAGE = "Usage: ahood add <owner>/<skill>[@version]";
@@ -300,14 +300,92 @@ function buildMcpServerConfig(manifest: ServerManifest, env: Record<string, stri
   throw new Error(`${manifest.name}'s server.json has neither a single 'packages' entry nor a single 'remotes' entry.`);
 }
 
+// A conflicting .mcp.json entry is echoed back to the user in the collision
+// error below so they can identify what they'd be overwriting -- but that
+// entry can itself hold another install's plaintext secret (its `env`, or a
+// remote's `headers`). Printing it verbatim would leak that secret to
+// stderr, and worse than a rare edge case: update.ts calls add() for every
+// locked entry and prints caught error messages, so this would leak a
+// previously-installed server's API key on every `ahood skill update` run.
+// Returns a shallow copy with those two containers' VALUES replaced,
+// keeping every key (and everything else) visible so the user can still
+// tell what's conflicting.
+function redactSecretValues(entry: unknown): unknown {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return entry;
+  const copy: Record<string, unknown> = { ...(entry as Record<string, unknown>) };
+  for (const key of ["env", "headers"] as const) {
+    const value = copy[key];
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      const redacted: Record<string, string> = {};
+      for (const varName of Object.keys(value as Record<string, unknown>)) redacted[varName] = "<redacted>";
+      copy[key] = redacted;
+    }
+  }
+  return copy;
+}
+
+// Reads and validates .mcp.json's shape, defaulting to an empty config when
+// the file doesn't exist yet. Guards `mcpServers` itself (not just the
+// top-level object) against being missing, `null`, or an array: a bare
+// `fileContents.mcpServers === undefined` check alone would let
+// `"mcpServers": null` reach the collision check below as an unactionable
+// raw TypeError, and would let `"mcpServers": []` pass the collision check
+// silently (an array's numeric-index write is then dropped entirely by
+// JSON.stringify), reporting a successful install that wrote nothing.
+function readMcpConfig(): Record<string, unknown> {
+  if (!existsSync(MCP_CONFIG_PATH)) return { mcpServers: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8"));
+  } catch {
+    throw new Error(`${MCP_CONFIG_PATH} exists but is not valid JSON -- fix or remove it before running this command.`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${MCP_CONFIG_PATH} exists but its top level is not a JSON object.`);
+  }
+  const fileContents = parsed as Record<string, unknown>;
+  if (fileContents.mcpServers === undefined) {
+    fileContents.mcpServers = {};
+  } else if (
+    typeof fileContents.mcpServers !== "object" ||
+    fileContents.mcpServers === null ||
+    Array.isArray(fileContents.mcpServers)
+  ) {
+    throw new Error(
+      `${MCP_CONFIG_PATH}'s "mcpServers" key exists but is not a JSON object -- fix or remove it before running this command.`,
+    );
+  }
+  return fileContents;
+}
+
 // Keyed by ahood's own validated `skill` slug (SEGMENT_RE-checked in
 // spec.ts), not the manifest's self-reported `name` field: two different
 // published packages could easily share a generic internal name like
 // "weather-server", and a JSON object key built from unvalidated manifest
 // text is a footgun this sidesteps entirely by never using it as a key.
+function assertNoCollision(fileContents: Record<string, unknown>, owner: string, skill: string): void {
+  const mcpServers = fileContents.mcpServers as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(mcpServers, skill)) {
+    throw new Error(
+      `${MCP_CONFIG_PATH} already has an entry named "${skill}":\n${JSON.stringify(redactSecretValues(mcpServers[skill]), null, 2)}\n` +
+        `Remove it manually first if you want to reinstall ${owner}/${skill}.`,
+    );
+  }
+}
+
 async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, buffer: Buffer): Promise<void> {
   const content = await extractSingleFileContent(buffer, "server.json");
   const manifest = JSON.parse(content.toString("utf-8")) as ServerManifest;
+
+  // Validate the manifest's shape (unsupported registry_type/runtime_hint,
+  // or neither a single 'packages' nor a single 'remotes' entry) and check
+  // for an existing .mcp.json collision BEFORE prompting for any secret --
+  // an install that's going to be refused anyway must not first cost the
+  // user a masked secret prompt. buildMcpServerConfig is called here with an
+  // empty env purely to run its validation/throw; the result is discarded
+  // and rebuilt below once secretEnv is known.
+  buildMcpServerConfig(manifest, {});
+  assertNoCollision(readMcpConfig(), owner, skill);
 
   const envVars = manifest.packages?.[0]?.environment_variables ?? [];
   const secretEnv: Record<string, string> = {};
@@ -320,29 +398,21 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
 
   const serverConfig = buildMcpServerConfig(manifest, secretEnv);
 
-  let fileContents: Record<string, unknown> = { mcpServers: {} };
-  if (existsSync(MCP_CONFIG_PATH)) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8"));
-    } catch {
-      throw new Error(`${MCP_CONFIG_PATH} exists but is not valid JSON -- fix or remove it before running this command.`);
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error(`${MCP_CONFIG_PATH} exists but its top level is not a JSON object.`);
-    }
-    fileContents = parsed as Record<string, unknown>;
-    if (fileContents.mcpServers === undefined) fileContents.mcpServers = {};
-  }
-  const mcpServers = fileContents.mcpServers as Record<string, unknown>;
-  if (Object.prototype.hasOwnProperty.call(mcpServers, skill)) {
-    throw new Error(
-      `${MCP_CONFIG_PATH} already has an entry named "${skill}":\n${JSON.stringify(mcpServers[skill], null, 2)}\n` +
-        `Remove it manually first if you want to reinstall ${owner}/${skill}.`,
-    );
-  }
-  mcpServers[skill] = serverConfig;
-  writeFileSync(MCP_CONFIG_PATH, JSON.stringify(fileContents, null, 2));
+  // Read-modify-write under an advisory lock, mirroring lockfile.ts's own
+  // writeLockfileEntry: .mcp.json sits right next to the lockfile and can
+  // hold other servers' secrets, so it gets the same protection against a
+  // truncated write or a concurrent `add` racing the same read-modify-write.
+  // Re-reads and re-checks the collision here rather than trusting the
+  // pre-check above, since arbitrary time may have passed since then --
+  // including, in the interactive case, however long the user took at the
+  // secret prompt -- during which another process could have written the
+  // same entry.
+  withLock(MCP_CONFIG_PATH, () => {
+    const fileContents = readMcpConfig();
+    assertNoCollision(fileContents, owner, skill);
+    (fileContents.mcpServers as Record<string, unknown>)[skill] = serverConfig;
+    writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
+  });
 
   writeLockfileEntry(LOCKFILE_PATH, `${owner}/${skill}`, { version: meta.version, checksum_sha256: meta.checksum_sha256 });
   console.log(`Installed ${owner}/${skill}@${meta.version} into ${MCP_CONFIG_PATH} as "${skill}"`);

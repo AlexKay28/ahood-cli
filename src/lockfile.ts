@@ -20,21 +20,31 @@ export function readLockfile(path: string): Lockfile {
   }
 }
 
-function writeLockfile(path: string, lockfile: Lockfile): void {
+// Generalized so callers other than the lockfile itself (e.g. add.ts's
+// .mcp.json merge, which sits right next to the lockfile and can hold other
+// servers' secrets) get the same crash-safety guarantee instead of a bare
+// writeFileSync that risks truncating the file on interruption.
+export function writeJsonFileAtomic(path: string, data: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
   // Write-then-rename so a process interrupted mid-write never leaves a
-  // truncated lockfile on disk -- a reader always sees either the old or the
-  // new complete content, never a partial one.
+  // truncated file on disk -- a reader always sees either the old or the new
+  // complete content, never a partial one.
   const tmpPath = `${path}.tmp-${process.pid}-${process.hrtime.bigint()}`;
-  writeFileSync(tmpPath, JSON.stringify(lockfile, null, 2) + "\n");
+  writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n");
   renameSync(tmpPath, path);
+}
+
+function writeLockfile(path: string, lockfile: Lockfile): void {
+  writeJsonFileAtomic(path, lockfile);
 }
 
 // Simple advisory lock via mkdir's atomicity (EEXIST on a second caller),
 // so two concurrent `ahood add`/`remove` invocations against the same
 // project don't race a read-modify-write and silently drop one another's
-// entry.
-function withLock<T>(path: string, fn: () => T): T {
+// entry. Exported so other same-directory JSON files with the same
+// read-modify-write shape (e.g. add.ts's .mcp.json merge) can reuse it
+// instead of duplicating the pattern.
+export function withLock<T>(path: string, fn: () => T): T {
   mkdirSync(dirname(path), { recursive: true });
   const lockDir = `${path}.lock`;
   const deadline = Date.now() + 5000;

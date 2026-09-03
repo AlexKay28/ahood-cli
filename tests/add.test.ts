@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -121,6 +121,12 @@ describe("add", () => {
     process.env.HOME = dir;
     process.env.AHOOD_API_URL = API_URL;
     delete process.env.AHOOD_TOKEN;
+    // Cleared here (not just per-test) so a `.not.toHaveBeenCalled()`
+    // assertion in one test can't spuriously fail because an EARLIER test
+    // already called the same module-level mock -- vi.mock's factory
+    // creates promptSecret's vi.fn() once for the whole file, and nothing
+    // else resets its call history between tests.
+    vi.mocked(promptSecret).mockClear();
   });
 
   afterEach(() => {
@@ -508,6 +514,109 @@ describe("add", () => {
 
     const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
     expect(mcpConfig.mcpServers[SKILL]).toEqual({ url: "https://already-here.test" });
+  });
+
+  it("redacts secret values from the conflicting .mcp.json entry echoed in the collision error message", async () => {
+    // The plaintext value here ("super-secret-value") must never appear in
+    // the thrown error's message -- update.ts calls add() for every locked
+    // entry and prints caught error messages, so a leak here would print a
+    // previously-installed server's API key to stderr on every
+    // `ahood skill update` run.
+    const serverJson = JSON.stringify({
+      name: "hosted-search",
+      description: "d",
+      remotes: [{ url: "https://mcp.example.com/sse" }],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+
+    const existing = {
+      mcpServers: {
+        [SKILL]: {
+          command: "npx",
+          args: ["-y", "@example/weather-mcp-server@1.4.0"],
+          env: { WEATHER_API_KEY: "super-secret-value" },
+        },
+      },
+    };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify(existing, null, 2));
+
+    let error: Error | undefined;
+    try {
+      await add([`${OWNER}/${SKILL}`]);
+    } catch (e) {
+      error = e as Error;
+    }
+
+    expect(error?.message).toMatch(/already has an entry/);
+    expect(error?.message).not.toContain("super-secret-value");
+    // The key is still visible (so the user can tell WHAT'S conflicting) --
+    // only the value is redacted.
+    expect(error?.message).toContain("WEATHER_API_KEY");
+  });
+
+  it("refuses to install when .mcp.json's mcpServers is not a JSON object (e.g. an array)", async () => {
+    const serverJson = JSON.stringify({
+      name: "hosted-search",
+      description: "d",
+      remotes: [{ url: "https://mcp.example.com/sse" }],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: [] }, null, 2));
+
+    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/mcpServers/);
+
+    // Must not silently "succeed" while writing nothing -- the file must be
+    // left exactly as it was, not mutated into some half-written state.
+    expect(JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"))).toEqual({ mcpServers: [] });
+  });
+
+  it("checks for an existing .mcp.json collision before prompting for any secret", async () => {
+    const serverJson = JSON.stringify({
+      name: "weather-server",
+      description: "d",
+      packages: [
+        {
+          registry_type: "npm",
+          identifier: "@example/weather-mcp-server",
+          version: "1.4.0",
+          runtime_hint: "npx",
+          environment_variables: [
+            { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+          ],
+        },
+      ],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    delete process.env.WEATHER_API_KEY;
+
+    const existing = { mcpServers: { [SKILL]: { url: "https://already-here.test" } } };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify(existing, null, 2));
+
+    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/already has an entry/);
+
+    // The user must not have been made to type a secret at a masked prompt
+    // for an install that was refused anyway.
+    expect(promptSecret).not.toHaveBeenCalled();
+  });
+
+  it("does not leave a temp file or lock directory behind after installing an mcp artifact", async () => {
+    const serverJson = JSON.stringify({
+      name: "hosted-search",
+      description: "d",
+      remotes: [{ url: "https://mcp.example.com/sse" }],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    const entries = readdirSync(dir);
+    expect(entries.some((f) => f.startsWith(".mcp.json.tmp-"))).toBe(false);
+    expect(entries.some((f) => f === ".mcp.json.lock")).toBe(false);
   });
 
   it("preserves other existing mcpServers entries and top-level keys when merging", async () => {
