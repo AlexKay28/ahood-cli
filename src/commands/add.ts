@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, renameSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, rmdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import * as tarStream from "tar-stream";
 import { gunzipSync } from "node:zlib";
 import { apiFetch, apiJson } from "../http.js";
-import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, AGENTS_ROOT } from "../spec.js";
+import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, AGENTS_ROOT, MCP_CONFIG_PATH } from "../spec.js";
 import { readLockfile, writeLockfileEntry } from "../lockfile.js";
+import { promptSecret } from "../secret-prompt.js";
 
 const USAGE = "Usage: ahood add <owner>/<skill>[@version]";
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB compressed
@@ -24,7 +25,7 @@ export type VersionMeta = {
   checksum_sha256: string;
   yanked_at: string | null;
   changelog_md?: string | null;
-  kind?: "skill" | "agent";
+  kind?: "skill" | "agent" | "mcp";
 };
 
 // GET /api/v1/skills/{owner}/{skill}/versions/{version} matches the version
@@ -258,6 +259,98 @@ async function extractSingleFileContent(buffer: Buffer, entryName: string): Prom
   return found;
 }
 
+type ServerManifestEnvVar = { name: string; description: string; is_required: boolean; is_secret: boolean };
+type ServerManifestPackage = {
+  registry_type: string;
+  identifier: string;
+  version: string;
+  runtime_hint: string;
+  environment_variables?: ServerManifestEnvVar[];
+};
+type ServerManifestRemote = { url: string; headers?: Record<string, string> };
+type ServerManifest = {
+  name: string;
+  description: string;
+  packages?: ServerManifestPackage[];
+  remotes?: ServerManifestRemote[];
+};
+
+// Only npm+npx is supported in v1 (docs/superpowers/specs/2026-09-03-mcp-server-artifacts-design.md) --
+// server-side publish validation (lib/publish/parse-server-manifest.ts) already
+// rejects anything else, so this check is defense-in-depth against a
+// manifest that somehow reached this point unvalidated, same posture as
+// extractTarGz's own re-check of path containment "even though the server's
+// publish-time validateEntries is supposed to have rejected it already."
+function buildMcpServerConfig(manifest: ServerManifest, env: Record<string, string>): Record<string, unknown> {
+  if (manifest.packages && manifest.packages.length === 1) {
+    const pkg = manifest.packages[0];
+    if (pkg.registry_type !== "npm" || pkg.runtime_hint !== "npx") {
+      throw new Error(
+        `${manifest.name}'s server.json uses registry_type "${pkg.registry_type}"/runtime_hint "${pkg.runtime_hint}", which this version of ahood does not know how to install (only npm+npx is supported).`,
+      );
+    }
+    const config: Record<string, unknown> = { command: "npx", args: ["-y", `${pkg.identifier}@${pkg.version}`] };
+    if (Object.keys(env).length > 0) config.env = env;
+    return config;
+  }
+  if (manifest.remotes && manifest.remotes.length === 1) {
+    const remote = manifest.remotes[0];
+    return remote.headers ? { url: remote.url, headers: remote.headers } : { url: remote.url };
+  }
+  throw new Error(`${manifest.name}'s server.json has neither a single 'packages' entry nor a single 'remotes' entry.`);
+}
+
+// Keyed by ahood's own validated `skill` slug (SEGMENT_RE-checked in
+// spec.ts), not the manifest's self-reported `name` field: two different
+// published packages could easily share a generic internal name like
+// "weather-server", and a JSON object key built from unvalidated manifest
+// text is a footgun this sidesteps entirely by never using it as a key.
+async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, buffer: Buffer): Promise<void> {
+  const content = await extractSingleFileContent(buffer, "server.json");
+  const manifest = JSON.parse(content.toString("utf-8")) as ServerManifest;
+
+  const envVars = manifest.packages?.[0]?.environment_variables ?? [];
+  const secretEnv: Record<string, string> = {};
+  for (const variable of envVars) {
+    if (!variable.is_secret) continue;
+    const fromEnv = process.env[variable.name];
+    secretEnv[variable.name] =
+      fromEnv !== undefined ? fromEnv : await promptSecret(`${variable.name} (${variable.description}): `);
+  }
+
+  const serverConfig = buildMcpServerConfig(manifest, secretEnv);
+
+  let fileContents: Record<string, unknown> = { mcpServers: {} };
+  if (existsSync(MCP_CONFIG_PATH)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8"));
+    } catch {
+      throw new Error(`${MCP_CONFIG_PATH} exists but is not valid JSON -- fix or remove it before running this command.`);
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error(`${MCP_CONFIG_PATH} exists but its top level is not a JSON object.`);
+    }
+    fileContents = parsed as Record<string, unknown>;
+    if (fileContents.mcpServers === undefined) fileContents.mcpServers = {};
+  }
+  const mcpServers = fileContents.mcpServers as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(mcpServers, skill)) {
+    throw new Error(
+      `${MCP_CONFIG_PATH} already has an entry named "${skill}":\n${JSON.stringify(mcpServers[skill], null, 2)}\n` +
+        `Remove it manually first if you want to reinstall ${owner}/${skill}.`,
+    );
+  }
+  mcpServers[skill] = serverConfig;
+  writeFileSync(MCP_CONFIG_PATH, JSON.stringify(fileContents, null, 2));
+
+  writeLockfileEntry(LOCKFILE_PATH, `${owner}/${skill}`, { version: meta.version, checksum_sha256: meta.checksum_sha256 });
+  console.log(`Installed ${owner}/${skill}@${meta.version} into ${MCP_CONFIG_PATH} as "${skill}"`);
+  if (Object.keys(secretEnv).length > 0) {
+    console.warn(`WARNING: ${MCP_CONFIG_PATH} now contains one or more secret values in plaintext -- do not commit it to version control.`);
+  }
+}
+
 export async function add(args: string[]): Promise<void> {
   const spec = args[0];
   if (!spec) throw new Error(USAGE);
@@ -289,7 +382,7 @@ export async function add(args: string[]): Promise<void> {
   // manifest can never actually land on disk there -- the warning would be
   // both mislabeled ("skill") and about a risk that can't materialize
   // (ahood-cli final review finding #5).
-  if (meta.kind !== "agent" && meta.manifest.some((f) => f.path.startsWith("scripts/"))) {
+  if (meta.kind !== "agent" && meta.kind !== "mcp" && meta.manifest.some((f) => f.path.startsWith("scripts/"))) {
     console.warn("WARNING: this skill includes a scripts/ directory. Review its contents before use.");
   }
 
@@ -317,6 +410,11 @@ export async function add(args: string[]): Promise<void> {
     writeFileSync(destPath, content);
     writeLockfileEntry(LOCKFILE_PATH, key, { version: meta.version, checksum_sha256: meta.checksum_sha256 });
     console.log(`Installed ${key}@${meta.version} to ${destPath}`);
+    return;
+  }
+
+  if (meta.kind === "mcp") {
+    await installMcpEntry(owner, skill, meta, buffer);
     return;
   }
 

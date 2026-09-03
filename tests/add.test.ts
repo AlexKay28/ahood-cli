@@ -1,12 +1,18 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
 import { add, extractTarGz } from "../src/commands/add.js";
-import { agentPath, skillDir } from "../src/spec.js";
+import { agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
+
+vi.mock("../src/secret-prompt.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/secret-prompt.js")>();
+  return { ...actual, promptSecret: vi.fn(async () => "prompted-secret-value") };
+});
+import { promptSecret } from "../src/secret-prompt.js";
 
 const API_URL = "http://ahood.test";
 const OWNER = "alice";
@@ -62,7 +68,7 @@ function stubApi(
   checksum: string,
   manifest: Array<{ path: string }> = [{ path: "SKILL.md" }],
   version: string = VERSION,
-  kind?: "skill" | "agent",
+  kind?: "skill" | "agent" | "mcp",
 ) {
   const calls: string[] = [];
   vi.stubGlobal(
@@ -391,6 +397,145 @@ describe("add", () => {
     await add([`${OWNER}/${SKILL}`]);
 
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringMatching(/scripts\//));
+  });
+
+  it("installs an mcp artifact (remote) by merging an entry into .mcp.json", async () => {
+    const serverJson = JSON.stringify({
+      name: "hosted-search",
+      description: "d",
+      remotes: [{ url: "https://mcp.example.com/sse" }],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL]).toEqual({ url: "https://mcp.example.com/sse" });
+  });
+
+  it("installs an mcp artifact (npm package) mapping registry_type/runtime_hint to command/args", async () => {
+    const serverJson = JSON.stringify({
+      name: "weather-server",
+      description: "d",
+      packages: [
+        { registry_type: "npm", identifier: "@example/weather-mcp-server", version: "1.4.0", runtime_hint: "npx" },
+      ],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL]).toEqual({
+      command: "npx",
+      args: ["-y", "@example/weather-mcp-server@1.4.0"],
+    });
+  });
+
+  it("uses an already-set environment variable for a secret without prompting", async () => {
+    const serverJson = JSON.stringify({
+      name: "weather-server",
+      description: "d",
+      packages: [
+        {
+          registry_type: "npm",
+          identifier: "@example/weather-mcp-server",
+          version: "1.4.0",
+          runtime_hint: "npx",
+          environment_variables: [
+            { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+          ],
+        },
+      ],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    process.env.WEATHER_API_KEY = "already-set-value";
+
+    try {
+      await add([`${OWNER}/${SKILL}`]);
+    } finally {
+      delete process.env.WEATHER_API_KEY;
+    }
+
+    expect(promptSecret).not.toHaveBeenCalled();
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_API_KEY: "already-set-value" });
+  });
+
+  it("prompts for a secret env var that is not already set", async () => {
+    const serverJson = JSON.stringify({
+      name: "weather-server",
+      description: "d",
+      packages: [
+        {
+          registry_type: "npm",
+          identifier: "@example/weather-mcp-server",
+          version: "1.4.0",
+          runtime_hint: "npx",
+          environment_variables: [
+            { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+          ],
+        },
+      ],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    delete process.env.WEATHER_API_KEY;
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect(promptSecret).toHaveBeenCalledWith(expect.stringContaining("WEATHER_API_KEY"));
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_API_KEY: "prompted-secret-value" });
+  });
+
+  it("refuses to install and does not write .mcp.json when the entry name already exists", async () => {
+    const serverJson = JSON.stringify({
+      name: "hosted-search",
+      description: "d",
+      remotes: [{ url: "https://mcp.example.com/sse" }],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+
+    const existing = { mcpServers: { [SKILL]: { url: "https://already-here.test" } } };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify(existing, null, 2));
+
+    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/already has an entry/);
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL]).toEqual({ url: "https://already-here.test" });
+  });
+
+  it("preserves other existing mcpServers entries and top-level keys when merging", async () => {
+    const serverJson = JSON.stringify({ name: "hosted-search", description: "d", remotes: [{ url: "https://mcp.example.com/sse" }] });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+
+    const existing = { someOtherTopLevelKey: true, mcpServers: { "unrelated-server": { url: "https://other.test" } } };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify(existing, null, 2));
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.someOtherTopLevelKey).toBe(true);
+    expect(mcpConfig.mcpServers["unrelated-server"]).toEqual({ url: "https://other.test" });
+    expect(mcpConfig.mcpServers[SKILL]).toEqual({ url: "https://mcp.example.com/sse" });
+  });
+
+  it("does not print the scripts/ warning for an mcp install, even if the manifest lists a scripts/ path", async () => {
+    const serverJson = JSON.stringify({ name: "hosted-search", description: "d", remotes: [{ url: "https://mcp.example.com/sse" }] });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }, { path: "scripts/run.sh" }], VERSION, "mcp");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("scripts/"));
+    warnSpy.mockRestore();
   });
 
   it("still prints the scripts/ warning for a skill install with a scripts/ path (unchanged)", async () => {
