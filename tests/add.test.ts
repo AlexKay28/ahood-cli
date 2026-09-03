@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
 import { add, extractTarGz } from "../src/commands/add.js";
+import { agentPath, skillDir } from "../src/spec.js";
 
 const API_URL = "http://ahood.test";
 const OWNER = "alice";
@@ -44,6 +45,7 @@ function stubApi(
   checksum: string,
   manifest: Array<{ path: string }> = [{ path: "SKILL.md" }],
   version: string = VERSION,
+  kind?: "skill" | "agent",
 ) {
   const calls: string[] = [];
   vi.stubGlobal(
@@ -53,13 +55,15 @@ function stubApi(
       calls.push(url);
       if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}`) {
         return new Response(
-          JSON.stringify({ skill_versions: { version, manifest, checksum_sha256: checksum } }),
+          JSON.stringify({
+            skill_versions: { version, manifest, checksum_sha256: checksum, ...(kind ? { kind } : {}) },
+          }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
       if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}/versions/${version}`) {
         return new Response(
-          JSON.stringify({ version, manifest, checksum_sha256: checksum, yanked_at: null }),
+          JSON.stringify({ version, manifest, checksum_sha256: checksum, yanked_at: null, ...(kind ? { kind } : {}) }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
@@ -237,6 +241,33 @@ describe("add", () => {
     // MAX_CHUNKS + 1 (201). A fix that checks the running total AS bytes
     // arrive stops within a few chunks of crossing the 50 MB cap (~51).
     expect(pullCount).toBeLessThan(60);
+  });
+
+  it("installs an agent as a single file at .claude/agents/<owner>--<skill>.md, not a directory", async () => {
+    const archive = await tarGz({ "AGENT.md": "# reviewer agent\n" });
+    stubApi(archive, sha256(archive), [{ path: "AGENT.md" }], VERSION, "agent");
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    const dest = join(dir, agentPath(OWNER, SKILL));
+    expect(existsSync(dest)).toBe(true);
+    expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
+    // A single flat file, not a directory -- distinct from the skills'
+    // owner-nested .claude/skills/<owner>/<skill>/ layout.
+    expect(existsSync(join(dir, ".claude", "skills", OWNER, SKILL))).toBe(false);
+    expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
+      [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: sha256(archive) },
+    });
+  });
+
+  it("still installs a skill as a directory under .claude/skills/<owner>/<skill>/ (unchanged)", async () => {
+    const archive = await tarGz({ "SKILL.md": "# demo\n" });
+    stubApi(archive, sha256(archive), [{ path: "SKILL.md" }], VERSION, "skill");
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# demo\n");
+    expect(existsSync(join(dir, ".claude", "agents"))).toBe(false);
   });
 
 });

@@ -36,7 +36,7 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
 }
 
 const USAGE =
-  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--kind skill|agent] [--json]\n" +
+  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]\n" +
   "   or: ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested

@@ -97,7 +97,10 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
   {
     usage: "ahood skill add <owner>/<skill>[@version]",
     summary: "Install a skill into .claude/skills/, pinned in the lockfile.",
-    desc: "Install a skill into .claude/skills/, pinned in the lockfile.",
+    desc:
+      "Install a skill into .claude/skills/, pinned in the lockfile. An artifact published with --kind agent " +
+      "installs instead as a single file at .claude/agents/<owner>--<skill>.md (Claude Code's own subagent " +
+      "loader scans .claude/agents/*.md as flat files), not a .claude/skills/ directory.",
     examples: ["ahood skill add alice/pdf-tools", "ahood skill add alice/pdf-tools@1.2.0"],
   },
   {
@@ -175,22 +178,25 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage:
-      "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]",
+      "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]",
     summary:
-      "Publish a new version of a skill from a folder containing SKILL.md, creating the skill first if it doesn't already exist.",
+      "Publish a new version of a skill or agent from a folder containing SKILL.md or AGENT.md, creating the skill first if it doesn't already exist.",
     desc:
-      "Publish a new version of a skill from a folder containing SKILL.md. If the skill doesn't exist yet, this " +
-      "creates it first -- pass --name (required in that case) and optionally --tagline/--tags/--license/--homepage/--repository. " +
+      "Publish a new version of a skill or agent from a folder containing SKILL.md or AGENT.md. If the artifact " +
+      "doesn't exist yet, this creates it first -- pass --name to set its display name, and --kind agent if " +
+      "publishing an AGENT.md (auto-detected from the folder contents when only one of SKILL.md/AGENT.md is present). " +
+      "--name is required when creating; optionally also pass --tagline/--tags/--license/--homepage/--repository. " +
       "Processing happens server-side after upload; this command polls and reports the final published/failed status. " +
       "The legacy form `ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted. " +
       "Every flag also accepts the --flag=value form, needed when a value itself starts with --.",
     flags: [
-      "--name <text>                 Required only when creating the skill on this publish.",
+      "--kind skill|agent            What kind of artifact this is. Auto-detected from SKILL.md/AGENT.md when omitted.",
+      "--name <text>                 Required only when creating the artifact on this publish.",
       "--tagline <text>              Short one-line description, used only when creating.",
       "--tags <comma,separated>      Initial tags, used only when creating.",
       "--license <id>                An SPDX license identifier, e.g. MIT, used only when creating.",
-      "--homepage <url>              The skill's homepage URL, used only when creating.",
-      "--repository <url>            The skill's source repository URL, used only when creating.",
+      "--homepage <url>              The artifact's homepage URL, used only when creating.",
+      "--repository <url>            The artifact's source repository URL, used only when creating.",
       "--json                        Suppress human progress lines; print one {version,status,...} JSON object on completion (or {error} on failure).",
     ],
     examples: [

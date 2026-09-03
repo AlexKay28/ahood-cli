@@ -90,3 +90,20 @@ export const LOCKFILE_PATH = join(".claude", "skills.lock.json");
 export function skillDir(owner: string, skill: string): string {
   return join(SKILLS_ROOT, owner, skill);
 }
+
+// Claude Code's own subagent loader scans .claude/agents/*.md as flat files
+// (non-recursive), unlike .claude/skills/<owner>/<skill>/ which nests by
+// owner -- a bare .claude/agents/<skill>.md would let two different owners'
+// same-named agent collide and silently overwrite each other. Joining the
+// owner into the filename with a DOUBLE hyphen keeps the layout flat (so
+// Claude Code still finds it) while staying collision-resistant: a single
+// hyphen would be ambiguous, since SEGMENT_RE-valid slugs can themselves
+// contain internal hyphens (owner="al-ice"/skill="bob" and
+// owner="al"/skill="ice-bob" would both join to "al-ice-bob"). "--" can
+// never appear inside a valid slug (an alphanumeric must follow every
+// hyphen), so it's an unambiguous separator.
+export const AGENTS_ROOT = join(".claude", "agents");
+
+export function agentPath(owner: string, skill: string): string {
+  return join(AGENTS_ROOT, `${owner}--${skill}.md`);
+}

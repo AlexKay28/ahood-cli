@@ -81,12 +81,13 @@ Requires Node.js 18 or later.
 | `AHOOD_API_URL` | Overrides the registry endpoint (default: `https://ahood.vercel.app`). Must be `https://`, except for `localhost`/`127.0.0.1` or a `.test`/`.invalid`/`.example`/`.localhost` host, which may use plain `http://` for local development. |
 | `XDG_CONFIG_HOME` | If set, browser-login credentials are stored under `$XDG_CONFIG_HOME/ahood/credentials.json` instead of the default `~/.config/ahood/credentials.json`. |
 
-Two files `ahood` reads and writes in your project, neither of which needs to be gitignored (the lockfile is meant to be committed, same as `package-lock.json`):
+Paths `ahood` reads and writes in your project, none of which need to be gitignored (the lockfile is meant to be committed, same as `package-lock.json`):
 
 | Path | What's in it |
 | --- | --- |
 | `.claude/skills/<owner>/<skill>/` | Installed skill files. |
-| `.claude/skills.lock.json` | Exact installed version + checksum per skill, written by `add`/`update`, read by every install to verify integrity. |
+| `.claude/agents/<owner>--<skill>.md` | An installed agent, as a single file (double-hyphen owner/skill separator, since Claude Code's own subagent loader scans `.claude/agents/*.md` flat, non-recursively). |
+| `.claude/skills.lock.json` | Exact installed version + checksum per skill or agent, written by `add`/`update`, read by every install to verify integrity. |
 
 ## Usage examples
 
@@ -220,7 +221,7 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | `ahood skill share <owner>/<skill> --group <group>` | Share a skill you own with a group, without changing its public/private visibility. |
 | `ahood skill unshare <owner>/<skill> --group <group>` | Stop sharing a skill you own with a group. |
 | `ahood skill init [name]` | Scaffold a new skill folder with a minimal, valid SKILL.md. |
-| `ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]` | Publish a new version of a skill from a folder containing SKILL.md, creating the skill first if it doesn't already exist. |
+| `ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill\|agent] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]` | Publish a new version of a skill or agent from a folder containing SKILL.md or AGENT.md, creating the skill first if it doesn't already exist. |
 
 ### Group
 

@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import * as tarStream from "tar-stream";
 import { gunzipSync } from "node:zlib";
 import { apiFetch, apiJson } from "../http.js";
-import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir } from "../spec.js";
+import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, AGENTS_ROOT } from "../spec.js";
 import { readLockfile, writeLockfileEntry } from "../lockfile.js";
 
 const USAGE = "Usage: ahood add <owner>/<skill>[@version]";
@@ -24,6 +24,7 @@ export type VersionMeta = {
   checksum_sha256: string;
   yanked_at: string | null;
   changelog_md?: string | null;
+  kind?: "skill" | "agent";
 };
 
 // GET /api/v1/skills/{owner}/{skill}/versions/{version} matches the version
@@ -191,6 +192,37 @@ async function extractFreshVersion(buffer: Buffer, destDir: string): Promise<voi
   renameSync(tempDir, destDir);
 }
 
+// Agent packages install as one file, not a directory (Claude Code's own
+// .claude/agents/*.md convention is flat, non-recursive) -- extracts just
+// AGENT.md's content from the downloaded tarball rather than writing every
+// entry to disk the way extractFreshVersion does for skills.
+async function extractSingleFileContent(buffer: Buffer, entryName: string): Promise<Buffer> {
+  const decompressed = gunzipSync(buffer);
+  const extract = tarStream.extract();
+  let found: Buffer | null = null;
+  await new Promise<void>((resolvePromise, reject) => {
+    extract.on("entry", (header, stream, next) => {
+      if (header.name !== entryName) {
+        stream.resume();
+        next();
+        return;
+      }
+      const chunks: Buffer[] = [];
+      stream.on("data", (chunk) => chunks.push(chunk as Buffer));
+      stream.on("end", () => {
+        found = Buffer.concat(chunks);
+        next();
+      });
+      stream.on("error", reject);
+    });
+    extract.on("finish", () => resolvePromise());
+    extract.on("error", reject);
+    extract.end(decompressed);
+  });
+  if (!found) throw new Error(`${entryName} not found in the downloaded archive`);
+  return found;
+}
+
 export async function add(args: string[]): Promise<void> {
   const spec = args[0];
   if (!spec) throw new Error(USAGE);
@@ -236,6 +268,16 @@ export async function add(args: string[]): Promise<void> {
     throw new Error(
       `Checksum mismatch for ${key}@${meta.version}: expected ${meta.checksum_sha256}, got ${actualChecksum}. Refusing to install.`,
     );
+  }
+
+  if (meta.kind === "agent") {
+    const content = await extractSingleFileContent(buffer, "AGENT.md");
+    mkdirSync(AGENTS_ROOT, { recursive: true });
+    const destPath = agentPath(owner, skill);
+    writeFileSync(destPath, content);
+    writeLockfileEntry(LOCKFILE_PATH, key, { version: meta.version, checksum_sha256: meta.checksum_sha256 });
+    console.log(`Installed ${key}@${meta.version} to ${destPath}`);
+    return;
   }
 
   // Owner-namespaced on disk, mirroring npm's node_modules/@scope/package.
