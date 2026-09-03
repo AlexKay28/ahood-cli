@@ -1,7 +1,7 @@
-import { existsSync, readdirSync, rmSync, rmdirSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, rmdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { removeLockfileEntry } from "../lockfile.js";
-import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath } from "../spec.js";
+import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, MCP_CONFIG_PATH } from "../spec.js";
 
 const USAGE = "Usage: ahood remove <owner>/<skill>";
 
@@ -39,5 +39,38 @@ export async function remove(args: string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
+
+  // An mcp-kind install has no directory or agent file on disk -- its only
+  // footprint here is the lockfile entry just cleared above and a live
+  // entry in .mcp.json (which add.ts's installMcpEntry merged in, possibly
+  // holding a resolved secret in its `env`). remove() doesn't attempt a real
+  // mcp removal, but staying silent about that entry repeats the exact
+  // false-assurance bug already fixed once for agent installs above: a user
+  // who removes an mcp artifact because they no longer trust it would be
+  // told it's gone while the MCP server (and its credential) still runs on
+  // the next Claude Code start -- and since the lockfile pin is now cleared,
+  // nothing will ever surface this again via `list`/`update`. So: warn
+  // instead of pretending it's gone.
+  if (existsSync(MCP_CONFIG_PATH)) {
+    try {
+      const parsed = JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8"));
+      const mcpServers = parsed?.mcpServers;
+      if (
+        mcpServers &&
+        typeof mcpServers === "object" &&
+        !Array.isArray(mcpServers) &&
+        Object.prototype.hasOwnProperty.call(mcpServers, skill)
+      ) {
+        console.warn(
+          `WARNING: ${key} still has an entry in ${MCP_CONFIG_PATH} (which may contain secrets you entered) -- remove it manually.`,
+        );
+      }
+    } catch {
+      // A malformed .mcp.json isn't this command's problem to fix or crash
+      // on -- add.ts's readMcpConfig is the strict validator for that path.
+      // Skip the warning rather than throw here.
+    }
+  }
+
   console.log(`Removed ${key}`);
 }

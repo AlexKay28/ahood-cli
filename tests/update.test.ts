@@ -215,6 +215,43 @@ describe("update", () => {
     expect(process.exitCode).not.toBe(1);
   });
 
+  it("skips an installed mcp artifact with a clean status message instead of always failing (finding #2)", async () => {
+    // add() always hits the .mcp.json collision check for an mcp entry that's
+    // already installed -- without a skip, `ahood skill update` with no args
+    // would report 1 failure and exit 1 for every user who has an mcp
+    // artifact installed, even when nothing needs updating.
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+    });
+
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${API_URL}/api/v1/skills/alice/weather`) {
+        return new Response(
+          JSON.stringify({
+            skill_versions: { version: "1.0.0", manifest: [{ path: "server.json" }], checksum_sha256: "abc" },
+            kind: "mcp",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      // The download endpoint must never be hit for a skipped mcp entry.
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await update([]);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("alice/weather"));
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).not.toBe(1);
+    expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("/download"))).toBe(false);
+  });
+
   describe("--dry-run", () => {
     const lockfilePath = () => join(dir, ".claude", "skills.lock.json");
     const skillDirPath = (owner: string, skill: string) => join(dir, ".claude", "skills", owner, skill);

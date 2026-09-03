@@ -555,6 +555,181 @@ describe("add", () => {
     expect(error?.message).toContain("WEATHER_API_KEY");
   });
 
+  it("does not leak a secret embedded in the conflicting entry's args or url in the collision error (finding #1)", async () => {
+    // Unlike env/headers keys, a hand-authored .mcp.json entry routinely
+    // passes a credential as a CLI arg or in a URL query string -- neither
+    // of which the old 2-key ("env"/"headers") redaction allowlist ever
+    // touched. This is the entry being COLLIDED with, not one ahood wrote.
+    const serverJson = JSON.stringify({
+      name: "hosted-search",
+      description: "d",
+      remotes: [{ url: "https://mcp.example.com/sse" }],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+
+    const existing = {
+      mcpServers: {
+        [SKILL]: {
+          command: "npx",
+          args: ["-y", "@thing/mcp", "--api-key", "sk-live-topsecret123"],
+        },
+      },
+    };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify(existing, null, 2));
+
+    let error: Error | undefined;
+    try {
+      await add([`${OWNER}/${SKILL}`]);
+    } catch (e) {
+      error = e as Error;
+    }
+
+    expect(error?.message).toMatch(/already has an entry/);
+    expect(error?.message).not.toContain("sk-live-topsecret123");
+  });
+
+  it("does not leak a secret embedded in a conflicting entry's URL query string in the collision error (finding #1)", async () => {
+    const serverJson = JSON.stringify({
+      name: "hosted-search",
+      description: "d",
+      remotes: [{ url: "https://mcp.example.com/sse" }],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+
+    const existing = {
+      mcpServers: {
+        [SKILL]: { url: "https://host.example.com/sse?token=topsecretquerytoken" },
+      },
+    };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify(existing, null, 2));
+
+    let error: Error | undefined;
+    try {
+      await add([`${OWNER}/${SKILL}`]);
+    } catch (e) {
+      error = e as Error;
+    }
+
+    expect(error?.message).toMatch(/already has an entry/);
+    expect(error?.message).not.toContain("topsecretquerytoken");
+  });
+
+  it("still redacts secret values from env/headers keys, but shows key names (unchanged behavior)", async () => {
+    const serverJson = JSON.stringify({
+      name: "hosted-search",
+      description: "d",
+      remotes: [{ url: "https://mcp.example.com/sse" }],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+
+    const existing = {
+      mcpServers: {
+        [SKILL]: {
+          command: "npx",
+          args: ["-y", "@example/weather-mcp-server@1.4.0"],
+          env: { WEATHER_API_KEY: "super-secret-value" },
+        },
+      },
+    };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify(existing, null, 2));
+
+    let error: Error | undefined;
+    try {
+      await add([`${OWNER}/${SKILL}`]);
+    } catch (e) {
+      error = e as Error;
+    }
+
+    expect(error?.message).toMatch(/already has an entry/);
+    expect(error?.message).not.toContain("super-secret-value");
+    expect(error?.message).toContain("WEATHER_API_KEY");
+  });
+
+  it("strips control characters from manifest-derived text before it reaches the secret prompt (finding #4)", async () => {
+    // A malicious/compromised server.json's description or name is
+    // server-validated only as a string -- a terminal control sequence
+    // embedded in it (cursor movement, line clear) must never reach the
+    // terminal verbatim right before a masked credential prompt.
+    const maliciousDescription = "API key\x1b[2K\x1b[1G\x1b[31mFAKE PROMPT: enter password: \x1b[0m";
+    const serverJson = JSON.stringify({
+      name: "weather-server",
+      description: "d",
+      packages: [
+        {
+          registry_type: "npm",
+          identifier: "@example/weather-mcp-server",
+          version: "1.4.0",
+          runtime_hint: "npx",
+          environment_variables: [
+            { name: "WEATHER_API_KEY", description: maliciousDescription, is_required: true, is_secret: true },
+          ],
+        },
+      ],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    delete process.env.WEATHER_API_KEY;
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    const promptCalls = vi.mocked(promptSecret).mock.calls.map((c) => c[0]);
+    expect(promptCalls.some((p) => p.includes("\x1b"))).toBe(false);
+  });
+
+  it("strips control characters from manifest.name before it reaches an error message (finding #4)", async () => {
+    const maliciousName = "evil\x1b[2Kserver";
+    const serverJson = JSON.stringify({
+      name: maliciousName,
+      description: "d",
+      packages: [{ registry_type: "pypi", identifier: "x", version: "1.0.0", runtime_hint: "uvx" }],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+
+    let error: Error | undefined;
+    try {
+      await add([`${OWNER}/${SKILL}`]);
+    } catch (e) {
+      error = e as Error;
+    }
+    expect(error?.message).toBeDefined();
+    expect(error!.message).not.toContain("\x1b");
+  });
+
+  it("prompts for a secret when the env var is set to an empty string, matching resolveToken's precedent (finding #6)", async () => {
+    const serverJson = JSON.stringify({
+      name: "weather-server",
+      description: "d",
+      packages: [
+        {
+          registry_type: "npm",
+          identifier: "@example/weather-mcp-server",
+          version: "1.4.0",
+          runtime_hint: "npx",
+          environment_variables: [
+            { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+          ],
+        },
+      ],
+    });
+    const archive = await tarGz({ "server.json": serverJson });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    process.env.WEATHER_API_KEY = "";
+
+    try {
+      await add([`${OWNER}/${SKILL}`]);
+    } finally {
+      delete process.env.WEATHER_API_KEY;
+    }
+
+    expect(promptSecret).toHaveBeenCalledWith(expect.stringContaining("WEATHER_API_KEY"));
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_API_KEY: "prompted-secret-value" });
+  });
+
   it("refuses to install when .mcp.json's mcpServers is not a JSON object (e.g. an array)", async () => {
     const serverJson = JSON.stringify({
       name: "hosted-search",

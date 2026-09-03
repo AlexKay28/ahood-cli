@@ -121,6 +121,22 @@ export async function update(args: string[]): Promise<void> {
       continue;
     }
     try {
+      // add() always hits the .mcp.json collision check for an mcp-kind
+      // entry that's already installed (that's the very definition of
+      // "already installed" for that kind), so calling it unconditionally
+      // here would make `ahood skill update` with no arguments permanently
+      // report a failure and exit 1 for every user who has ever installed
+      // an mcp artifact, even when nothing needs updating. fetchVersionMeta
+      // already resolves `kind` as part of the normal "latest" lookup add()
+      // itself does, so resolving it here first lets this skip cleanly
+      // instead of updating and hitting that guaranteed error. This is a
+      // skip-and-report-cleanly fix, not real mcp-update support.
+      const { owner, skill } = parseOwnerSkill(ownerSlashSkill, USAGE);
+      const meta = await fetchVersionMeta(owner, skill, "latest");
+      if (meta.kind === "mcp") {
+        console.warn(`Skipping ${ownerSlashSkill}: mcp artifacts aren't updatable via this command yet.`);
+        continue;
+      }
       await add([ownerSlashSkill]); // no @version -- resolves to latest again
     } catch (error) {
       // One skill being removed/yanked/unreachable must not stop every other

@@ -50,7 +50,7 @@ export async function fetchVersionMeta(owner: string, skill: string, version: st
     // no error anywhere (ahood-cli final review finding #1).
     const { skill_versions, kind } = await apiJson<{
       skill_versions: Omit<VersionMeta, "yanked_at" | "kind"> | null;
-      kind?: "skill" | "agent";
+      kind?: "skill" | "agent" | "mcp";
     }>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`);
     if (!skill_versions) throw new Error(`${owner}/${skill} has no published version`);
     return { ...skill_versions, kind, yanked_at: null };
@@ -259,6 +259,19 @@ async function extractSingleFileContent(buffer: Buffer, entryName: string): Prom
   return found;
 }
 
+// Every manifest field used below reaches the terminal (an error message, or
+// -- worse -- the text printed immediately before a masked secret prompt)
+// but comes verbatim from a third-party-published server.json: server-side
+// validation only checks these are strings, not that they're free of
+// control/escape characters. A malicious description could otherwise smuggle
+// a terminal control sequence (cursor movement, line-clear) that repaints
+// what the user sees at the exact moment they're about to type a credential.
+// Strips C0/C1 control characters (including ESC, \x1b) and caps length so a
+// single field can't also flood the terminal.
+function sanitizeForTerminal(text: string): string {
+  return text.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").slice(0, 200);
+}
+
 type ServerManifestEnvVar = { name: string; description: string; is_required: boolean; is_secret: boolean };
 type ServerManifestPackage = {
   registry_type: string;
@@ -282,11 +295,12 @@ type ServerManifest = {
 // extractTarGz's own re-check of path containment "even though the server's
 // publish-time validateEntries is supposed to have rejected it already."
 function buildMcpServerConfig(manifest: ServerManifest, env: Record<string, string>): Record<string, unknown> {
+  const manifestName = sanitizeForTerminal(manifest.name);
   if (manifest.packages && manifest.packages.length === 1) {
     const pkg = manifest.packages[0];
     if (pkg.registry_type !== "npm" || pkg.runtime_hint !== "npx") {
       throw new Error(
-        `${manifest.name}'s server.json uses registry_type "${pkg.registry_type}"/runtime_hint "${pkg.runtime_hint}", which this version of ahood does not know how to install (only npm+npx is supported).`,
+        `${manifestName}'s server.json uses registry_type "${pkg.registry_type}"/runtime_hint "${pkg.runtime_hint}", which this version of ahood does not know how to install (only npm+npx is supported).`,
       );
     }
     const config: Record<string, unknown> = { command: "npx", args: ["-y", `${pkg.identifier}@${pkg.version}`] };
@@ -297,31 +311,49 @@ function buildMcpServerConfig(manifest: ServerManifest, env: Record<string, stri
     const remote = manifest.remotes[0];
     return remote.headers ? { url: remote.url, headers: remote.headers } : { url: remote.url };
   }
-  throw new Error(`${manifest.name}'s server.json has neither a single 'packages' entry nor a single 'remotes' entry.`);
+  throw new Error(`${manifestName}'s server.json has neither a single 'packages' entry nor a single 'remotes' entry.`);
 }
 
-// A conflicting .mcp.json entry is echoed back to the user in the collision
-// error below so they can identify what they'd be overwriting -- but that
-// entry can itself hold another install's plaintext secret (its `env`, or a
-// remote's `headers`). Printing it verbatim would leak that secret to
-// stderr, and worse than a rare edge case: update.ts calls add() for every
-// locked entry and prints caught error messages, so this would leak a
-// previously-installed server's API key on every `ahood skill update` run.
-// Returns a shallow copy with those two containers' VALUES replaced,
-// keeping every key (and everything else) visible so the user can still
-// tell what's conflicting.
-function redactSecretValues(entry: unknown): unknown {
-  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return entry;
-  const copy: Record<string, unknown> = { ...(entry as Record<string, unknown>) };
+// A conflicting .mcp.json entry is summarized back to the user in the
+// collision error below so they can identify what they'd be overwriting --
+// but this entry is, by definition, one ahood did NOT write (that's what
+// makes it a collision), so it's a hand-authored entry that routinely passes
+// a credential as a CLI arg (e.g. `"args": ["-y", "@thing", "--api-key",
+// "sk-live-..."]`) or in a URL query string (`"url": "https://host/sse?
+// token=..."`) -- neither of which a small "env"/"headers"-keyed redaction
+// allowlist would ever touch. Worse than a rare edge case: update.ts calls
+// add() for every locked entry and prints caught error messages, so a leak
+// here would fire on a routine `ahood skill update`, not just a rare manual
+// re-add.
+//
+// So rather than trying to allowlist every place a secret might hide, this
+// prints only structural information: the entry's top-level key names, its
+// `command` (a package identifier, not a secret), the key names inside
+// `env`/`headers` (so the user can see WHICH variable conflicts without its
+// value), and the conflicting URL's hostname (never its full value, since
+// query strings are a common place to find a token). No leaf string value
+// from `args`, a header's value, an env var's value, or a URL's path/query
+// is ever included.
+function summarizeConflictingEntry(entry: unknown): string {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return String(entry);
+  const obj = entry as Record<string, unknown>;
+  const parts: string[] = [`keys: ${Object.keys(obj).join(", ") || "(none)"}`];
+  if (typeof obj.command === "string") parts.push(`command: ${obj.command}`);
   for (const key of ["env", "headers"] as const) {
-    const value = copy[key];
+    const value = obj[key];
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-      const redacted: Record<string, string> = {};
-      for (const varName of Object.keys(value as Record<string, unknown>)) redacted[varName] = "<redacted>";
-      copy[key] = redacted;
+      parts.push(`${key} keys: ${Object.keys(value as Record<string, unknown>).join(", ")}`);
     }
   }
-  return copy;
+  if (typeof obj.url === "string") {
+    try {
+      parts.push(`url host: ${new URL(obj.url).hostname}`);
+    } catch {
+      // Not a parseable URL -- omit rather than risk printing something
+      // sensitive verbatim.
+    }
+  }
+  return parts.join("; ");
 }
 
 // Reads and validates .mcp.json's shape, defaulting to an empty config when
@@ -367,7 +399,7 @@ function assertNoCollision(fileContents: Record<string, unknown>, owner: string,
   const mcpServers = fileContents.mcpServers as Record<string, unknown>;
   if (Object.prototype.hasOwnProperty.call(mcpServers, skill)) {
     throw new Error(
-      `${MCP_CONFIG_PATH} already has an entry named "${skill}":\n${JSON.stringify(redactSecretValues(mcpServers[skill]), null, 2)}\n` +
+      `${MCP_CONFIG_PATH} already has an entry named "${skill}" (${summarizeConflictingEntry(mcpServers[skill])}).\n` +
         `Remove it manually first if you want to reinstall ${owner}/${skill}.`,
     );
   }
@@ -392,8 +424,14 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
   for (const variable of envVars) {
     if (!variable.is_secret) continue;
     const fromEnv = process.env[variable.name];
-    secretEnv[variable.name] =
-      fromEnv !== undefined ? fromEnv : await promptSecret(`${variable.name} (${variable.description}): `);
+    // Truthiness, not `!== undefined` -- matches credentials.ts's
+    // resolveToken(), the precedent this feature was explicitly modeled on
+    // (per the design spec), which uses `if (process.env.AHOOD_TOKEN)`
+    // specifically so an empty-string env var falls through to the real
+    // source instead of silently installing an empty secret.
+    secretEnv[variable.name] = fromEnv
+      ? fromEnv
+      : await promptSecret(`${sanitizeForTerminal(variable.name)} (${sanitizeForTerminal(variable.description)}): `);
   }
 
   const serverConfig = buildMcpServerConfig(manifest, secretEnv);
