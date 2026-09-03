@@ -117,7 +117,7 @@ describe("publish", () => {
   });
 
   it("rejects when no SKILL.md is found", async () => {
-    await expect(publish([`alice/demo@1.0.0`, "--path", dir])).rejects.toThrow(/No SKILL.md found/);
+    await expect(publish([`alice/demo@1.0.0`, "--path", dir])).rejects.toThrow(/No SKILL.md or AGENT.md found/);
   });
 
   it("rejects an invalid --version", async () => {
@@ -152,7 +152,7 @@ describe("publish", () => {
   it("errors instead of treating a flag as the legacy path when the path is omitted", async () => {
     await expect(
       publish(["--owner", "alice", "--slug", "demo", "--version", "1.0.0"]),
-    ).rejects.toThrow(/No SKILL.md found/);
+    ).rejects.toThrow(/No SKILL.md or AGENT.md found/);
   });
 
   it("errors instead of swallowing the next flag as this one's value", async () => {
@@ -321,6 +321,31 @@ describe("publish", () => {
       /doesn't exist yet -- pass --name/,
     );
     expect(uploadCalled).not.toHaveBeenCalled();
+  });
+
+  it("publishes an agent when the folder contains only AGENT.md, inferring --kind automatically", async () => {
+    writeFileSync(join(dir, "AGENT.md"), "# demo agent");
+    const captures: { uploadBody?: Uint8Array; createBody?: unknown } = {};
+    stubApiFirstPublish(captures);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish(["alice/demo@1.0.0", "--path", dir, "--name", "Demo Agent"]);
+
+    expect(captures.createBody).toMatchObject({ kind: "agent" });
+    expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
+  });
+
+  it("errors when --kind agent is passed but the folder has no AGENT.md", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    await expect(
+      publish([`alice/demo@1.0.0`, "--path", dir, "--kind", "agent", "--name", "N"]),
+    ).rejects.toThrow(/AGENT.md/);
+  });
+
+  it("errors when both SKILL.md and AGENT.md are present, with no --kind to disambiguate", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    writeFileSync(join(dir, "AGENT.md"), "# demo agent");
+    await expect(publish([`alice/demo@1.0.0`, "--path", dir])).rejects.toThrow(/--kind/);
   });
 
   it("errors clearly when the created skill lands under a different owner than requested", async () => {

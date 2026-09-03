@@ -36,7 +36,7 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
 }
 
 const USAGE =
-  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]\n" +
+  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--kind skill|agent] [--json]\n" +
   "   or: ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
@@ -123,6 +123,7 @@ function parsePublishArgs(args: string[]): {
   license?: string;
   homepage?: string;
   repository?: string;
+  kind?: string;
 } {
   const pathFlag = flagValue(args, "--path");
   let owner = flagValue(args, "--owner");
@@ -134,6 +135,7 @@ function parsePublishArgs(args: string[]): {
   const license = flagValue(args, "--license");
   const homepage = flagValue(args, "--homepage");
   const repository = flagValue(args, "--repository");
+  const kind = flagValue(args, "--kind");
   let legacyPath: string | undefined;
 
   const first = args[0];
@@ -154,12 +156,15 @@ function parsePublishArgs(args: string[]): {
   if (!SEMVER_RE.test(version)) {
     throw new Error(`--version must be a semver like 1.2.3 (got "${version}").\n${USAGE}`);
   }
+  if (kind !== undefined && kind !== "skill" && kind !== "agent") {
+    throw new Error(`--kind must be "skill" or "agent" (got "${kind}").\n${USAGE}`);
+  }
   // Validated here, before any network call (including the tar/gzip of the
   // skill directory) -- these only ever reach the server via
   // createSkillForPublish's create-skill body (ahood-cli#34).
   if (homepage !== undefined) validateExternalUrl(homepage, "--homepage");
   if (repository !== undefined) validateExternalUrl(repository, "--repository");
-  return { owner, skill, version, path: pathFlag ?? legacyPath ?? ".", name, tagline, tags, license, homepage, repository };
+  return { owner, skill, version, path: pathFlag ?? legacyPath ?? ".", name, tagline, tags, license, homepage, repository, kind };
 }
 
 // Creates the skill under the caller's own account when versions/init 404s
@@ -171,7 +176,7 @@ function parsePublishArgs(args: string[]): {
 async function createSkillForPublish(
   owner: string,
   skill: string,
-  opts: { name?: string; tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string },
+  opts: { name?: string; tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string; kind?: string },
   jsonOutput: boolean,
 ): Promise<CreateResponse> {
   if (!opts.name) {
@@ -185,6 +190,7 @@ async function createSkillForPublish(
   if (opts.license !== undefined) body.license = opts.license;
   if (opts.homepage !== undefined) body.homepage = opts.homepage;
   if (opts.repository !== undefined) body.repository = opts.repository;
+  if (opts.kind !== undefined) body.kind = opts.kind;
 
   const created = await apiJson<CreateResponse>("/api/v1/skills", {
     method: "POST",
@@ -213,7 +219,7 @@ async function initVersion(
   skill: string,
   version: string,
   packageSizeBytes: number,
-  createOpts: { name?: string; tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string },
+  createOpts: { name?: string; tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string; kind?: string },
   jsonOutput: boolean,
 ): Promise<{ init: InitResponse; created?: CreateResponse }> {
   const path = `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/init`;
@@ -241,10 +247,26 @@ async function initVersion(
 export async function publish(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   try {
-    const { owner, skill, version, path, name, tagline, tags, license, homepage, repository } = parsePublishArgs(args);
+    const { owner, skill, version, path, name, tagline, tags, license, homepage, repository, kind } = parsePublishArgs(args);
+
     const skillMdPath = join(path, "SKILL.md");
-    if (!existsSync(skillMdPath)) {
-      throw new Error(`No SKILL.md found at ${skillMdPath} -- publish must point at a skill folder's root.`);
+    const agentMdPath = join(path, "AGENT.md");
+    const hasSkillMd = existsSync(skillMdPath);
+    const hasAgentMd = existsSync(agentMdPath);
+
+    let resolvedKind = kind;
+    if (kind === "agent") {
+      if (!hasAgentMd) throw new Error(`No AGENT.md found at ${agentMdPath} -- publish --kind agent must point at a folder containing AGENT.md.`);
+    } else if (kind === "skill" || kind === undefined) {
+      if (hasSkillMd && hasAgentMd) {
+        throw new Error(`Both SKILL.md and AGENT.md found at ${path} -- pass --kind skill or --kind agent to disambiguate.`);
+      }
+      if (!hasSkillMd && hasAgentMd) {
+        resolvedKind = "agent"; // inferred: only AGENT.md present, no --kind needed
+      } else if (!hasSkillMd && !hasAgentMd) {
+        throw new Error(`No SKILL.md or AGENT.md found at ${path} -- publish must point at a skill or agent folder's root.`);
+      }
+      // else: hasSkillMd only -- unchanged existing behavior, resolvedKind stays undefined (server defaults to 'skill')
     }
 
     const archive = await tarGzDirectory(path);
@@ -254,7 +276,7 @@ export async function publish(args: string[]): Promise<void> {
       skill,
       version,
       archive.length,
-      { name, tagline, tags, license, homepage, repository },
+      { name, tagline, tags, license, homepage, repository, kind: resolvedKind },
       jsonOutput,
     );
 
