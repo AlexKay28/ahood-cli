@@ -274,14 +274,7 @@ export async function publish(args: string[]): Promise<void> {
         );
       }
       if (present.length === 0) {
-        // Deviates from the brief's literal wording ("No SKILL.md, AGENT.md,
-        // or server.json found") to preserve the exact substring
-        // "No SKILL.md or AGENT.md found" that two pre-existing tests
-        // ("rejects when no SKILL.md is found" and "errors instead of
-        // treating a flag as the legacy path...") assert against via regex
-        // -- the brief's own Step 4 requires those to keep passing unchanged,
-        // which its literal Step 3 wording would otherwise break.
-        throw new Error(`No SKILL.md or AGENT.md found at ${path} (server.json not found either) -- publish must point at a skill, agent, or mcp folder's root.`);
+        throw new Error(`No SKILL.md, AGENT.md, or server.json found at ${path} -- publish must point at a skill, agent, or mcp folder's root.`);
       }
       if (hasAgentMd) {
         resolvedKind = "agent"; // inferred: only AGENT.md present, no --kind needed

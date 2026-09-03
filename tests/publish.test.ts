@@ -117,7 +117,7 @@ describe("publish", () => {
   });
 
   it("rejects when no SKILL.md is found", async () => {
-    await expect(publish([`alice/demo@1.0.0`, "--path", dir])).rejects.toThrow(/No SKILL.md or AGENT.md found/);
+    await expect(publish([`alice/demo@1.0.0`, "--path", dir])).rejects.toThrow(/No SKILL\.md, AGENT\.md, or server\.json found/);
   });
 
   it("rejects an invalid --version", async () => {
@@ -152,7 +152,7 @@ describe("publish", () => {
   it("errors instead of treating a flag as the legacy path when the path is omitted", async () => {
     await expect(
       publish(["--owner", "alice", "--slug", "demo", "--version", "1.0.0"]),
-    ).rejects.toThrow(/No SKILL.md or AGENT.md found/);
+    ).rejects.toThrow(/No SKILL\.md, AGENT\.md, or server\.json found/);
   });
 
   it("errors instead of swallowing the next flag as this one's value", async () => {
