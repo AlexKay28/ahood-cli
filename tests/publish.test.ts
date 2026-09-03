@@ -370,6 +370,58 @@ describe("publish", () => {
     ).rejects.toThrow(/SKILL.md/);
   });
 
+  it("publishes an mcp artifact when the folder contains only server.json, inferring --kind automatically", async () => {
+    writeFileSync(
+      join(dir, "server.json"),
+      JSON.stringify({ name: "hosted-search", description: "d", remotes: [{ url: "https://mcp.example.com/sse" }] }),
+    );
+    const captures: { uploadBody?: Uint8Array; createBody?: unknown } = {};
+    stubApiFirstPublish(captures);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish(["alice/demo@1.0.0", "--path", dir, "--name", "Hosted Search"]);
+
+    expect(captures.createBody).toMatchObject({ kind: "mcp" });
+    expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
+  });
+
+  it("errors when --kind mcp is passed but the folder has no server.json", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    await expect(
+      publish([`alice/demo@1.0.0`, "--path", dir, "--kind", "mcp", "--name", "N"]),
+    ).rejects.toThrow(/server\.json/);
+  });
+
+  it("rejects an invalid --kind value", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    await expect(
+      publish([`alice/demo@1.0.0`, "--path", dir, "--kind", "bogus", "--name", "N"]),
+    ).rejects.toThrow(/--kind must be/);
+  });
+
+  it("errors when SKILL.md, AGENT.md, and server.json are all present, with no --kind to disambiguate", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    writeFileSync(join(dir, "AGENT.md"), "# demo agent");
+    writeFileSync(join(dir, "server.json"), JSON.stringify({ name: "n", description: "d", remotes: [{ url: "https://x.test" }] }));
+    await expect(publish([`alice/demo@1.0.0`, "--path", dir])).rejects.toThrow(/Multiple root files found/);
+  });
+
+  it("publishes successfully when --kind mcp is passed explicitly and server.json is present, even alongside SKILL.md", async () => {
+    writeFileSync(
+      join(dir, "server.json"),
+      JSON.stringify({ name: "hosted-search", description: "d", remotes: [{ url: "https://mcp.example.com/sse" }] }),
+    );
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const captures: { uploadBody?: Uint8Array; createBody?: unknown } = {};
+    stubApiFirstPublish(captures);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish(["alice/demo@1.0.0", "--path", dir, "--kind", "mcp", "--name", "N"]);
+
+    expect(captures.createBody).toMatchObject({ kind: "mcp" });
+    expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
+  });
+
   it("errors clearly when the created skill lands under a different owner than requested", async () => {
     writeFileSync(join(dir, "SKILL.md"), "# demo");
     const captures: { uploadBody?: Uint8Array; createBody?: unknown } = {};

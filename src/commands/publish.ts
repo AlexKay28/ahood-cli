@@ -36,7 +36,7 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
 }
 
 const USAGE =
-  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]\n" +
+  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]\n" +
   "   or: ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
@@ -156,8 +156,8 @@ function parsePublishArgs(args: string[]): {
   if (!SEMVER_RE.test(version)) {
     throw new Error(`--version must be a semver like 1.2.3 (got "${version}").\n${USAGE}`);
   }
-  if (kind !== undefined && kind !== "skill" && kind !== "agent") {
-    throw new Error(`--kind must be "skill" or "agent" (got "${kind}").\n${USAGE}`);
+  if (kind !== undefined && kind !== "skill" && kind !== "agent" && kind !== "mcp") {
+    throw new Error(`--kind must be "skill", "agent", or "mcp" (got "${kind}").\n${USAGE}`);
   }
   // Validated here, before any network call (including the tar/gzip of the
   // skill directory) -- these only ever reach the server via
@@ -251,23 +251,42 @@ export async function publish(args: string[]): Promise<void> {
 
     const skillMdPath = join(path, "SKILL.md");
     const agentMdPath = join(path, "AGENT.md");
+    const serverJsonPath = join(path, "server.json");
     const hasSkillMd = existsSync(skillMdPath);
     const hasAgentMd = existsSync(agentMdPath);
+    const hasServerJson = existsSync(serverJsonPath);
 
     let resolvedKind = kind;
     if (kind === "agent") {
       if (!hasAgentMd) throw new Error(`No AGENT.md found at ${agentMdPath} -- publish --kind agent must point at a folder containing AGENT.md.`);
     } else if (kind === "skill") {
       if (!hasSkillMd) throw new Error(`No SKILL.md found at ${skillMdPath} -- publish --kind skill must point at a folder containing SKILL.md.`);
+    } else if (kind === "mcp") {
+      if (!hasServerJson) throw new Error(`No server.json found at ${serverJsonPath} -- publish --kind mcp must point at a folder containing server.json.`);
     } else {
-      // kind === undefined -- infer from whichever file(s) are actually present
-      if (hasSkillMd && hasAgentMd) {
-        throw new Error(`Both SKILL.md and AGENT.md found at ${path} -- pass --kind skill or --kind agent to disambiguate.`);
+      // kind === undefined -- infer from whichever root file(s) are actually present
+      const present = [hasSkillMd && "SKILL.md", hasAgentMd && "AGENT.md", hasServerJson && "server.json"].filter(
+        Boolean,
+      ) as string[];
+      if (present.length > 1) {
+        throw new Error(
+          `Multiple root files found at ${path} (${present.join(", ")}) -- pass --kind skill, --kind agent, or --kind mcp to disambiguate.`,
+        );
       }
-      if (!hasSkillMd && hasAgentMd) {
+      if (present.length === 0) {
+        // Deviates from the brief's literal wording ("No SKILL.md, AGENT.md,
+        // or server.json found") to preserve the exact substring
+        // "No SKILL.md or AGENT.md found" that two pre-existing tests
+        // ("rejects when no SKILL.md is found" and "errors instead of
+        // treating a flag as the legacy path...") assert against via regex
+        // -- the brief's own Step 4 requires those to keep passing unchanged,
+        // which its literal Step 3 wording would otherwise break.
+        throw new Error(`No SKILL.md or AGENT.md found at ${path} (server.json not found either) -- publish must point at a skill, agent, or mcp folder's root.`);
+      }
+      if (hasAgentMd) {
         resolvedKind = "agent"; // inferred: only AGENT.md present, no --kind needed
-      } else if (!hasSkillMd && !hasAgentMd) {
-        throw new Error(`No SKILL.md or AGENT.md found at ${path} -- publish must point at a skill or agent folder's root.`);
+      } else if (hasServerJson) {
+        resolvedKind = "mcp"; // inferred: only server.json present, no --kind needed
       }
       // else: hasSkillMd only -- resolvedKind stays undefined (unchanged existing behavior, server defaults to 'skill')
     }

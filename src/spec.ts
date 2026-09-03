@@ -110,3 +110,9 @@ export const AGENTS_ROOT = join(".claude", "agents");
 export function agentPath(owner: string, skill: string): string {
   return join(AGENTS_ROOT, `${owner}@${skill}.md`);
 }
+
+// .mcp.json lives at the project root -- Claude Code's own convention for
+// MCP server configuration (unlike .claude/skills or .claude/agents, this
+// file isn't under .claude/ at all, since it's a convention MCP clients
+// broadly share, not one specific to this CLI).
+export const MCP_CONFIG_PATH = ".mcp.json";
