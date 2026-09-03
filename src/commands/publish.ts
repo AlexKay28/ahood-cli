@@ -257,7 +257,10 @@ export async function publish(args: string[]): Promise<void> {
     let resolvedKind = kind;
     if (kind === "agent") {
       if (!hasAgentMd) throw new Error(`No AGENT.md found at ${agentMdPath} -- publish --kind agent must point at a folder containing AGENT.md.`);
-    } else if (kind === "skill" || kind === undefined) {
+    } else if (kind === "skill") {
+      if (!hasSkillMd) throw new Error(`No SKILL.md found at ${skillMdPath} -- publish --kind skill must point at a folder containing SKILL.md.`);
+    } else {
+      // kind === undefined -- infer from whichever file(s) are actually present
       if (hasSkillMd && hasAgentMd) {
         throw new Error(`Both SKILL.md and AGENT.md found at ${path} -- pass --kind skill or --kind agent to disambiguate.`);
       }
@@ -266,7 +269,7 @@ export async function publish(args: string[]): Promise<void> {
       } else if (!hasSkillMd && !hasAgentMd) {
         throw new Error(`No SKILL.md or AGENT.md found at ${path} -- publish must point at a skill or agent folder's root.`);
       }
-      // else: hasSkillMd only -- unchanged existing behavior, resolvedKind stays undefined (server defaults to 'skill')
+      // else: hasSkillMd only -- resolvedKind stays undefined (unchanged existing behavior, server defaults to 'skill')
     }
 
     const archive = await tarGzDirectory(path);

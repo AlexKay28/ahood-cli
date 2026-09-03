@@ -348,6 +348,28 @@ describe("publish", () => {
     await expect(publish([`alice/demo@1.0.0`, "--path", dir])).rejects.toThrow(/--kind/);
   });
 
+  it("publishes successfully when --kind agent is passed explicitly and AGENT.md is present, even alongside SKILL.md", async () => {
+    // Writing both AGENT.md and SKILL.md proves the explicit --kind wins
+    // over inference/ambiguity handling, not just that AGENT.md alone works.
+    writeFileSync(join(dir, "AGENT.md"), "# demo agent");
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const captures: { uploadBody?: Uint8Array; createBody?: unknown } = {};
+    stubApiFirstPublish(captures);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish(["alice/demo@1.0.0", "--path", dir, "--kind", "agent", "--name", "N"]);
+
+    expect(captures.createBody).toMatchObject({ kind: "agent" });
+    expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
+  });
+
+  it("errors when --kind skill is passed explicitly but the folder has only AGENT.md, instead of silently inferring agent", async () => {
+    writeFileSync(join(dir, "AGENT.md"), "# demo agent");
+    await expect(
+      publish([`alice/demo@1.0.0`, "--path", dir, "--kind", "skill", "--name", "N"]),
+    ).rejects.toThrow(/SKILL.md/);
+  });
+
   it("errors clearly when the created skill lands under a different owner than requested", async () => {
     writeFileSync(join(dir, "SKILL.md"), "# demo");
     const captures: { uploadBody?: Uint8Array; createBody?: unknown } = {};
