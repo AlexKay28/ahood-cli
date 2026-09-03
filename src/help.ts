@@ -100,7 +100,9 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     desc:
       "Install a skill into .claude/skills/, pinned in the lockfile. An artifact published with --kind agent " +
       "installs instead as a single file at .claude/agents/<owner>@<skill>.md (Claude Code's own subagent " +
-      "loader scans .claude/agents/*.md as flat files), not a .claude/skills/ directory.",
+      "loader scans .claude/agents/*.md as flat files), not a .claude/skills/ directory. An artifact published " +
+      "with --kind mcp installs by merging an entry into .mcp.json instead, prompting for any secret " +
+      "environment variables its server.json declares that aren't already set in your shell.",
     examples: ["ahood skill add alice/pdf-tools", "ahood skill add alice/pdf-tools@1.2.0"],
   },
   {
@@ -178,19 +180,19 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage:
-      "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]",
+      "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]",
     summary:
-      "Publish a new version of a skill or agent from a folder containing SKILL.md or AGENT.md, creating the skill first if it doesn't already exist.",
+      "Publish a new version of a skill, agent, or mcp server manifest from a folder containing SKILL.md, AGENT.md, or server.json, creating the skill first if it doesn't already exist.",
     desc:
-      "Publish a new version of a skill or agent from a folder containing SKILL.md or AGENT.md. If the artifact " +
-      "doesn't exist yet, this creates it first -- pass --name to set its display name, and --kind agent if " +
-      "publishing an AGENT.md (auto-detected from the folder contents when only one of SKILL.md/AGENT.md is present). " +
+      "Publish a new version of a skill, agent, or mcp server manifest from a folder containing SKILL.md, AGENT.md, or server.json. If the artifact " +
+      "doesn't exist yet, this creates it first -- pass --name to set its display name, and --kind agent or --kind mcp if " +
+      "publishing an AGENT.md or server.json (auto-detected from the folder contents when only one of SKILL.md/AGENT.md/server.json is present). " +
       "--name is required when creating; optionally also pass --tagline/--tags/--license/--homepage/--repository. " +
       "Processing happens server-side after upload; this command polls and reports the final published/failed status. " +
       "The legacy form `ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted. " +
       "Every flag also accepts the --flag=value form, needed when a value itself starts with --.",
     flags: [
-      "--kind skill|agent            What kind of artifact this is. Auto-detected from SKILL.md/AGENT.md when omitted.",
+      "--kind skill|agent|mcp        What kind of artifact this is. Auto-detected from SKILL.md/AGENT.md/server.json when omitted.",
       "--name <text>                 Required only when creating the artifact on this publish.",
       "--tagline <text>              Short one-line description, used only when creating.",
       "--tags <comma,separated>      Initial tags, used only when creating.",
