@@ -38,15 +38,20 @@ function formatSize(bytes: number): string {
   return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
+export async function listSkillVersions(owner: string, skill: string): Promise<SkillVersion[]> {
+  const { versions } = await apiJson<VersionsResponse>(
+    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions`,
+  );
+  return versions;
+}
+
 export async function versions(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const spec = args.find((a) => !a.startsWith("--"));
   if (!spec) throw new UsageError(USAGE);
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
 
-  const { versions: list } = await apiJson<VersionsResponse>(
-    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions`,
-  );
+  const list = await listSkillVersions(owner, skill);
 
   if (jsonOutput) {
     console.log(JSON.stringify(list));
