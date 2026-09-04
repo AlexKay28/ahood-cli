@@ -100,6 +100,21 @@ describe("ahood mcp tools", () => {
     expect(firstTextBody(result.content)).toEqual(skills);
   });
 
+  it("skill_search degrades to an empty array (not a protocol error) when the API response is missing the skills key", async () => {
+    // JSON.stringify(undefined) is the JS value `undefined`, not a string --
+    // the MCP SDK would reject that as an invalid tool result and throw a
+    // raw protocol-level error instead of the isError result safeTool
+    // exists to guarantee. searchSkills's `?? []` guard plus safeTool's
+    // `?? null` backstop together must degrade this gracefully instead.
+    stubApi(200, {});
+    const client = await connectedClient();
+
+    const result = await client.callTool({ name: "skill_search", arguments: { query: "demo" } });
+
+    expect(result.isError).toBeFalsy();
+    expect(firstTextBody(result.content)).toEqual([]);
+  });
+
   it("skill_search maps a 404 to a structured isError result with error_code not_found", async () => {
     stubApi(404, { error: "not found" });
     const client = await connectedClient();
@@ -108,6 +123,33 @@ describe("ahood mcp tools", () => {
 
     expect(result.isError).toBe(true);
     expect((firstTextBody(result.content) as { error_code: string }).error_code).toBe("not_found");
+  });
+
+  it("skill_view rejects an invalid owner segment locally, before any network request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await connectedClient();
+
+    const result = await client.callTool({ name: "skill_view", arguments: { owner: "..", skill: "profile" } });
+
+    expect(result.isError).toBe(true);
+    expect((firstTextBody(result.content) as { error_code: string }).error_code).toBe("usage_error");
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+  });
+
+  it("skill_view rejects an absurdly long owner segment locally, before any network request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await connectedClient();
+
+    const result = await client.callTool({
+      name: "skill_view",
+      arguments: { owner: "a".repeat(200), skill: "demo" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect((firstTextBody(result.content) as { error_code: string }).error_code).toBe("usage_error");
+    expect(fetchMock).toHaveBeenCalledTimes(0);
   });
 
   it("skill_view returns the skill detail object", async () => {
@@ -128,7 +170,43 @@ describe("ahood mcp tools", () => {
     const result = await client.callTool({ name: "skill_read", arguments: { owner: "alice", skill: "demo" } });
 
     expect(result.isError).toBeFalsy();
-    expect(firstTextBody(result.content)).toEqual({ version: "1.0.0", content: "# Demo" });
+    expect(firstTextBody(result.content)).toEqual({ version: "1.0.0", content: "# Demo", yanked_at: null, yanked_reason: null });
+  });
+
+  it("skill_read surfaces yanked_at/yanked_reason for MCP callers (no stderr visibility)", async () => {
+    stubApi(200, {
+      owner: "alice",
+      slug: "demo",
+      skill_versions: {
+        version: "1.0.0",
+        skill_md_content: "# Demo",
+        yanked_at: "2026-01-03T00:00:00Z",
+        yanked_reason: "contains a critical bug",
+      },
+    });
+    const client = await connectedClient();
+
+    const result = await client.callTool({ name: "skill_read", arguments: { owner: "alice", skill: "demo" } });
+
+    expect(result.isError).toBeFalsy();
+    expect(firstTextBody(result.content)).toEqual({
+      version: "1.0.0",
+      content: "# Demo",
+      yanked_at: "2026-01-03T00:00:00Z",
+      yanked_reason: "contains a critical bug",
+    });
+  });
+
+  it("skill_read rejects an invalid owner segment locally, before any network request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await connectedClient();
+
+    const result = await client.callTool({ name: "skill_read", arguments: { owner: "..", skill: "profile" } });
+
+    expect(result.isError).toBe(true);
+    expect((firstTextBody(result.content) as { error_code: string }).error_code).toBe("usage_error");
+    expect(fetchMock).toHaveBeenCalledTimes(0);
   });
 
   it("skill_read maps 'no published version' to a general_error isError result", async () => {
@@ -141,6 +219,18 @@ describe("ahood mcp tools", () => {
     const body = firstTextBody(result.content) as { error_code: string; error: string };
     expect(body.error_code).toBe("general_error");
     expect(body.error).toMatch(/no published version/);
+  });
+
+  it("skill_versions rejects an invalid owner segment locally, before any network request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await connectedClient();
+
+    const result = await client.callTool({ name: "skill_versions", arguments: { owner: "..", skill: "profile" } });
+
+    expect(result.isError).toBe(true);
+    expect((firstTextBody(result.content) as { error_code: string }).error_code).toBe("usage_error");
+    expect(fetchMock).toHaveBeenCalledTimes(0);
   });
 
   it("skill_versions returns the versions array", async () => {

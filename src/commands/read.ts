@@ -21,7 +21,10 @@ type SkillReadDetail = {
   } | null;
 };
 
-export async function readSkillMd(owner: string, skill: string): Promise<{ version: string; content: string }> {
+export async function readSkillMd(
+  owner: string,
+  skill: string,
+): Promise<{ version: string; content: string; yanked_at: string | null; yanked_reason: string | null }> {
   const detail = await apiJson<SkillReadDetail>(
     `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`,
   );
@@ -46,7 +49,18 @@ export async function readSkillMd(owner: string, skill: string): Promise<{ versi
     throw new Error(`${owner}/${skill}@${detail.skill_versions.version} has no SKILL.md content available.`);
   }
 
-  return { version: detail.skill_versions.version, content };
+  return {
+    version: detail.skill_versions.version,
+    content,
+    // The CLI already warns about a yanked version on stderr above, but an
+    // MCP caller has no visibility into stderr -- unlike skill_view, whose
+    // returned object already surfaces yanked_at/yanked_reason, skill_read
+    // was silently dropping this signal for MCP callers entirely. read()
+    // below still destructures only {version, content} for the CLI's
+    // --json output, so this addition doesn't change that shape.
+    yanked_at: detail.skill_versions.yanked_at ?? null,
+    yanked_reason: detail.skill_versions.yanked_reason ?? null,
+  };
 }
 
 export async function read(args: string[]): Promise<void> {

@@ -30,7 +30,14 @@ export function safeTool<TInput>(
   return async (input: TInput) => {
     try {
       const result = await fn(input);
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      // Defensive backstop: JSON.stringify(undefined) evaluates to the JS
+      // value `undefined`, not a string -- if any tool's core function ever
+      // returns undefined (e.g. a malformed API response missing an
+      // expected key), the MCP SDK rejects that as an invalid tool result
+      // and throws a raw protocol-level error instead of the structured
+      // isError result this wrapper exists to guarantee. Coalescing to null
+      // keeps `text` a string no matter what `fn` returns.
+      return { content: [{ type: "text", text: JSON.stringify(result ?? null) }] };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const body = { error: message, error_code: errorCodeFor(error) };

@@ -42,7 +42,7 @@ export async function listSkillVersions(owner: string, skill: string): Promise<S
   const { versions } = await apiJson<VersionsResponse>(
     `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions`,
   );
-  return versions;
+  return versions ?? [];
 }
 
 export async function versions(args: string[]): Promise<void> {

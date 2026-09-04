@@ -22,7 +22,7 @@ type OwnSkill = {
 
 export async function listOwnSkills(): Promise<OwnSkill[]> {
   const { skills } = await apiJson<{ skills: OwnSkill[] }>("/api/v1/skills?mine=true");
-  return skills;
+  return skills ?? [];
 }
 
 export async function listSkills(args: string[] = []): Promise<void> {

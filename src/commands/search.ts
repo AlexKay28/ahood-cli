@@ -10,7 +10,7 @@ export async function searchSkills(query: string, limit?: number): Promise<Searc
   const qs = new URLSearchParams({ q: query });
   if (limit !== undefined) qs.set("per_page", String(limit));
   const { skills } = await apiJson<SearchResult>(`/api/v1/skills?${qs}`);
-  return skills;
+  return skills ?? [];
 }
 
 export async function search(args: string[]): Promise<void> {
