@@ -51,6 +51,10 @@ function openBrowser(url: string): void {
   }
 }
 
+export async function viewSkill(owner: string, skill: string): Promise<SkillDetail> {
+  return apiJson<SkillDetail>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`);
+}
+
 export async function view(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const web = args.includes("--web");
@@ -64,9 +68,7 @@ export async function view(args: string[]): Promise<void> {
     return;
   }
 
-  const detail = await apiJson<SkillDetail>(
-    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`,
-  );
+  const detail = await viewSkill(owner, skill);
 
   if (jsonOutput) {
     console.log(JSON.stringify(detail));
