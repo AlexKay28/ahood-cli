@@ -32,7 +32,9 @@
     "sync-readme": "node scripts/sync-readme.mjs"
   },
   "dependencies": {
-    "tar-stream": "^3.2.1"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "tar-stream": "^3.2.1",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^20",
