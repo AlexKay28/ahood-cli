@@ -1,20 +1,21 @@
 import { apiJson } from "../http.js";
 import { flagValue } from "../flags.js";
+import { UsageError } from "../usage-error.js";
 
 type SearchResult = { skills: Array<{ slug: string; name: string; tagline: string | null; downloads_count: number; profiles: { username: string } }> };
 
-const USAGE = "Usage: ahood search <query> [--json] [--limit <n>]";
+const USAGE = "Usage: ahood skill search <query> [--json] [--limit <n>]";
 
 export async function search(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const limit = flagValue(args, "--limit");
   const queryParts = args.filter((a, i) => a !== "--json" && a !== "--limit" && args[i - 1] !== "--limit");
   const unknownFlag = queryParts.find((a) => a.startsWith("--"));
-  if (unknownFlag) throw new Error(`Unknown flag: ${unknownFlag}\n${USAGE}`);
+  if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${USAGE}`);
   const query = queryParts.join(" ");
-  if (!query) throw new Error(USAGE);
+  if (!query) throw new UsageError(USAGE);
   if (limit !== undefined && (!/^\d+$/.test(limit) || Number(limit) < 1)) {
-    throw new Error(`--limit must be a positive integer (got "${limit}").\n${USAGE}`);
+    throw new UsageError(`--limit must be a positive integer (got "${limit}").\n${USAGE}`);
   }
 
   const qs = new URLSearchParams({ q: query });

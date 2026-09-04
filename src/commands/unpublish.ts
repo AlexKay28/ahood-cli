@@ -2,8 +2,9 @@ import { apiJson } from "../http.js";
 import { confirm } from "../confirm.js";
 import { parseOwnerSkill, parseOwnerSkillVersion } from "../spec.js";
 import { fetchVersionMeta } from "./add.js";
+import { UsageError } from "../usage-error.js";
 
-const USAGE = "Usage: ahood unpublish <owner>/<skill>[@version] [--yes]";
+const USAGE = "Usage: ahood skill unpublish <owner>/<skill>[@version] [--yes]";
 
 // yankVersion's response is `ok: true` plus an optional latest_version_warning
 // when the post-yank latest_version_id recompute failed -- see the comment at
@@ -25,7 +26,7 @@ function isVersioned(spec: string): boolean {
 export async function unpublish(args: string[]): Promise<void> {
   const yes = args.includes("--yes");
   const spec = args.find((a) => !a.startsWith("--"));
-  if (!spec) throw new Error(USAGE);
+  if (!spec) throw new UsageError(USAGE);
 
   if (isVersioned(spec)) {
     const { owner, skill, version: parsedVersion } = parseOwnerSkillVersion(spec, USAGE);
@@ -83,7 +84,7 @@ export async function unpublish(args: string[]): Promise<void> {
     // the whole request, since the yank already took effect. Discarding the
     // response body would silently drop that signal (ahood-cli#68): the
     // pointer could now be stale with nothing in the terminal to say so, and
-    // a later `ahood add owner/skill` trusts latest_version_id completely.
+    // a later `ahood skill add owner/skill` trusts latest_version_id completely.
     if (result.latest_version_warning) {
       console.warn(`WARNING: ${result.latest_version_warning}`);
     }
@@ -106,5 +107,5 @@ export async function unpublish(args: string[]): Promise<void> {
   }
 
   await apiJson(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`, { method: "DELETE" });
-  console.log(`Unpublished ${key}. Run \`ahood remove ${key}\` to also remove your local copy.`);
+  console.log(`Unpublished ${key}. Run \`ahood skill remove ${key}\` to also remove your local copy.`);
 }

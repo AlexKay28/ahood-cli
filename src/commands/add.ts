@@ -7,8 +7,9 @@ import { apiFetch, apiJson } from "../http.js";
 import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, AGENTS_ROOT, MCP_CONFIG_PATH } from "../spec.js";
 import { readLockfile, writeLockfileEntry, withLock, writeJsonFileAtomic } from "../lockfile.js";
 import { promptSecret } from "../secret-prompt.js";
+import { UsageError } from "../usage-error.js";
 
-const USAGE = "Usage: ahood add <owner>/<skill>[@version]";
+const USAGE = "Usage: ahood skill add <owner>/<skill>[@version]";
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB compressed
 const MAX_EXTRACTED_BYTES = 200 * 1024 * 1024; // 200 MB decompressed
 const MAX_ENTRY_COUNT = 10_000;
@@ -461,7 +462,7 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
 
 export async function add(args: string[]): Promise<void> {
   const spec = args[0];
-  if (!spec) throw new Error(USAGE);
+  if (!spec) throw new UsageError(USAGE);
   const { owner, skill, version: requestedVersion } = parseOwnerSkillVersion(spec, USAGE);
   const key = `${owner}/${skill}`;
 

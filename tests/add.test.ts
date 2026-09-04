@@ -187,7 +187,7 @@ describe("add", () => {
   });
 
   it("rejects a spec whose owner/skill segments try to escape .claude/skills/", async () => {
-    await expect(add(["../../etc"])).rejects.toThrow(/Usage: ahood add/);
+    await expect(add(["../../etc"])).rejects.toThrow(/Usage: ahood skill add/);
     await expect(add(["alice/.."])).rejects.toThrow(/Invalid skill/);
     expect(existsSync(join(dir, ".claude"))).toBe(false);
   });

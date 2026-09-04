@@ -68,12 +68,12 @@ describe("whoami", () => {
     process.exitCode = 0;
   });
 
-  it("exits non-zero when no token is configured at all", async () => {
+  it("exits with the auth-required code when no token is configured at all", async () => {
     delete process.env.AHOOD_TOKEN;
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     await whoami([]);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Not logged in/));
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(4);
   });
 
   it("reports success for a session-backed token (200) when the profile fetch also fails", async () => {
@@ -95,13 +95,13 @@ describe("whoami", () => {
     expect(process.exitCode).toBe(0);
   });
 
-  it("exits non-zero with an 'invalid or revoked' message on 401", async () => {
+  it("exits with the auth-required code and an 'invalid or revoked' message on 401", async () => {
     process.env.AHOOD_TOKEN = "tok_test";
     stubApi(401, { error: "unauthorized" });
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     await whoami([]);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/invalid or has been revoked/));
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(4);
   });
 
   it("distinguishes a network/server failure from an invalid token", async () => {

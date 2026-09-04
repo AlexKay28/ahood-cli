@@ -1,6 +1,7 @@
 import { apiJson } from "../http.js";
 import { flagValue } from "../flags.js";
 import { parseOwnerSkill, validateExternalUrl } from "../spec.js";
+import { UsageError } from "../usage-error.js";
 
 type UpdateResponse = {
   slug: string;
@@ -19,7 +20,7 @@ type UpdateResponse = {
 };
 
 const USAGE =
-  "Usage: ahood edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]";
+  "Usage: ahood skill edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]";
 
 // Mirrors PATCH /api/v1/skills/{owner}/{skill}'s allow-list exactly
 // (lib/skills/mutations.ts's UpdateSkillInput) -- only a field the caller
@@ -28,7 +29,7 @@ const USAGE =
 // that are present on the body at all).
 export async function edit(args: string[]): Promise<void> {
   const spec = args[0];
-  if (!spec || spec.startsWith("--")) throw new Error(USAGE);
+  if (!spec || spec.startsWith("--")) throw new UsageError(USAGE);
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
 
   const body: Record<string, unknown> = {};
@@ -41,7 +42,7 @@ export async function edit(args: string[]): Promise<void> {
   const visibility = flagValue(args, "--visibility");
   if (visibility !== undefined) {
     if (visibility !== "public" && visibility !== "private") {
-      throw new Error(`--visibility must be "public" or "private" (got "${visibility}").`);
+      throw new UsageError(`--visibility must be "public" or "private" (got "${visibility}").`);
     }
     body.visibility = visibility;
   }
@@ -57,7 +58,7 @@ export async function edit(args: string[]): Promise<void> {
   }
 
   if (Object.keys(body).length === 0) {
-    throw new Error(
+    throw new UsageError(
       "Nothing to update -- pass at least one of --tagline, --tags, --license, --visibility, --homepage, --repository.",
     );
   }

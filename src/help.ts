@@ -331,10 +331,76 @@ export function formatCommandHelp(entry: CommandHelp): string {
   return lines.join("\n");
 }
 
+const FALLBACK_TERMINAL_WIDTH = 80;
+
+// Piped/redirected output (a script capturing `ahood skill --help`, a test)
+// has no TTY and so no column count -- falls back to a fixed width rather
+// than wrapping to whatever width happened to be inherited, so scripted use
+// gets stable, repeatable output.
+function terminalWidth(): number {
+  const columns = process.stdout.columns;
+  return columns && columns > 20 ? columns : FALLBACK_TERMINAL_WIDTH;
+}
+
+// Greedy word wrap -- doesn't split words, so a single word longer than
+// `width` is left on its own overlength line rather than being cut mid-word.
+function wrapText(text: string, width: number): string[] {
+  if (width < 10) return [text];
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > width && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+// Longest usage string an aligned label column will stretch to accommodate
+// -- past this, one outlier (e.g. `skill publish`'s usage line, with every
+// flag spelled out) would otherwise push every other row's description
+// column out with it, which is what made `ahood skill --help` wrap to
+// 300+ characters per line with no relation to the terminal's actual width
+// (ahood-cli#81). A row whose usage is longer than this gets its summary on
+// its own indented line instead of sharing the row.
+const MAX_LABEL_COLUMN = 50;
+
+// Renders a two-column command table (usage on the left, one-line summary on
+// the right, aligned and wrapped to the terminal width) -- shared by
+// formatSkillHelp/formatGroupHelp/formatHelp so all three `--help` listings
+// wrap the same way.
+function formatCommandTable(rows: Array<{ usage: string; summary: string }>): string[] {
+  const longest = Math.max(...rows.map((r) => r.usage.length));
+  const labelWidth = Math.min(longest, MAX_LABEL_COLUMN);
+  const columnWidth = labelWidth + 4; // 2-space left margin + 2-space gutter after the label
+  const summaryWidth = Math.max(20, terminalWidth() - columnWidth);
+  const indent = " ".repeat(columnWidth);
+
+  const lines: string[] = [];
+  for (const row of rows) {
+    const summaryLines = wrapText(row.summary, summaryWidth);
+    if (row.usage.length <= labelWidth) {
+      lines.push(`  ${row.usage.padEnd(labelWidth + 2)}${summaryLines[0]}`);
+    } else {
+      lines.push(`  ${row.usage}`);
+      lines.push(`${indent}${summaryLines[0]}`);
+    }
+    for (const continuation of summaryLines.slice(1)) {
+      lines.push(`${indent}${continuation}`);
+    }
+  }
+  return lines;
+}
+
 // `ahood skill --help` -- the group-level listing for every skill verb.
 export function formatSkillHelp(): string {
-  const width = Math.max(...SKILL_COMMANDS_HELP.map((c) => usageWithAliases(c).length));
-  const lines = SKILL_COMMANDS_HELP.map((c) => `  ${usageWithAliases(c).padEnd(width + 2)}${c.summary}`);
+  const lines = formatCommandTable(SKILL_COMMANDS_HELP.map((c) => ({ usage: usageWithAliases(c), summary: c.summary })));
   return [
     "ahood skill -- manage skills in the ahood registry",
     "",
@@ -347,8 +413,7 @@ export function formatSkillHelp(): string {
 
 // `ahood group --help` -- the group-level listing for every group verb.
 export function formatGroupHelp(): string {
-  const width = Math.max(...GROUP_COMMANDS_HELP.map((c) => usageWithAliases(c).length));
-  const lines = GROUP_COMMANDS_HELP.map((c) => `  ${usageWithAliases(c).padEnd(width + 2)}${c.summary}`);
+  const lines = formatCommandTable(GROUP_COMMANDS_HELP.map((c) => ({ usage: usageWithAliases(c), summary: c.summary })));
   return [
     "ahood group -- create private groups, invite members, and share skills with them",
     "",
@@ -368,16 +433,11 @@ export function formatHelp(): string {
   const groupGroupUsage = "ahood group <command>";
   const groupGroupSummary =
     "Create private groups and share skills with them -- run `ahood group --help` for the full list.";
-  const width = Math.max(
-    ...TOP_LEVEL_COMMANDS_HELP.map((c) => usageWithAliases(c).length),
-    skillGroupUsage.length,
-    groupGroupUsage.length,
-  );
-  const lines = [
-    ...TOP_LEVEL_COMMANDS_HELP.map((c) => `  ${usageWithAliases(c).padEnd(width + 2)}${c.summary}`),
-    `  ${skillGroupUsage.padEnd(width + 2)}${skillGroupSummary}`,
-    `  ${groupGroupUsage.padEnd(width + 2)}${groupGroupSummary}`,
-  ];
+  const lines = formatCommandTable([
+    ...TOP_LEVEL_COMMANDS_HELP.map((c) => ({ usage: usageWithAliases(c), summary: c.summary })),
+    { usage: skillGroupUsage, summary: skillGroupSummary },
+    { usage: groupGroupUsage, summary: groupGroupSummary },
+  ]);
   return [
     "ahood -- CLI for the ahood skills registry (https://ahood.vercel.app)",
     "",

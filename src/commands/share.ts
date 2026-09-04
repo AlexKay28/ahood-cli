@@ -1,6 +1,7 @@
 import { apiJson } from "../http.js";
 import { flagValue } from "../flags.js";
 import { parseOwnerSkill } from "../spec.js";
+import { UsageError } from "../usage-error.js";
 
 // These are skill-entity verbs (reached as `ahood skill share`/`ahood skill
 // unshare`, registered in SKILL_COMMANDS in index.ts), not group verbs --
@@ -19,10 +20,10 @@ type ShareResponse = { shared: boolean };
 // if --group happened to come first.
 export async function share(args: string[]): Promise<void> {
   const spec = args[0];
-  if (!spec || spec.startsWith("--")) throw new Error(SHARE_USAGE);
+  if (!spec || spec.startsWith("--")) throw new UsageError(SHARE_USAGE);
   const { owner, skill } = parseOwnerSkill(spec, SHARE_USAGE);
   const groupSlug = flagValue(args, "--group");
-  if (!groupSlug) throw new Error(SHARE_USAGE);
+  if (!groupSlug) throw new UsageError(SHARE_USAGE);
 
   await apiJson<ShareResponse>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/share`, {
     method: "POST",
@@ -34,10 +35,10 @@ export async function share(args: string[]): Promise<void> {
 
 export async function unshare(args: string[]): Promise<void> {
   const spec = args[0];
-  if (!spec || spec.startsWith("--")) throw new Error(UNSHARE_USAGE);
+  if (!spec || spec.startsWith("--")) throw new UsageError(UNSHARE_USAGE);
   const { owner, skill } = parseOwnerSkill(spec, UNSHARE_USAGE);
   const groupSlug = flagValue(args, "--group");
-  if (!groupSlug) throw new Error(UNSHARE_USAGE);
+  if (!groupSlug) throw new UsageError(UNSHARE_USAGE);
 
   await apiJson<ShareResponse>(
     `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/share/${encodeURIComponent(groupSlug)}`,

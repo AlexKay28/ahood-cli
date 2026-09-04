@@ -1,4 +1,5 @@
 import { ApiError, NetworkError } from "./http.js";
+import { UsageError } from "./usage-error.js";
 
 // A hung/black-holed connection throws undici's generic TypeError("fetch
 // failed") -- http.ts wraps that into NetworkError so it gets its own exit
@@ -6,6 +7,13 @@ import { ApiError, NetworkError } from "./http.js";
 // module (rather than inline in index.ts) so it's importable in tests
 // without triggering index.ts's unconditional top-level main() call.
 export function exitCodeFor(error: unknown): number {
+  // A local validation failure (missing/malformed argument, bad flag value)
+  // is exactly the "bad arguments" half of exit code 2's documented meaning
+  // -- same code the server-rejected branch below already uses, so a caller
+  // branching on exit code sees one consistent "fix your input" signal
+  // regardless of whether the check ran locally or round-tripped to the
+  // server (ahood-cli#80).
+  if (error instanceof UsageError) return 2;
   if (error instanceof ApiError) {
     if (error.status === 401 || error.status === 403) return 4;
     if (error.status === 404) return 5;

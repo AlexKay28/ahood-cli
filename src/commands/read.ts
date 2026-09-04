@@ -1,5 +1,6 @@
 import { apiJson } from "../http.js";
 import { parseOwnerSkill } from "../spec.js";
+import { UsageError } from "../usage-error.js";
 
 const USAGE = "Usage: ahood skill read <owner>/<skill> [--json]";
 
@@ -23,7 +24,7 @@ type SkillReadDetail = {
 export async function read(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const spec = args.find((a) => !a.startsWith("--"));
-  if (!spec) throw new Error(USAGE);
+  if (!spec) throw new UsageError(USAGE);
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
 
   const detail = await apiJson<SkillReadDetail>(

@@ -18,7 +18,7 @@ describe("search", () => {
   });
 
   it("rejects with a usage error when no query is given", async () => {
-    await expect(search([])).rejects.toThrow(/Usage: ahood search/);
+    await expect(search([])).rejects.toThrow(/Usage: ahood skill search/);
   });
 
   it("errors on an unrecognized flag instead of folding it into the query", async () => {

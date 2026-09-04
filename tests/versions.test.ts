@@ -19,7 +19,7 @@ describe("versions", () => {
   });
 
   it("rejects with a usage error when no spec is given", async () => {
-    await expect(versions([])).rejects.toThrow(/Usage: ahood versions/);
+    await expect(versions([])).rejects.toThrow(/Usage: ahood skill versions/);
   });
 
   it("rejects a malformed spec via the shared validator", async () => {
@@ -30,7 +30,7 @@ describe("versions", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(versions(["alice"])).rejects.toThrow(/Usage: ahood versions/);
+    await expect(versions(["alice"])).rejects.toThrow(/Usage: ahood skill versions/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
