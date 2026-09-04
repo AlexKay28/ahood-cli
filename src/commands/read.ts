@@ -21,12 +21,7 @@ type SkillReadDetail = {
   } | null;
 };
 
-export async function read(args: string[]): Promise<void> {
-  const jsonOutput = args.includes("--json");
-  const spec = args.find((a) => !a.startsWith("--"));
-  if (!spec) throw new UsageError(USAGE);
-  const { owner, skill } = parseOwnerSkill(spec, USAGE);
-
+export async function readSkillMd(owner: string, skill: string): Promise<{ version: string; content: string }> {
   const detail = await apiJson<SkillReadDetail>(
     `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`,
   );
@@ -37,7 +32,9 @@ export async function read(args: string[]): Promise<void> {
 
   // Mirrors view.ts's exact wording/tone for the same warning -- this
   // command reads straight from the same endpoint/version, so it must not
-  // be silent about handing back a yanked version's content.
+  // be silent about handing back a yanked version's content. Written to
+  // stderr, not stdout -- safe for MCP callers too (only stdout is reserved
+  // for the JSON-RPC stream).
   if (detail.skill_versions.yanked_at) {
     console.warn(
       `WARNING: ${detail.owner}/${detail.slug}@${detail.skill_versions.version} has been yanked${detail.skill_versions.yanked_reason ? `: ${detail.skill_versions.yanked_reason}` : "."}`,
@@ -49,8 +46,19 @@ export async function read(args: string[]): Promise<void> {
     throw new Error(`${owner}/${skill}@${detail.skill_versions.version} has no SKILL.md content available.`);
   }
 
+  return { version: detail.skill_versions.version, content };
+}
+
+export async function read(args: string[]): Promise<void> {
+  const jsonOutput = args.includes("--json");
+  const spec = args.find((a) => !a.startsWith("--"));
+  if (!spec) throw new UsageError(USAGE);
+  const { owner, skill } = parseOwnerSkill(spec, USAGE);
+
+  const { version, content } = await readSkillMd(owner, skill);
+
   if (jsonOutput) {
-    console.log(JSON.stringify({ version: detail.skill_versions.version, content }));
+    console.log(JSON.stringify({ version, content }));
     return;
   }
 
