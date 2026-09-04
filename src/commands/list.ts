@@ -20,9 +20,14 @@ type OwnSkill = {
   profiles: { username: string };
 };
 
+export async function listOwnSkills(): Promise<OwnSkill[]> {
+  const { skills } = await apiJson<{ skills: OwnSkill[] }>("/api/v1/skills?mine=true");
+  return skills;
+}
+
 export async function listSkills(args: string[] = []): Promise<void> {
   const jsonOutput = args.includes("--json");
-  const { skills } = await apiJson<{ skills: OwnSkill[] }>("/api/v1/skills?mine=true");
+  const skills = await listOwnSkills();
 
   if (jsonOutput) {
     console.log(JSON.stringify(skills));
