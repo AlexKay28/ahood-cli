@@ -1,3 +1,5 @@
+import { UsageError } from "./usage-error.js";
+
 const DEFAULT_API_URL = "https://ahood.vercel.app";
 
 let warnedAboutOverride = false;
@@ -16,7 +18,7 @@ export function getApiUrl(): string {
   try {
     url = new URL(trimmed);
   } catch {
-    throw new Error(`AHOOD_API_URL is not a valid URL: "${configured}"`);
+    throw new UsageError(`AHOOD_API_URL is not a valid URL: "${configured}"`);
   }
   // Plain http:// is only allowed for localhost and the RFC 2606 reserved
   // test TLDs (.test/.invalid/.example/.localhost), which can never resolve
@@ -28,7 +30,7 @@ export function getApiUrl(): string {
     url.hostname === "::1" ||
     /\.(test|invalid|example|localhost)$/i.test(url.hostname);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalHost)) {
-    throw new Error(
+    throw new UsageError(
       `AHOOD_API_URL must use https:// (http:// is only allowed for localhost/test hosts); got "${configured}".`,
     );
   }

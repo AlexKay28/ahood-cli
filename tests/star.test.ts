@@ -35,11 +35,11 @@ describe("star", () => {
   });
 
   it("rejects with a usage error when no owner/skill is given", async () => {
-    await expect(star([])).rejects.toThrow(/Usage: ahood star/);
+    await expect(star([])).rejects.toThrow(/Usage: ahood skill star/);
   });
 
   it("rejects when the spec has no slash", async () => {
-    await expect(star(["not-a-spec"])).rejects.toThrow(/Usage: ahood star/);
+    await expect(star(["not-a-spec"])).rejects.toThrow(/Usage: ahood skill star/);
   });
 
   it("sends a POST to the star route", async () => {
@@ -79,7 +79,7 @@ describe("unstar", () => {
   });
 
   it("rejects with a usage error when no owner/skill is given", async () => {
-    await expect(unstar([])).rejects.toThrow(/Usage: ahood unstar/);
+    await expect(unstar([])).rejects.toThrow(/Usage: ahood skill unstar/);
   });
 
   it("sends a DELETE to the star route", async () => {

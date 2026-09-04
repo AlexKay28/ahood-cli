@@ -1,4 +1,5 @@
 import { TOP_LEVEL_COMMANDS_HELP, SKILL_COMMANDS_HELP, COMMAND_ALIASES } from "../help.js";
+import { UsageError } from "../usage-error.js";
 
 const USAGE = "Usage: ahood completion <bash|zsh|fish>";
 
@@ -76,6 +77,6 @@ export async function completion(args: string[]): Promise<void> {
       console.log(fishCompletion());
       return;
     default:
-      throw new Error(USAGE);
+      throw new UsageError(USAGE);
   }
 }

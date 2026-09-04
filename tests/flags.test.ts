@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { flagValue } from "../src/flags.js";
+import { UsageError } from "../src/usage-error.js";
 
 describe("flagValue", () => {
   it("accepts a --flag=value token even when the value starts with --", () => {
     expect(flagValue(["--tagline=--fast and cheap"], "--tagline")).toBe("--fast and cheap");
+  });
+
+  // Distinguished from a plain Error so exit-code.ts maps it to exit code 2,
+  // not the generic 1 (ahood-cli#80).
+  it("throws a UsageError specifically, not a plain Error", () => {
+    expect(() => flagValue(["--tagline"], "--tagline")).toThrow(UsageError);
   });
 
   it("still supports the space-separated --flag value form", () => {

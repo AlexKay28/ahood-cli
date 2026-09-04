@@ -2,12 +2,13 @@ import { existsSync, readdirSync, readFileSync, rmSync, rmdirSync, unlinkSync } 
 import { dirname } from "node:path";
 import { removeLockfileEntry } from "../lockfile.js";
 import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, MCP_CONFIG_PATH } from "../spec.js";
+import { UsageError } from "../usage-error.js";
 
-const USAGE = "Usage: ahood remove <owner>/<skill>";
+const USAGE = "Usage: ahood skill remove <owner>/<skill>";
 
 export async function remove(args: string[]): Promise<void> {
   const spec = args[0];
-  if (!spec) throw new Error(USAGE);
+  if (!spec) throw new UsageError(USAGE);
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
   const key = `${owner}/${skill}`;
 

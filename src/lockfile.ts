@@ -39,7 +39,7 @@ function writeLockfile(path: string, lockfile: Lockfile): void {
 }
 
 // Simple advisory lock via mkdir's atomicity (EEXIST on a second caller),
-// so two concurrent `ahood add`/`remove` invocations against the same
+// so two concurrent `ahood skill add`/`remove` invocations against the same
 // project don't race a read-modify-write and silently drop one another's
 // entry. Exported so other same-directory JSON files with the same
 // read-modify-write shape (e.g. add.ts's .mcp.json merge) can reuse it

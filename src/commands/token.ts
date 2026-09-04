@@ -1,5 +1,6 @@
 import { apiJson } from "../http.js";
 import { confirm } from "../confirm.js";
+import { UsageError } from "../usage-error.js";
 
 type TokenRow = { id: string; name: string; token_prefix: string; scopes: string[]; revoked_at: string | null; created_at: string };
 
@@ -13,13 +14,13 @@ export async function token(args: string[]): Promise<void> {
     case "revoke":
       return tokenRevoke(rest);
     default:
-      throw new Error("Usage: ahood token create <name>|list [--json]|revoke <id> [--yes]");
+      throw new UsageError("Usage: ahood token create <name>|list [--json]|revoke <id> [--yes]");
   }
 }
 
 async function tokenCreate(args: string[]): Promise<void> {
   const name = args[0];
-  if (!name) throw new Error("Usage: ahood token create <name>");
+  if (!name) throw new UsageError("Usage: ahood token create <name>");
   // Note: this itself requires an existing session-backed token or a
   // browser login -- per docs/adr/backend/0001-backend-services.md's Phase
   // 3 section, tokens can't mint tokens (POST /auth/tokens is session-only,
@@ -57,7 +58,7 @@ async function tokenList(args: string[]): Promise<void> {
 async function tokenRevoke(args: string[]): Promise<void> {
   const yes = args.includes("--yes");
   const id = args.find((a) => !a.startsWith("--"));
-  if (!id) throw new Error("Usage: ahood token revoke <id> [--yes]");
+  if (!id) throw new UsageError("Usage: ahood token revoke <id> [--yes]");
 
   // --yes bypasses both the lookup and the prompt entirely, preserving the
   // original one-shot behavior (a single DELETE call) for scripts/CI that

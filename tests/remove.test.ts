@@ -23,7 +23,7 @@ describe("remove", () => {
   });
 
   it("rejects with a usage error when no spec is given", async () => {
-    await expect(remove([])).rejects.toThrow(/Usage: ahood remove/);
+    await expect(remove([])).rejects.toThrow(/Usage: ahood skill remove/);
   });
 
   it("removes the installed skill directory and its lockfile entry", async () => {

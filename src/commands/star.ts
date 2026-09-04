@@ -9,7 +9,7 @@ type StarResponse = { starred: boolean };
 // deletes any matching row), so starring an already-starred skill or
 // unstarring one you never starred is a no-op 200, not an error.
 export async function star(args: string[]): Promise<void> {
-  const USAGE = "Usage: ahood star <owner>/<skill>";
+  const USAGE = "Usage: ahood skill star <owner>/<skill>";
   const { owner, skill } = parseOwnerSkill(args[0] ?? "", USAGE);
 
   await apiJson<StarResponse>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/star`, {
@@ -19,7 +19,7 @@ export async function star(args: string[]): Promise<void> {
 }
 
 export async function unstar(args: string[]): Promise<void> {
-  const USAGE = "Usage: ahood unstar <owner>/<skill>";
+  const USAGE = "Usage: ahood skill unstar <owner>/<skill>";
   const { owner, skill } = parseOwnerSkill(args[0] ?? "", USAGE);
 
   await apiJson<StarResponse>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/star`, {

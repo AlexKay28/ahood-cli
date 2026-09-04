@@ -36,7 +36,7 @@ describe("edit", () => {
   });
 
   it("rejects with a usage error when no owner/skill is given", async () => {
-    await expect(edit([])).rejects.toThrow(/Usage: ahood edit/);
+    await expect(edit([])).rejects.toThrow(/Usage: ahood skill edit/);
   });
 
   it("rejects when no update flags are given", async () => {

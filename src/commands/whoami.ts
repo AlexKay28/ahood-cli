@@ -33,10 +33,13 @@ export async function whoami(args: string[] = []): Promise<void> {
   if (!token) {
     // Previously exited 0 here, defeating whoami's purpose as a scriptable
     // auth check -- "no token configured at all" must fail just like "token
-    // rejected by the server" does below.
+    // rejected by the server" does below. Exit 4 ("authentication required
+    // or rejected"), not the generic 1 -- this is exactly the case the
+    // README's own exit-code table names as the canonical example of 4
+    // (ahood-cli#80).
     if (wantsJson) console.log(JSON.stringify({ authenticated: false }));
     else console.error("Not logged in. Run `ahood login` (or set AHOOD_TOKEN).");
-    process.exitCode = 1;
+    process.exitCode = 4;
     return;
   }
 
@@ -72,9 +75,12 @@ export async function whoami(args: string[] = []): Promise<void> {
       return;
     }
     if (error instanceof ApiError && error.status === 401) {
+      // Same exit-4 reasoning as the "no token at all" branch above: the
+      // token was rejected by the server, which is the other half of the
+      // README's exit-code-4 definition ("or the token was refused").
       if (wantsJson) console.log(JSON.stringify({ authenticated: false, reason: "invalid_token" }));
       else console.error("Not authenticated -- your token is invalid or has been revoked.");
-      process.exitCode = 1;
+      process.exitCode = 4;
       return;
     }
     const message = error instanceof Error ? error.message : String(error);

@@ -1,3 +1,5 @@
+import { UsageError } from "./usage-error.js";
+
 // Shared flag-value parsing. Throws instead of silently treating the next flag
 // as this flag's value (e.g. `--tagline --visibility public` used to send
 // "--visibility" as the tagline and drop --visibility entirely).
@@ -20,7 +22,7 @@ export function flagValue(args: string[], flag: string): string | undefined {
     if (arg === flag) {
       const value = args[i + 1];
       if (value === undefined || value.startsWith("--")) {
-        throw new Error(`${flag} requires a value.`);
+        throw new UsageError(`${flag} requires a value.`);
       }
       return value;
     }

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { parseOwnerSkill, parseOwnerSkillVersion, validateSegment, SEMVER_RE } from "../src/spec.js";
+import { UsageError } from "../src/usage-error.js";
 
-const USAGE = "Usage: ahood view <owner>/<skill> [--json] [--web]";
+const USAGE = "Usage: ahood skill view <owner>/<skill> [--json] [--web]";
 
 describe("validateSegment", () => {
   it("accepts an ordinary owner/skill segment", () => {
@@ -12,6 +13,12 @@ describe("validateSegment", () => {
   it("rejects a malformed segment (bad charset / '..')", () => {
     expect(() => validateSegment("..", "owner", "../demo")).toThrow(/Invalid owner/);
     expect(() => validateSegment("alice!", "owner", "alice!/demo")).toThrow(/Invalid owner/);
+  });
+
+  // Distinguished from a plain Error so exit-code.ts maps it to exit code 2,
+  // not the generic 1 (ahood-cli#80).
+  it("throws a UsageError specifically, not a plain Error", () => {
+    expect(() => validateSegment("..", "owner", "../demo")).toThrow(UsageError);
   });
 
   // Owner max length (32) matches the backend's MAX_USERNAME_LENGTH

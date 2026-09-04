@@ -10,6 +10,25 @@ import {
   usageWithAliases,
 } from "../src/help.js";
 
+function normalizeWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+// Wrapped output splits a row's usage + summary across multiple lines (see
+// formatCommandTable in help.ts) -- this collapses everything from a row's
+// usage line up to (but not including) the next line that starts a new
+// usage entry back into one whitespace-normalized string, so tests can
+// assert content regardless of exactly how it wrapped.
+function rowText(help: string, usagePrefix: string): string {
+  const lines = help.split("\n");
+  const startIndex = lines.findIndex((l) => l.trim().startsWith(usagePrefix.trim()));
+  if (startIndex === -1) return "";
+  const rest = lines.slice(startIndex + 1);
+  const nextRowOffset = rest.findIndex((l) => /^  \S/.test(l));
+  const block = nextRowOffset === -1 ? lines.slice(startIndex) : lines.slice(startIndex, startIndex + 1 + nextRowOffset);
+  return normalizeWhitespace(block.join(" "));
+}
+
 describe("formatHelp", () => {
   it("includes every top-level command's usage line and a quick-start section", () => {
     const help = formatHelp();
@@ -59,19 +78,19 @@ describe("formatSkillHelp", () => {
 
   it("does not silently truncate multi-sentence descriptions on the first '. '", () => {
     const help = formatSkillHelp();
-    const publishLine = help.split("\n").find((l) => l.trim().startsWith("ahood skill publish "));
-    expect(publishLine).toBeDefined();
-    expect(publishLine).toMatch(/creat(es|ing) the skill( first)? if it doesn't (already )?exist/);
+    expect(rowText(help, "ahood skill publish ")).toMatch(/creat(es|ing) the skill( first)? if it doesn't (already )?exist/);
   });
 
-  it("prints every skill command's summary in full on its listing line", () => {
+  // A long usage string (e.g. publish's, with every flag spelled out) wraps
+  // its summary onto its own indented line(s) rather than sharing the usage
+  // line -- see formatCommandTable in help.ts (ahood-cli#81). This asserts
+  // the summary still appears in full somewhere in that row's block of
+  // lines, not that it shares a single line with the usage.
+  it("prints every skill command's summary in full within its listing block", () => {
     const help = formatSkillHelp();
-    const commandsSection = help.slice(help.indexOf("Commands:"));
-    const lines = commandsSection.split("\n").filter((l) => l.trim().length > 0 && l !== "Commands:");
-    for (const { usage, summary } of SKILL_COMMANDS_HELP) {
-      const line = lines.find((l) => l.trim().startsWith(usageWithAliases({ usage, summary, desc: "" }) + " ") || l.trim() === usageWithAliases({ usage, summary, desc: "" }));
-      expect(line, `expected a listing line for ${usage}`).toBeDefined();
-      expect(line).toContain(summary);
+    for (const entry of SKILL_COMMANDS_HELP) {
+      const usage = usageWithAliases(entry);
+      expect(rowText(help, usage), `expected a listing block for ${usage}`).toContain(normalizeWhitespace(entry.summary));
     }
   });
 

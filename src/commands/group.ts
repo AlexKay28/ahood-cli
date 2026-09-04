@@ -2,6 +2,7 @@ import { apiJson } from "../http.js";
 import { flagValue } from "../flags.js";
 import { confirm } from "../confirm.js";
 import { getApiUrl } from "../config.js";
+import { UsageError } from "../usage-error.js";
 
 // Mirrors GET /api/v1/groups' and GET /api/v1/groups/{slug}'s response
 // shapes (see the ahood repo's app/api/v1/groups routes) -- owner_user_id is
@@ -41,7 +42,7 @@ const DELETE_USAGE = "Usage: ahood group delete <group> [--yes]";
 // --description happened to come first.
 export async function createGroup(args: string[]): Promise<void> {
   const name = args[0];
-  if (!name || name.startsWith("--")) throw new Error(CREATE_USAGE);
+  if (!name || name.startsWith("--")) throw new UsageError(CREATE_USAGE);
   const description = flagValue(args, "--description");
 
   const body: Record<string, unknown> = { name };
@@ -79,7 +80,7 @@ export async function listGroups(args: string[] = []): Promise<void> {
 export async function groupMembers(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const slug = args.find((a) => !a.startsWith("--"));
-  if (!slug) throw new Error(MEMBERS_USAGE);
+  if (!slug) throw new UsageError(MEMBERS_USAGE);
 
   const { group, members } = await apiJson<{ group: GroupSummary; members: Member[] }>(
     `/api/v1/groups/${encodeURIComponent(slug)}`,
@@ -104,7 +105,7 @@ export async function groupMembers(args: string[]): Promise<void> {
 export async function inviteLink(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const slug = args.find((a) => !a.startsWith("--"));
-  if (!slug) throw new Error(INVITE_LINK_USAGE);
+  if (!slug) throw new UsageError(INVITE_LINK_USAGE);
 
   const { token, expiresAt } = await apiJson<{ token: string; expiresAt: string }>(
     `/api/v1/groups/${encodeURIComponent(slug)}/invites`,
@@ -140,7 +141,7 @@ function extractToken(input: string): string {
 
 export async function joinGroup(args: string[]): Promise<void> {
   const input = args.find((a) => !a.startsWith("--"));
-  if (!input) throw new Error(JOIN_USAGE);
+  if (!input) throw new UsageError(JOIN_USAGE);
   const token = extractToken(input);
 
   const { groupSlug, groupName } = await apiJson<{ groupSlug: string; groupName: string }>(
@@ -156,7 +157,7 @@ export async function joinGroup(args: string[]): Promise<void> {
 export async function removeMember(args: string[]): Promise<void> {
   const positional = args.filter((a) => !a.startsWith("--"));
   const [slug, username] = positional;
-  if (!slug || !username) throw new Error(REMOVE_MEMBER_USAGE);
+  if (!slug || !username) throw new UsageError(REMOVE_MEMBER_USAGE);
 
   await apiJson<{ removed: boolean }>(
     `/api/v1/groups/${encodeURIComponent(slug)}/members/${encodeURIComponent(username)}`,
@@ -179,7 +180,7 @@ async function getOwnUsername(): Promise<string> {
 // own username removes you, same as an owner removing someone else).
 export async function leaveGroup(args: string[]): Promise<void> {
   const slug = args.find((a) => !a.startsWith("--"));
-  if (!slug) throw new Error(LEAVE_USAGE);
+  if (!slug) throw new UsageError(LEAVE_USAGE);
 
   const username = await getOwnUsername();
   await apiJson<{ removed: boolean }>(
@@ -195,7 +196,7 @@ export async function leaveGroup(args: string[]): Promise<void> {
 export async function deleteGroup(args: string[]): Promise<void> {
   const yes = args.includes("--yes");
   const slug = args.find((a) => !a.startsWith("--"));
-  if (!slug) throw new Error(DELETE_USAGE);
+  if (!slug) throw new UsageError(DELETE_USAGE);
 
   const confirmed = yes
     ? true

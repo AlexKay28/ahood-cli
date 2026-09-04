@@ -1,8 +1,9 @@
 import { LOCKFILE_PATH, parseOwnerSkill } from "../spec.js";
 import { readLockfile } from "../lockfile.js";
 import { add, fetchVersionMeta } from "./add.js";
+import { UsageError } from "../usage-error.js";
 
-const USAGE = "Usage: ahood update [<owner>/<skill> ...] [--dry-run] [--json]";
+const USAGE = "Usage: ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]";
 
 // `update` is the only command that moves the lockfile pin forward -- `add`
 // always resolves and pins whatever version it's given (or latest, once,
@@ -69,7 +70,7 @@ export async function update(args: string[]): Promise<void> {
   const dryRun = args.includes("--dry-run");
   const jsonOutput = args.includes("--json");
   if (jsonOutput && !dryRun) {
-    throw new Error(`--json is only supported together with --dry-run.\n${USAGE}`);
+    throw new UsageError(`--json is only supported together with --dry-run.\n${USAGE}`);
   }
   const targets = args.filter((a) => a !== "--dry-run" && a !== "--json");
 
@@ -113,7 +114,7 @@ export async function update(args: string[]): Promise<void> {
   for (const ownerSlashSkill of skillKeys) {
     if (!lockfile[ownerSlashSkill]) {
       // Reachable two ways: an explicitly-named skill that was never
-      // installed (`ahood add` is the right command for that -- `update`
+      // installed (`ahood skill add` is the right command for that -- `update`
       // must not silently install and pin it), or -- when targets came from
       // the lockfile itself -- the lockfile changing out from under us
       // mid-loop. Either way: skip, don't abort.

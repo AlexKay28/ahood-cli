@@ -18,7 +18,7 @@ describe("view", () => {
   });
 
   it("rejects with a usage error when no spec is given", async () => {
-    await expect(view([])).rejects.toThrow(/Usage: ahood view/);
+    await expect(view([])).rejects.toThrow(/Usage: ahood skill view/);
   });
 
   it("rejects a malformed spec via the shared validator", async () => {

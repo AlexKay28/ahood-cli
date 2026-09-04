@@ -58,7 +58,7 @@ describe("unpublish", () => {
   });
 
   it("rejects with a usage error when no owner/skill is given", async () => {
-    await expect(unpublish([])).rejects.toThrow(/Usage: ahood unpublish/);
+    await expect(unpublish([])).rejects.toThrow(/Usage: ahood skill unpublish/);
   });
 
   it("does not call the API when the user does not type exactly 'yes'", async () => {

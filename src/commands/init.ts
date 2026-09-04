@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
+import { UsageError } from "../usage-error.js";
 
-const USAGE = "Usage: ahood init [name]";
+const USAGE = "Usage: ahood skill init [name]";
 
 // Mirrors the server's slug convention referenced by ahood-cli#60 (and the
 // same shape as spec.ts's SEGMENT_RE, minus "." and "_" -- skill slugs are
@@ -37,7 +38,7 @@ function buildSkillMd(name: string): string {
   return `---
 # name: a short, unique identifier for this skill (kebab-case is
 # conventional, e.g. "pdf-tools"). Not the same as the <skill> slug you
-# publish under -- ahood publish reads that from the command line -- but
+# publish under -- ahood skill publish reads that from the command line -- but
 # keeping them in sync avoids confusion.
 name: ${name}
 # description: one or two sentences describing what this skill does and
@@ -54,7 +55,7 @@ TODO: describe, step by step, what Claude should do when this skill is invoked.
 
 // Falls back to "my-skill" when the directory name itself isn't usable as a
 // bare YAML scalar (empty, or starting with a character like "-" or "@" that
-// would need quoting) -- e.g. running `ahood init` with no name directly in
+// would need quoting) -- e.g. running `ahood skill init` with no name directly in
 // "/" (basename "") or in a directory whose name starts with punctuation.
 function skillNameFor(dirPath: string): string {
   const base = basename(dirPath);
@@ -63,7 +64,7 @@ function skillNameFor(dirPath: string): string {
 
 export async function init(args: string[]): Promise<void> {
   let name = args[0];
-  if (name !== undefined && name.startsWith("-")) throw new Error(USAGE);
+  if (name !== undefined && name.startsWith("-")) throw new UsageError(USAGE);
 
   if (name) {
     // Path containment first (ahood-cli#61), mirroring spec.ts's
@@ -75,7 +76,7 @@ export async function init(args: string[]): Promise<void> {
     const cwd = resolve(process.cwd());
     const resolvedName = resolve(cwd, name);
     if (resolvedName !== cwd && !resolvedName.startsWith(cwd + sep)) {
-      throw new Error(
+      throw new UsageError(
         `Invalid name "${name}" -- resolves to "${resolvedName}", which is outside the current directory (${cwd}). Refusing to create files outside the project directory.`,
       );
     }
@@ -86,7 +87,7 @@ export async function init(args: string[]): Promise<void> {
     if (!SLUG_RE.test(name)) {
       const normalized = normalizeToSlug(name);
       if (!normalized) {
-        throw new Error(
+        throw new UsageError(
           `Invalid name "${name}" -- could not derive a valid name from it (must contain at least one letter or digit).`,
         );
       }
@@ -107,5 +108,5 @@ export async function init(args: string[]): Promise<void> {
 
   console.log(`Created ${skillMdPath}`);
   console.log("Fill in the description, then flesh out the ## Instructions section.");
-  console.log(`Run \`ahood publish <owner>/<skill>@<version>${name ? ` --path ${name}` : ""}\` when ready.`);
+  console.log(`Run \`ahood skill publish <owner>/<skill>@<version>${name ? ` --path ${name}` : ""}\` when ready.`);
 }

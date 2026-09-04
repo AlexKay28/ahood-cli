@@ -5,6 +5,7 @@ import { createGzip } from "node:zlib";
 import { apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
 import { flagValue } from "../flags.js";
 import { parseOwnerSkill, SEMVER_RE, validateExternalUrl } from "../spec.js";
+import { UsageError } from "../usage-error.js";
 
 type InitResponse = { upload_url: string; storage_path: string; version_id: string };
 type CreateResponse = { id: string; slug: string; owner: string };
@@ -31,13 +32,13 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
     await sleep(POLL_INTERVAL_MS);
   }
   throw new Error(
-    `Still processing after ${POLL_TIMEOUT_MS / 1000}s -- check \`ahood view ${owner}/${skill}\` later for the result.`,
+    `Still processing after ${POLL_TIMEOUT_MS / 1000}s -- check \`ahood skill view ${owner}/${skill}\` later for the result.`,
   );
 }
 
 const USAGE =
-  "Usage: ahood publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]\n" +
-  "   or: ahood publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
+  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]\n" +
+  "   or: ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
 // `vendor/thing/.git` is skipped the same as a top-level one. Not a
@@ -141,23 +142,23 @@ function parsePublishArgs(args: string[]): {
   const first = args[0];
   if (first && !first.startsWith("--")) {
     if (first.includes("/") && first.includes("@")) {
-      // Primary form: ahood publish <owner>/<skill>@<version>
+      // Primary form: ahood skill publish <owner>/<skill>@<version>
       const parsed = parseOwnerSkill(first.slice(0, first.lastIndexOf("@")), USAGE);
       owner = owner ?? parsed.owner;
       skill = skill ?? parsed.skill;
       version = version ?? first.slice(first.lastIndexOf("@") + 1);
     } else {
-      // Legacy form: ahood publish <path> --owner ... --slug ... --version ...
+      // Legacy form: ahood skill publish <path> --owner ... --slug ... --version ...
       legacyPath = first;
     }
   }
 
-  if (!owner || !skill || !version) throw new Error(USAGE);
+  if (!owner || !skill || !version) throw new UsageError(USAGE);
   if (!SEMVER_RE.test(version)) {
-    throw new Error(`--version must be a semver like 1.2.3 (got "${version}").\n${USAGE}`);
+    throw new UsageError(`--version must be a semver like 1.2.3 (got "${version}").\n${USAGE}`);
   }
   if (kind !== undefined && kind !== "skill" && kind !== "agent" && kind !== "mcp") {
-    throw new Error(`--kind must be "skill", "agent", or "mcp" (got "${kind}").\n${USAGE}`);
+    throw new UsageError(`--kind must be "skill", "agent", or "mcp" (got "${kind}").\n${USAGE}`);
   }
   // Validated here, before any network call (including the tar/gzip of the
   // skill directory) -- these only ever reach the server via
@@ -205,7 +206,7 @@ async function createSkillForPublish(
     throw new Error(
       `Created ${created.owner}/${created.slug}, but this publish targeted "${owner}/${skill}" -- skills ` +
         `are always created under your own account (${created.owner}). Retry with: ` +
-        `ahood publish ${created.owner}/${skill}@<version>.`,
+        `ahood skill publish ${created.owner}/${skill}@<version>.`,
     );
   }
   if (!jsonOutput) {

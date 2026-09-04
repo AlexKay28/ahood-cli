@@ -2,8 +2,9 @@ import { spawn } from "node:child_process";
 import { apiJson } from "../http.js";
 import { getApiUrl } from "../config.js";
 import { parseOwnerSkill } from "../spec.js";
+import { UsageError } from "../usage-error.js";
 
-const USAGE = "Usage: ahood view <owner>/<skill> [--json] [--web]";
+const USAGE = "Usage: ahood skill view <owner>/<skill> [--json] [--web]";
 
 // Matches GET /api/v1/skills/{owner}/{skill}'s actual response shape
 // (app/api/v1/skills/[owner]/[skill]/route.ts): visibility is always
@@ -54,7 +55,7 @@ export async function view(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const web = args.includes("--web");
   const spec = args.find((a) => !a.startsWith("--"));
-  if (!spec) throw new Error(USAGE);
+  if (!spec) throw new UsageError(USAGE);
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
 
   const url = `${getApiUrl()}/${owner}/${skill}`;
@@ -74,7 +75,7 @@ export async function view(args: string[]): Promise<void> {
 
   const field = (label: string, value: string) => console.log(`  ${label.padEnd(13)}${value}`);
   console.log(`${detail.owner}/${detail.slug}`);
-  // Mirrors the wording/tone of `ahood add`'s yanked warning (src/commands/add.ts)
+  // Mirrors the wording/tone of `ahood skill add`'s yanked warning (src/commands/add.ts)
   // and the website's skill detail page banner -- this is the one CLI surface
   // whose entire job is "let me check this out before deciding to install it",
   // so it must not be the one place that stays silent about a yanked version.

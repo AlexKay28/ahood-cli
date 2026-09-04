@@ -1,7 +1,8 @@
 import { apiJson } from "../http.js";
 import { parseOwnerSkill } from "../spec.js";
+import { UsageError } from "../usage-error.js";
 
-const USAGE = "Usage: ahood versions <owner>/<skill> [--json]";
+const USAGE = "Usage: ahood skill versions <owner>/<skill> [--json]";
 
 // Matches GET /api/v1/skills/{owner}/{skill}/versions's response shape
 // (app/api/v1/skills/[owner]/[skill]/versions/route.ts) -- the same
@@ -40,7 +41,7 @@ function formatSize(bytes: number): string {
 export async function versions(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const spec = args.find((a) => !a.startsWith("--"));
-  if (!spec) throw new Error(USAGE);
+  if (!spec) throw new UsageError(USAGE);
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
 
   const { versions: list } = await apiJson<VersionsResponse>(

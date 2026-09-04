@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { exitCodeFor } from "../src/exit-code.js";
 import { ApiError, NetworkError } from "../src/http.js";
+import { UsageError } from "../src/usage-error.js";
 
 describe("exitCodeFor", () => {
+  it("maps UsageError to 2 (usage/validation) -- a local argument-validation failure, not the generic 1 (ahood-cli#80)", () => {
+    expect(exitCodeFor(new UsageError("Usage: ahood skill add <owner>/<skill>[@version]"))).toBe(2);
+  });
+
   it("maps 401/403 to 4 (auth)", () => {
     expect(exitCodeFor(new ApiError(401, "unauthorized"))).toBe(4);
     expect(exitCodeFor(new ApiError(403, "forbidden"))).toBe(4);
