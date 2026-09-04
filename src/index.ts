@@ -18,6 +18,7 @@ import { view } from "./commands/view.js";
 import { read } from "./commands/read.js";
 import { versions } from "./commands/versions.js";
 import { completion } from "./commands/completion.js";
+import { mcp } from "./commands/mcp.js";
 import { init } from "./commands/init.js";
 import {
   createGroup,
@@ -81,6 +82,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   whoami,
   token,
   completion,
+  mcp,
   skill: dispatchSkill,
   group: dispatchGroup,
 };

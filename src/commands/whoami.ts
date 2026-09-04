@@ -77,7 +77,7 @@ export async function whoami(args: string[] = []): Promise<void> {
   const wantsJson = args.includes("--json");
   const result = await checkAuth();
 
-  if (!result.authenticated && result.reason === "not_logged_in") {
+  if (result.authenticated === false && result.reason === "not_logged_in") {
     // Previously exited 0 here, defeating whoami's purpose as a scriptable
     // auth check -- "no token configured at all" must fail just like "token
     // rejected by the server" does below. Exit 4 ("authentication required
@@ -90,7 +90,7 @@ export async function whoami(args: string[] = []): Promise<void> {
     return;
   }
 
-  if (!result.authenticated && result.reason === "invalid_token") {
+  if (result.authenticated === false && result.reason === "invalid_token") {
     // Same exit-4 reasoning as the "no token at all" branch above: the
     // token was rejected by the server, which is the other half of the
     // README's exit-code-4 definition ("or the token was refused").
