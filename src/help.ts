@@ -49,6 +49,15 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     desc: "Print a shell completion script for the command names.",
     examples: ["ahood completion bash >> ~/.bashrc"],
   },
+  {
+    usage: "ahood mcp",
+    summary: "Start an MCP server exposing read-only skill commands as tools over stdio.",
+    desc:
+      "Start a Model Context Protocol server over stdio, exposing skill_search, skill_view, skill_read, " +
+      "skill_versions, skill_list, and whoami as MCP tools -- the same data ahood's --json commands already " +
+      "return, reachable as typed tool calls instead of parsed CLI output. Meant to be launched by an " +
+      "MCP-aware agent host (e.g. Claude Code's MCP server configuration), not run interactively.",
+  },
 ];
 
 export const SKILL_COMMANDS_HELP: CommandHelp[] = [

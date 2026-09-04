@@ -201,6 +201,7 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | `ahood whoami [--json]` | Reports whether your stored token still authenticates. |
 | `ahood token create <name>\|list [--json]\|revoke <id> [--yes]` | Manage personal API tokens. |
 | `ahood completion <bash\|zsh\|fish>` | Print a shell completion script for the command names. |
+| `ahood mcp` | Start an MCP server exposing read-only skill commands as tools over stdio. |
 
 ### Skill
 
@@ -273,6 +274,7 @@ ahood completion fish > ~/.config/fish/completions/ahood.fish
 - **Structured output everywhere.** `--json` is available on every read command and on `publish`/`update`, so an agent never has to scrape human-formatted text.
 - **Predictable failure.** A stable, documented [exit code](#exit-codes) per failure class, and error messages that never leak raw upstream infrastructure details — safe to surface directly to an agent's reasoning loop.
 - **A real "start here."** `ahood skill init <name>` scaffolds a valid `SKILL.md` an agent can extend, rather than requiring it to know the frontmatter format up front.
+- **A native MCP server, for agents that prefer tool calls to subprocess parsing.** `ahood mcp` starts a Model Context Protocol server over stdio, exposing `skill_search`, `skill_view`, `skill_read`, `skill_versions`, `skill_list`, and `whoami` as typed tools -- the same data the `--json` flags above already return, reachable as structured tool calls instead. Configure your MCP-aware agent host to run `ahood mcp` (or `npx @ahood/cli@latest mcp`) as a stdio server.
 
 ## Development
 
