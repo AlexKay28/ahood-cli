@@ -189,7 +189,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage:
-      "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]",
+      "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
     summary:
       "Publish a new version of a skill, agent, or mcp server manifest from a folder containing SKILL.md, AGENT.md, or server.json, creating the skill first if it doesn't already exist.",
     desc:
@@ -208,6 +208,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "--license <id>                An SPDX license identifier, e.g. MIT, used only when creating.",
       "--homepage <url>              The artifact's homepage URL, used only when creating.",
       "--repository <url>            The artifact's source repository URL, used only when creating.",
+      "--changelog <text>            What changed in this version, shown by `ahood skill versions`.",
       "--json                        Suppress human progress lines; print one {version,status,...} JSON object on completion (or {error} on failure).",
     ],
     examples: [
