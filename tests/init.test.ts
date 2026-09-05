@@ -168,6 +168,17 @@ describe("init", () => {
     expect(content).toMatch(/\nname: pdf-tools\n/);
   });
 
+  // ahood-cli#93: the scaffold's comments above `description:` should steer
+  // authors clear of the same things publish.ts now warns about at publish
+  // time (missing/empty, oversized, or containing "<"/">").
+  it("the scaffold's description guidance mentions the 1024-character cap and avoiding '<'/'>' (ahood-cli#93)", async () => {
+    await init(["pdf-tools"]);
+    const content = readFileSync(join(dir, "pdf-tools", "SKILL.md"), "utf8");
+
+    expect(content).toContain("1024 characters");
+    expect(content).toContain('"<"/">"');
+  });
+
   it("a freshly-scaffolded skill folder passes ahood publish's own SKILL.md check end-to-end", async () => {
     await init(["pdf-tools"]);
     const uploadCapture: { body?: Uint8Array } = {};

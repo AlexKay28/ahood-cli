@@ -645,6 +645,203 @@ describe("publish", () => {
     );
   });
 
+  // ahood-cli#93: in registry-first usage the SKILL.md description is the
+  // only signal an agent sees to decide whether to trigger the skill at all,
+  // so publish warns (non-blocking) about a description that would fail to
+  // do that job. These warnings must go through console.warn, never
+  // console.error, never set process.exitCode, and never block the publish.
+  describe("description quality warning (ahood-cli#93)", () => {
+    it("does not warn for a normal, well-formed description", async () => {
+      writeFileSync(
+        join(dir, "SKILL.md"),
+        "---\nname: demo\ndescription: Extracts text and merges pages from PDF files.\n---\n\n## Instructions\n",
+      );
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
+
+      await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("warns when the description is missing entirely", async () => {
+      writeFileSync(join(dir, "SKILL.md"), "---\nname: demo\n---\n\n## Instructions\n");
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/no \(or an empty\) description/));
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it("warns when the description key is present but empty", async () => {
+      writeFileSync(join(dir, "SKILL.md"), "---\nname: demo\ndescription:\n---\n\n## Instructions\n");
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
+
+      await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/no \(or an empty\) description/));
+    });
+
+    it("warns when there is no frontmatter at all, without crashing publish", async () => {
+      writeFileSync(join(dir, "SKILL.md"), "# demo\n\nJust a heading, no frontmatter.\n");
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
+
+      await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/no \(or an empty\) description/));
+      expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
+    });
+
+    it("warns when the description is over the 1024-character cap", async () => {
+      const longDescription = "a".repeat(1025);
+      writeFileSync(join(dir, "SKILL.md"), `---\nname: demo\ndescription: ${longDescription}\n---\n`);
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
+
+      await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/1024-character recommended cap/));
+    });
+
+    it("does not warn about length for a description right at the 1024-character cap", async () => {
+      const okDescription = "a".repeat(1024);
+      writeFileSync(join(dir, "SKILL.md"), `---\nname: demo\ndescription: ${okDescription}\n---\n`);
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
+
+      await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringMatching(/1024-character recommended cap/));
+    });
+
+    it("warns when the description contains a literal '<' character", async () => {
+      writeFileSync(join(dir, "SKILL.md"), "---\nname: demo\ndescription: Use when input matches <some-tag>.\n---\n");
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
+
+      await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/literal "<" or ">" character/));
+    });
+
+    it("warns when the description contains a literal '>' character", async () => {
+      writeFileSync(join(dir, "SKILL.md"), "---\nname: demo\ndescription: Pipes input -> output.\n---\n");
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
+
+      await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/literal "<" or ">" character/));
+    });
+
+    it("warns when the description is written as raw multi-line text without a block-scalar indicator", async () => {
+      writeFileSync(
+        join(dir, "SKILL.md"),
+        "---\nname: demo\ndescription: Handles PDFs.\nAlso merges and splits them.\n---\n",
+      );
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
+
+      await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/spans multiple raw lines/));
+    });
+
+    it("does not flag a proper folded ('>') block scalar as raw multi-line", async () => {
+      writeFileSync(
+        join(dir, "SKILL.md"),
+        "---\nname: demo\ndescription: >\n  Handles PDFs, including merging\n  and splitting them.\n---\n",
+      );
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
+
+      await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringMatching(/spans multiple raw lines/));
+    });
+
+    it("does not warn about a SKILL.md description when publishing as --kind agent alongside an AGENT.md", async () => {
+      writeFileSync(join(dir, "AGENT.md"), "# demo agent");
+      writeFileSync(join(dir, "SKILL.md"), "---\nname: demo\n---\n"); // would warn (empty) if checked
+      const captures: { uploadBody?: Uint8Array; createBody?: unknown } = {};
+      stubApiFirstPublish(captures);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
+
+      await publish(["alice/demo@1.0.0", "--path", dir, "--kind", "agent", "--name", "N"]);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not set process.exitCode and does not throw when the description is bad", async () => {
+      const originalExitCode = process.exitCode;
+      writeFileSync(join(dir, "SKILL.md"), "---\nname: demo\n---\n");
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await expect(publish([`alice/demo@1.0.0`, "--path", dir])).resolves.toBeUndefined();
+
+      expect(process.exitCode).toBe(originalExitCode);
+      process.exitCode = originalExitCode;
+    });
+
+    it("keeps --json mode's stdout to exactly one JSON object even when the description warns", async () => {
+      writeFileSync(join(dir, "SKILL.md"), "---\nname: demo\n---\n");
+      const capture: { body?: Uint8Array } = {};
+      stubApi(capture);
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      logSpy.mockClear();
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
+
+      await publish([`alice/demo@1.0.0`, "--path", dir, "--json"]);
+
+      expect(warnSpy).toHaveBeenCalled(); // the warning did fire...
+      expect(logSpy).toHaveBeenCalledTimes(1); // ...but never touched console.log/stdout
+      const [line] = logSpy.mock.calls[0] as [string];
+      expect(() => JSON.parse(line)).not.toThrow();
+      expect(JSON.parse(line)).toEqual({ version: "1.0.0", status: "published" });
+    });
+  });
+
   // ahood-cli#57: --json must emit exactly one JSON object on stdout and
   // none of the human "Created/Uploaded/Published" progress lines, so a CI
   // caller can pipe stdout straight into `jq` without scraping text.
