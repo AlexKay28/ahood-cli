@@ -13,6 +13,13 @@ vi.mock("../src/commands/add.js", async (importOriginal) => {
   return { ...actual, add: vi.fn(async () => {}) };
 });
 
+// Mocked so the "outdated forces --dry-run" test below can assert on call
+// args without hitting the network or touching a lockfile.
+vi.mock("../src/commands/update.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/commands/update.js")>();
+  return { ...actual, update: vi.fn(async () => {}) };
+});
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cliPath = path.join(here, "..", "dist", "index.js");
 
@@ -131,6 +138,24 @@ describe("dispatchSkill (in-process)", () => {
     await dispatchSkill(["add", "alice/pdf-tools", "--json"]);
 
     expect(add).toHaveBeenCalledWith(["alice/pdf-tools", "--json"]);
+  });
+
+  it("`ahood skill outdated ...` reaches update()'s existing dry-run path by forcing --dry-run onto whatever args were given", async () => {
+    const { update } = await import("../src/commands/update.js");
+    const { dispatchSkill } = await import("../src/index.js");
+
+    await dispatchSkill(["outdated", "alice/pdf-tools", "--json"]);
+
+    expect(update).toHaveBeenCalledWith(["alice/pdf-tools", "--json", "--dry-run"]);
+  });
+
+  it("`ahood skill outdated` with no args still forces --dry-run", async () => {
+    const { update } = await import("../src/commands/update.js");
+    const { dispatchSkill } = await import("../src/index.js");
+
+    await dispatchSkill(["outdated"]);
+
+    expect(update).toHaveBeenCalledWith(["--dry-run"]);
   });
 });
 

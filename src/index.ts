@@ -48,6 +48,12 @@ const SKILL_COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   list: listSkills,
   add,
   update,
+  // A discoverable name for what `update --dry-run` already does (ahood-cli#91)
+  // -- forces --dry-run regardless of what the caller passes, so `outdated`
+  // can never accidentally move a pin forward. Reuses update()'s existing
+  // "no targets = every installed skill, explicit targets = just those"
+  // behavior as-is; no new logic.
+  outdated: (args) => update([...args, "--dry-run"]),
   remove,
   edit,
   unpublish,

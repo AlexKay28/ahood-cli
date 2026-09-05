@@ -79,13 +79,13 @@ describe("ahood mcp tools", () => {
     else process.env.AHOOD_TOKEN = originalToken;
   });
 
-  it("lists exactly the 6 v1 tools", async () => {
+  it("lists exactly the 7 v1 tools", async () => {
     const client = await connectedClient();
 
     const { tools } = await client.listTools();
 
     expect(tools.map((t) => t.name).sort()).toEqual(
-      ["skill_list", "skill_read", "skill_search", "skill_versions", "skill_view", "whoami"].sort(),
+      ["skill_list", "skill_outdated", "skill_read", "skill_search", "skill_versions", "skill_view", "whoami"].sort(),
     );
   });
 
@@ -263,6 +263,126 @@ describe("ahood mcp tools", () => {
 
     expect(result.isError).toBe(true);
     expect((firstTextBody(result.content) as { error_code: string }).error_code).toBe("auth_error");
+  });
+
+  it("skill_outdated reports up-to-date and outdated entries with changelog only for the outdated one", async () => {
+    stubApiRoutes({
+      "/api/v1/skills/alice/current": {
+        status: 200,
+        body: { skill_versions: { version: "1.0.0", manifest: [], checksum_sha256: "same" } },
+      },
+      "/api/v1/skills/alice/behind": {
+        status: 200,
+        body: {
+          skill_versions: {
+            version: "2.0.0",
+            manifest: [],
+            checksum_sha256: "new",
+            changelog_md: "## 2.0.0\n- Breaking change.",
+          },
+        },
+      },
+    });
+    const client = await connectedClient();
+
+    const result = await client.callTool({
+      name: "skill_outdated",
+      arguments: {
+        skills: [
+          { owner: "alice", skill: "current", version: "1.0.0" },
+          { owner: "alice", skill: "behind", version: "1.0.0" },
+        ],
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(firstTextBody(result.content)).toEqual([
+      {
+        skill: "alice/current",
+        current_version: "1.0.0",
+        latest_version: "1.0.0",
+        up_to_date: true,
+        changelog_md: null,
+      },
+      {
+        skill: "alice/behind",
+        current_version: "1.0.0",
+        latest_version: "2.0.0",
+        up_to_date: false,
+        changelog_md: "## 2.0.0\n- Breaking change.",
+      },
+    ]);
+  });
+
+  it("skill_outdated returns partial results when one entry 404s, without failing the whole batch", async () => {
+    stubApiRoutes({
+      "/api/v1/skills/alice/good": {
+        status: 200,
+        body: { skill_versions: { version: "1.0.0", manifest: [], checksum_sha256: "same" } },
+      },
+      "/api/v1/skills/bob/gone": { status: 404, body: { error: "not found" } },
+    });
+    const client = await connectedClient();
+
+    const result = await client.callTool({
+      name: "skill_outdated",
+      arguments: {
+        skills: [
+          { owner: "alice", skill: "good", version: "1.0.0" },
+          { owner: "bob", skill: "gone", version: "1.0.0" },
+        ],
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    const body = firstTextBody(result.content) as Array<Record<string, unknown>>;
+    expect(body[0]).toEqual({
+      skill: "alice/good",
+      current_version: "1.0.0",
+      latest_version: "1.0.0",
+      up_to_date: true,
+      changelog_md: null,
+    });
+    expect(body[1]).toMatchObject({
+      skill: "bob/gone",
+      current_version: "1.0.0",
+      latest_version: null,
+      up_to_date: false,
+      changelog_md: null,
+    });
+    expect(typeof body[1].error).toBe("string");
+  });
+
+  it("skill_outdated rejects an invalid owner segment locally, before any network request, without failing other entries", async () => {
+    stubApiRoutes({
+      "/api/v1/skills/alice/good": {
+        status: 200,
+        body: { skill_versions: { version: "1.0.0", manifest: [], checksum_sha256: "same" } },
+      },
+    });
+    const client = await connectedClient();
+
+    const result = await client.callTool({
+      name: "skill_outdated",
+      arguments: {
+        skills: [
+          { owner: "..", skill: "profile", version: "1.0.0" },
+          { owner: "alice", skill: "good", version: "1.0.0" },
+        ],
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    const body = firstTextBody(result.content) as Array<Record<string, unknown>>;
+    expect(body[0]).toMatchObject({ skill: "../profile", up_to_date: false, latest_version: null });
+    expect(typeof body[0].error).toBe("string");
+    expect(body[1]).toEqual({
+      skill: "alice/good",
+      current_version: "1.0.0",
+      latest_version: "1.0.0",
+      up_to_date: true,
+      changelog_md: null,
+    });
   });
 
   it("whoami reports authenticated:false with no token, never as isError", async () => {
