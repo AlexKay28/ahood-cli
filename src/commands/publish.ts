@@ -75,6 +75,124 @@ function isExcluded(name: string): boolean {
   return EXCLUDED_PREFIXES.some((prefix) => name === prefix || name.startsWith(`${prefix}.`));
 }
 
+// ahood-cli#93: in registry-first usage (an agent consuming this skill via
+// the MCP server/registry, with no local SKILL.md ever loaded) the
+// frontmatter `description` is the *only* signal an agent sees to decide
+// whether to trigger this skill at all. A missing, oversized, or
+// malformed-enough-to-mis-parse description means the skill silently never
+// fires, and nothing today tells the author. This is a best-effort, targeted
+// text scan -- not a real YAML parser (see init.ts's comment above
+// buildSkillMd for why this codebase doesn't carry one) -- so it only needs
+// to catch what a real skill author would plausibly write, not every legal
+// YAML shape for `description:`.
+const MAX_DESCRIPTION_LENGTH = 1024;
+
+// Pulls just the `description:` value out of a SKILL.md's `---`-delimited
+// frontmatter block. Returns undefined when the frontmatter or the key
+// itself can't be found -- callers treat that the same as an empty
+// description rather than throwing, since this scan is advisory only.
+function extractSkillDescription(skillMd: string): { value: string; rawMultiLine: boolean } | undefined {
+  const frontmatterMatch = skillMd.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!frontmatterMatch) return undefined;
+  const lines = frontmatterMatch[1].split(/\r?\n/);
+
+  const descIndex = lines.findIndex((line) => /^description:/.test(line));
+  if (descIndex === -1) return undefined;
+  const firstLineValue = lines[descIndex].slice("description:".length).trim();
+
+  // YAML block scalar ("description: >" folded, or "description: |"
+  // literal), optionally with a chomping/indentation indicator like ">-" or
+  // "|2". Everything indented under it, until a dedented or blank line, is
+  // the value -- this is the *correct* way to write a genuinely multi-line
+  // description, so it does not trip the rawMultiLine heuristic below.
+  const blockScalarMatch = firstLineValue.match(/^([>|])[+-]?\d*$/);
+  if (blockScalarMatch) {
+    const folded = blockScalarMatch[1] === ">";
+    const collected: string[] = [];
+    for (let i = descIndex + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trim() === "") {
+        collected.push("");
+        continue;
+      }
+      if (!/^\s/.test(line)) break; // dedented back to frontmatter's top level -- block scalar is over
+      collected.push(line.trim());
+    }
+    const value = folded ? collected.filter(Boolean).join(" ") : collected.join("\n");
+    return { value, rawMultiLine: false };
+  }
+
+  // Plain (or quoted) single-line form. Strip a matching pair of wrapping
+  // quotes for the length/character checks below -- not a full YAML string
+  // unescape, just enough to not count the quote characters themselves.
+  let value = firstLineValue;
+  if (value.length >= 2) {
+    const first = value[0];
+    const last = value[value.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      value = value.slice(1, -1);
+    }
+  }
+
+  // Heuristic for "the author typed real newlines into what should be one
+  // value": any non-blank line right after the description line that isn't
+  // itself a new top-level `key:` entry. Depending on its indentation, real
+  // YAML either folds this into the same scalar or fails to parse outright --
+  // neither is what a naive frontmatter-reading agent gets right, so either
+  // way it's worth flagging. This can't distinguish every edge case (e.g. a
+  // value that legitimately continues a nested structure), but skill
+  // frontmatter in practice is flat enough that it doesn't need to.
+  let rawMultiLine = false;
+  const extraLines: string[] = [];
+  for (let i = descIndex + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === "") break;
+    if (!/^\s/.test(line) && /^[^\s:]+:/.test(line)) break; // next top-level key -- description's value ended
+    rawMultiLine = true;
+    extraLines.push(line.trim());
+  }
+  if (extraLines.length > 0) value = [value, ...extraLines].filter(Boolean).join(" ");
+
+  return { value, rawMultiLine };
+}
+
+// Non-blocking: this only ever calls console.warn (never sets
+// process.exitCode, never throws) so a weak description warns the author
+// without affecting the exit code or --json mode's structured stdout output.
+function warnAboutSkillDescription(skillMdPath: string): void {
+  let content: string;
+  try {
+    content = readFileSync(skillMdPath, "utf8");
+  } catch {
+    return; // publish's own existsSync check already guards this path being missing entirely
+  }
+
+  const extracted = extractSkillDescription(content);
+  const value = extracted?.value ?? "";
+
+  if (!value.trim()) {
+    console.warn(
+      `WARNING: ${skillMdPath} has no (or an empty) description. In registry-first usage (an agent pulling this skill via the registry/MCP server, without ever loading this file) the description is the only signal deciding whether the skill is ever triggered -- without one, it effectively never will be.`,
+    );
+    return;
+  }
+  if (value.length > MAX_DESCRIPTION_LENGTH) {
+    console.warn(
+      `WARNING: ${skillMdPath}'s description is ${value.length} characters, over the ${MAX_DESCRIPTION_LENGTH}-character recommended cap. An oversized description crowds out an agent's other context and is less likely to be read in full when it's deciding whether to trigger this skill.`,
+    );
+  }
+  if (extracted?.rawMultiLine) {
+    console.warn(
+      `WARNING: ${skillMdPath}'s description spans multiple raw lines without a YAML block-scalar indicator (">" or "|"). This is easy to write by accident and breaks simple frontmatter parsers that only read a single line -- keep the description on one line, or use an explicit ">" (folded) or "|" (literal) block scalar if it genuinely needs to span multiple lines.`,
+    );
+  }
+  if (value.includes("<") || value.includes(">")) {
+    console.warn(
+      `WARNING: ${skillMdPath}'s description contains a literal "<" or ">" character. These can be misread as markup or YAML block-scalar syntax by downstream parsers and renderers -- rewrite the description without them.`,
+    );
+  }
+}
+
 async function tarGzDirectory(dir: string): Promise<Buffer> {
   const tar = pack();
   const gzip = createGzip();
@@ -283,6 +401,15 @@ export async function publish(args: string[]): Promise<void> {
         resolvedKind = "mcp"; // inferred: only server.json present, no --kind needed
       }
       // else: hasSkillMd only -- resolvedKind stays undefined (unchanged existing behavior, server defaults to 'skill')
+    }
+
+    // ahood-cli#93: fires for an explicit --kind skill, and for the
+    // inferred-skill case above (resolvedKind left undefined because
+    // SKILL.md was the only root file present) -- but not when SKILL.md
+    // merely happens to sit alongside an AGENT.md/server.json being
+    // published as --kind agent/mcp instead.
+    if (resolvedKind === "skill" || (resolvedKind === undefined && hasSkillMd)) {
+      warnAboutSkillDescription(skillMdPath);
     }
 
     const archive = await tarGzDirectory(path);

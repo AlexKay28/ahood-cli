@@ -22,14 +22,17 @@ function normalizeToSlug(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-// publish.ts's only client-side check on SKILL.md is that the file exists
-// (see publish.ts's `existsSync(skillMdPath)`) -- actual frontmatter
+// publish.ts's only hard client-side check on SKILL.md is that the file
+// exists (see publish.ts's `existsSync(skillMdPath)`) -- actual frontmatter
 // validation happens server-side, after upload, as part of the processing
-// workflow described in publish.ts's POLL_INTERVAL_MS comment. There's no
-// parser to match locally, so this template instead follows the documented
-// Claude Code skill format: YAML frontmatter delimited by `---` lines, with
-// a `name` and a `description` field -- the same shape every real SKILL.md
-// in this ecosystem uses (see e.g. any installed skill under
+// workflow described in publish.ts's POLL_INTERVAL_MS comment. (Publish does
+// also do a best-effort, non-blocking scan of `description` at publish time
+// -- ahood-cli#93 -- but that's a warning, not a parser, and this scaffold's
+// job is to steer authors clear of it in the first place.) There's no real
+// YAML parser to match locally, so this template instead follows the
+// documented Claude Code skill format: YAML frontmatter delimited by `---`
+// lines, with a `name` and a `description` field -- the same shape every
+// real SKILL.md in this ecosystem uses (see e.g. any installed skill under
 // .claude/skills/<owner>/<skill>/SKILL.md). Keeping to exactly those two
 // fields, rather than inventing extra ones, means nothing here needs
 // updating just because publish.ts's own validation happens to be looser
@@ -44,6 +47,11 @@ name: ${name}
 # description: one or two sentences describing what this skill does and
 # when Claude should use it. This is the primary text Claude reads to
 # decide whether to invoke the skill, so be specific rather than generic.
+# Keep it on a single line, under 1024 characters, and free of "<"/">"
+# characters -- ahood skill publish warns about all three, because in
+# registry-first usage (no local file, loaded via the registry/MCP server)
+# this description is the *only* signal deciding whether the skill is ever
+# triggered at all.
 description: TODO -- describe what this skill does and when Claude should use it.
 ---
 
