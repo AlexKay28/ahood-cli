@@ -399,6 +399,75 @@ describe("publish", () => {
     ).rejects.toThrow(/--kind must be/);
   });
 
+  // ahood-cli#87: --changelog must reach the versions/init POST body under
+  // the same changelog_md key that versions.ts's SkillVersion type already
+  // reads on the read side.
+  it("includes changelog_md in the versions/init request body when --changelog is passed", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const initBodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        const url = String(input);
+        if (url.endsWith("/versions/init")) {
+          initBodies.push(init.body ? JSON.parse(init.body as string) : undefined);
+          return new Response(
+            JSON.stringify({ upload_url: "http://upload.test/put", storage_path: "x", version_id: "v1" }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === "http://upload.test/put") return new Response(null, { status: 200 });
+        if (url.endsWith("/versions/complete")) {
+          return new Response(JSON.stringify({ version_id: "v1", version: "1.0.0", status: "processing" }), { status: 202 });
+        }
+        if (/\/versions\/[^/]+$/.test(url) && !url.endsWith("/versions/init") && !url.endsWith("/versions/complete")) {
+          return new Response(JSON.stringify({ version: "1.0.0", status: "published" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish([`alice/demo@1.0.0`, "--path", dir, "--changelog", "Fixed a bug and added a feature"]);
+
+    expect(initBodies).toEqual([
+      { version: "1.0.0", package_size_bytes: expect.any(Number), changelog_md: "Fixed a bug and added a feature" },
+    ]);
+  });
+
+  it("omits changelog_md from the versions/init request body when --changelog is not passed", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const initBodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        const url = String(input);
+        if (url.endsWith("/versions/init")) {
+          initBodies.push(init.body ? JSON.parse(init.body as string) : undefined);
+          return new Response(
+            JSON.stringify({ upload_url: "http://upload.test/put", storage_path: "x", version_id: "v1" }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === "http://upload.test/put") return new Response(null, { status: 200 });
+        if (url.endsWith("/versions/complete")) {
+          return new Response(JSON.stringify({ version_id: "v1", version: "1.0.0", status: "processing" }), { status: 202 });
+        }
+        if (/\/versions\/[^/]+$/.test(url) && !url.endsWith("/versions/init") && !url.endsWith("/versions/complete")) {
+          return new Response(JSON.stringify({ version: "1.0.0", status: "published" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+    expect(initBodies).toHaveLength(1);
+    expect(initBodies[0]).not.toHaveProperty("changelog_md");
+    expect(initBodies[0]).toEqual({ version: "1.0.0", package_size_bytes: expect.any(Number) });
+  });
+
   it("errors when SKILL.md, AGENT.md, and server.json are all present, with no --kind to disambiguate", async () => {
     writeFileSync(join(dir, "SKILL.md"), "# demo");
     writeFileSync(join(dir, "AGENT.md"), "# demo agent");

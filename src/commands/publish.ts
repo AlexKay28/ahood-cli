@@ -37,7 +37,7 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
 }
 
 const USAGE =
-  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]\n" +
+  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]\n" +
   "   or: ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
@@ -125,6 +125,7 @@ function parsePublishArgs(args: string[]): {
   homepage?: string;
   repository?: string;
   kind?: string;
+  changelog?: string;
 } {
   const pathFlag = flagValue(args, "--path");
   let owner = flagValue(args, "--owner");
@@ -137,6 +138,7 @@ function parsePublishArgs(args: string[]): {
   const homepage = flagValue(args, "--homepage");
   const repository = flagValue(args, "--repository");
   const kind = flagValue(args, "--kind");
+  const changelog = flagValue(args, "--changelog");
   let legacyPath: string | undefined;
 
   const first = args[0];
@@ -165,7 +167,20 @@ function parsePublishArgs(args: string[]): {
   // createSkillForPublish's create-skill body (ahood-cli#34).
   if (homepage !== undefined) validateExternalUrl(homepage, "--homepage");
   if (repository !== undefined) validateExternalUrl(repository, "--repository");
-  return { owner, skill, version, path: pathFlag ?? legacyPath ?? ".", name, tagline, tags, license, homepage, repository, kind };
+  return {
+    owner,
+    skill,
+    version,
+    path: pathFlag ?? legacyPath ?? ".",
+    name,
+    tagline,
+    tags,
+    license,
+    homepage,
+    repository,
+    kind,
+    changelog,
+  };
 }
 
 // Creates the skill under the caller's own account when versions/init 404s
@@ -220,11 +235,18 @@ async function initVersion(
   skill: string,
   version: string,
   packageSizeBytes: number,
+  changelog: string | undefined,
   createOpts: { name?: string; tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string; kind?: string },
   jsonOutput: boolean,
 ): Promise<{ init: InitResponse; created?: CreateResponse }> {
   const path = `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/init`;
-  const body = JSON.stringify({ version, package_size_bytes: packageSizeBytes });
+  // changelog_md matches the field name versions.ts's SkillVersion type already
+  // reads on the GET side (ahood-cli#87) -- only sent when --changelog was
+  // passed, same "omit rather than null" convention as every other optional
+  // flag in this file (see createSkillForPublish's body above).
+  const initBody: Record<string, unknown> = { version, package_size_bytes: packageSizeBytes };
+  if (changelog !== undefined) initBody.changelog_md = changelog;
+  const body = JSON.stringify(initBody);
   try {
     const init = await apiJson<InitResponse>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body });
     return { init };
@@ -248,7 +270,8 @@ async function initVersion(
 export async function publish(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   try {
-    const { owner, skill, version, path, name, tagline, tags, license, homepage, repository, kind } = parsePublishArgs(args);
+    const { owner, skill, version, path, name, tagline, tags, license, homepage, repository, kind, changelog } =
+      parsePublishArgs(args);
 
     const skillMdPath = join(path, "SKILL.md");
     const agentMdPath = join(path, "AGENT.md");
@@ -292,6 +315,7 @@ export async function publish(args: string[]): Promise<void> {
       skill,
       version,
       archive.length,
+      changelog,
       { name, tagline, tags, license, homepage, repository, kind: resolvedKind },
       jsonOutput,
     );

@@ -224,7 +224,7 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | `ahood skill share <owner>/<skill> --group <group>` | Share a skill you own with a group, without changing its public/private visibility. |
 | `ahood skill unshare <owner>/<skill> --group <group>` | Stop sharing a skill you own with a group. |
 | `ahood skill init [name]` | Scaffold a new skill folder with a minimal, valid SKILL.md. |
-| `ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill\|agent\|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--json]` | Publish a new version of a skill, agent, or mcp server manifest from a folder containing SKILL.md, AGENT.md, or server.json, creating the skill first if it doesn't already exist. |
+| `ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill\|agent\|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of a skill, agent, or mcp server manifest from a folder containing SKILL.md, AGENT.md, or server.json, creating the skill first if it doesn't already exist. |
 
 ### Group
 
