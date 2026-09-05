@@ -17,6 +17,7 @@ import { share, unshare } from "./commands/share.js";
 import { view } from "./commands/view.js";
 import { read } from "./commands/read.js";
 import { versions } from "./commands/versions.js";
+import { diff } from "./commands/diff.js";
 import { completion } from "./commands/completion.js";
 import { mcp } from "./commands/mcp.js";
 import { init } from "./commands/init.js";
@@ -43,6 +44,7 @@ const SKILL_COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   show: view,
   read,
   versions,
+  diff,
   list: listSkills,
   add,
   update,

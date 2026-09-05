@@ -211,6 +211,7 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | `ahood skill view\|show <owner>/<skill> [--json] [--web]` | Show a single skill's details -- tags, license, homepage, repository, dates, and more -- without installing it (alias: ahood skill show). |
 | `ahood skill read <owner>/<skill> [--json]` | Print a skill's full SKILL.md content, without installing it. |
 | `ahood skill versions <owner>/<skill> [--json]` | List a skill's published-version history -- version, changelog, size, and publish date. |
+| `ahood skill diff <owner>/<skill> <versionA> <versionB> [--json]` | Show what changed between two published versions -- a SKILL.md diff plus an added/removed/changed file summary. |
 | `ahood skill list [--json]` | List your own skills, public and private. |
 | `ahood skill add <owner>/<skill>[@version]` | Install a skill into .claude/skills/, pinned in the lockfile. |
 | `ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]` | Move the lockfile pin(s) forward to the latest version, for one skill or all installed skills at once. |

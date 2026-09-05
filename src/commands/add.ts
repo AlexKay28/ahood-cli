@@ -204,8 +204,11 @@ async function extractFreshVersion(buffer: Buffer, destDir: string): Promise<voi
 // Agent packages install as one file, not a directory (Claude Code's own
 // .claude/agents/*.md convention is flat, non-recursive) -- extracts just
 // AGENT.md's content from the downloaded tarball rather than writing every
-// entry to disk the way extractFreshVersion does for skills.
-async function extractSingleFileContent(buffer: Buffer, entryName: string): Promise<Buffer> {
+// entry to disk the way extractFreshVersion does for skills. Exported so
+// `diff.ts` can reuse the exact same in-memory single-file extraction to
+// pull SKILL.md out of two downloaded version archives without ever writing
+// either to disk (ahood-cli#88).
+export async function extractSingleFileContent(buffer: Buffer, entryName: string): Promise<Buffer> {
   let decompressed: Buffer;
   try {
     // Same decompression-bomb guard as extractTarGz above: a highly-
@@ -460,6 +463,31 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
   }
 }
 
+// Downloads a specific version's archive and verifies it against the
+// checksum in `meta`, WITHOUT extracting anything -- the shared first half
+// of add()'s download flow below, pulled out so `diff.ts` (ahood-cli#88) can
+// fetch two versions' archives the same verified way without duplicating
+// the download/checksum logic.
+export async function downloadVerifiedArchive(owner: string, skill: string, meta: VersionMeta): Promise<Buffer> {
+  const downloadRes = await apiFetch(
+    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/download?version=${encodeURIComponent(meta.version)}`,
+    { headers: { "X-Ahood-Source": "cli" }, redirect: "follow" },
+  );
+  if (!downloadRes.ok) {
+    const body = await downloadRes.text().catch(() => "");
+    throw new Error(`Download failed with status ${downloadRes.status}${body ? `: ${body}` : ""}`);
+  }
+  const buffer = await readBoundedBody(downloadRes, MAX_DOWNLOAD_BYTES);
+
+  const actualChecksum = createHash("sha256").update(buffer).digest("hex");
+  if (actualChecksum !== meta.checksum_sha256) {
+    throw new Error(
+      `Checksum mismatch for ${owner}/${skill}@${meta.version}: expected ${meta.checksum_sha256}, got ${actualChecksum}. Refusing to install.`,
+    );
+  }
+  return buffer;
+}
+
 export async function add(args: string[]): Promise<void> {
   const spec = args[0];
   if (!spec) throw new UsageError(USAGE);
@@ -495,22 +523,7 @@ export async function add(args: string[]): Promise<void> {
     console.warn("WARNING: this skill includes a scripts/ directory. Review its contents before use.");
   }
 
-  const downloadRes = await apiFetch(
-    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/download?version=${encodeURIComponent(meta.version)}`,
-    { headers: { "X-Ahood-Source": "cli" }, redirect: "follow" },
-  );
-  if (!downloadRes.ok) {
-    const body = await downloadRes.text().catch(() => "");
-    throw new Error(`Download failed with status ${downloadRes.status}${body ? `: ${body}` : ""}`);
-  }
-  const buffer = await readBoundedBody(downloadRes, MAX_DOWNLOAD_BYTES);
-
-  const actualChecksum = createHash("sha256").update(buffer).digest("hex");
-  if (actualChecksum !== meta.checksum_sha256) {
-    throw new Error(
-      `Checksum mismatch for ${key}@${meta.version}: expected ${meta.checksum_sha256}, got ${actualChecksum}. Refusing to install.`,
-    );
-  }
+  const buffer = await downloadVerifiedArchive(owner, skill, meta);
 
   if (meta.kind === "agent") {
     const content = await extractSingleFileContent(buffer, "AGENT.md");

@@ -98,6 +98,18 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     flags: ["--json    Emit the raw version objects instead of formatted text."],
   },
   {
+    usage: "ahood skill diff <owner>/<skill> <versionA> <versionB> [--json]",
+    summary: "Show what changed between two published versions -- a SKILL.md diff plus an added/removed/changed file summary.",
+    desc:
+      "Show what changed between two published versions of a skill: a unified diff of SKILL.md's content, plus a " +
+      "summary of which files were added or removed based on the two versions' manifests (a common file's content " +
+      "can only be confirmed changed for SKILL.md itself, since manifests don't carry per-file checksums). Both " +
+      "versions must be explicit semver -- \"latest\" isn't accepted, since it could silently mean two different " +
+      "things if a new version is published between resolving each side.",
+    flags: ["--json    Emit {skillmd_diff, manifest: {added, removed, changed}} instead of formatted text."],
+    examples: ["ahood skill diff alice/pdf-tools 1.0.0 1.1.0", "ahood skill diff alice/pdf-tools 1.0.0 1.1.0 --json"],
+  },
+  {
     usage: "ahood skill list [--json]",
     summary: "List your own skills, public and private.",
     desc: "List your own skills, public and private.",
