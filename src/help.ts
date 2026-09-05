@@ -54,9 +54,9 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     summary: "Start an MCP server exposing read-only skill commands as tools over stdio.",
     desc:
       "Start a Model Context Protocol server over stdio, exposing skill_search, skill_view, skill_read, " +
-      "skill_versions, skill_list, and whoami as MCP tools -- the same data ahood's --json commands already " +
-      "return, reachable as typed tool calls instead of parsed CLI output. Meant to be launched by an " +
-      "MCP-aware agent host (e.g. Claude Code's MCP server configuration), not run interactively.",
+      "skill_versions, skill_list, skill_outdated, and whoami as MCP tools -- the same data ahood's --json " +
+      "commands already return, reachable as typed tool calls instead of parsed CLI output. Meant to be " +
+      "launched by an MCP-aware agent host (e.g. Claude Code's MCP server configuration), not run interactively.",
   },
 ];
 
@@ -123,6 +123,16 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "--json      With --dry-run, emit structured preview objects instead of a formatted table.",
     ],
     examples: ["ahood skill update --dry-run", "ahood skill update alice/pdf-tools --dry-run --json"],
+  },
+  {
+    usage: "ahood skill outdated [<owner>/<skill> ...] [--json]",
+    summary: "Read-only staleness check comparing current and latest versions (with changelog) for installed skills.",
+    desc:
+      "Read-only staleness check across installed skills -- current vs. latest version, plus the changelog for " +
+      "anything behind. With no argument, checks every installed skill; with one or more given, checks just " +
+      "those. Never moves a lockfile pin or installs anything; equivalent to `ahood skill update --dry-run`.",
+    flags: ["--json    Emit structured preview objects instead of a formatted table."],
+    examples: ["ahood skill outdated", "ahood skill outdated alice/pdf-tools --json"],
   },
   {
     usage: "ahood skill remove <owner>/<skill>",

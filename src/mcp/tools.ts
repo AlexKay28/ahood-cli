@@ -7,6 +7,7 @@ import { readSkillMd } from "../commands/read.js";
 import { listSkillVersions } from "../commands/versions.js";
 import { listOwnSkills } from "../commands/list.js";
 import { checkAuth } from "../commands/whoami.js";
+import { fetchVersionMeta } from "../commands/add.js";
 import { validateSegment } from "../spec.js";
 
 // MCP tool inputs arrive as separate owner/skill zod fields (not a single
@@ -80,6 +81,62 @@ export function registerTools(server: McpServer): void {
       inputSchema: {},
     },
     safeTool(async () => listOwnSkills()),
+  );
+
+  server.registerTool(
+    "skill_outdated",
+    {
+      description:
+        "Compare an explicit list of {owner, skill, version} pins (e.g. from an agent's own memory of what it " +
+        "installed via MCP calls) against the registry's latest published version for each, returning " +
+        "up-to-date status and changelog -- without reading or requiring any local lockfile. One entry " +
+        "failing to resolve (e.g. a 404 for an unpublished skill) doesn't fail the whole batch; that entry's " +
+        "result carries an `error` field instead.",
+      inputSchema: {
+        skills: z
+          .array(
+            z.object({
+              owner: z.string().min(1),
+              skill: z.string().min(1),
+              version: z.string().min(1),
+            }),
+          )
+          .min(1),
+      },
+    },
+    safeTool(async ({ skills }: { skills: Array<{ owner: string; skill: string; version: string }> }) => {
+      const results = [];
+      for (const { owner, skill, version } of skills) {
+        const label = `${owner}/${skill}`;
+        try {
+          validateOwnerAndSkill(owner, skill);
+          const meta = await fetchVersionMeta(owner, skill, "latest");
+          const upToDate = version === meta.version;
+          results.push({
+            skill: label,
+            current_version: version,
+            latest_version: meta.version,
+            up_to_date: upToDate,
+            changelog_md: upToDate ? null : meta.changelog_md ?? null,
+          });
+        } catch (error) {
+          // One skill being removed/yanked/unreachable/invalid must not abort
+          // resolution of the rest of the batch -- that's the whole point of
+          // accepting an array instead of a single owner/skill pair. Mirrors
+          // update.ts's own per-skill try/catch in its --dry-run loop.
+          const message = error instanceof Error ? error.message : String(error);
+          results.push({
+            skill: label,
+            current_version: version,
+            latest_version: null,
+            up_to_date: false,
+            changelog_md: null,
+            error: message,
+          });
+        }
+      }
+      return results;
+    }),
   );
 
   server.registerTool(
