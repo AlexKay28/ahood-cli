@@ -1,0 +1,29 @@
+name: Verify build
+description: Install dependencies, build, run tests, and check the README is in sync. Shared by ci.yml and release.yml so the two pipelines can't silently drift apart.
+
+inputs:
+  registry-url:
+    description: npm registry URL to configure via .npmrc (only needed by callers about to run npm publish)
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: npm
+        registry-url: ${{ inputs.registry-url }}
+
+    - run: npm ci
+      shell: bash
+
+    - run: npm run build
+      shell: bash
+
+    - run: npm test
+      shell: bash
+
+    - run: node scripts/sync-readme.mjs --check
+      shell: bash
