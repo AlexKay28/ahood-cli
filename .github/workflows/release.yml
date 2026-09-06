@@ -15,20 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          registry-url: "https://registry.npmjs.org"
-
-      - run: npm ci
-      - run: npm run build
-      - run: npm test
-      - run: node scripts/sync-readme.mjs --check
-
       # Refuses to publish a tag that doesn't match package.json -- a tag
       # pushed against the wrong commit, or a manual mistake, must not
       # silently publish whatever version happens to be in package.json.
+      # Runs before the (slower) build/test steps below, on the runner's
+      # preinstalled node, so a bad tag fails fast instead of burning a
+      # full npm ci + build + test cycle first.
       - name: Verify tag matches package.json version
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -37,6 +29,10 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION"
             exit 1
           fi
+
+      - uses: ./.github/actions/verify
+        with:
+          registry-url: "https://registry.npmjs.org"
 
       - run: npm publish
         env:
