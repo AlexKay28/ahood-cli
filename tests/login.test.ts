@@ -91,4 +91,38 @@ describe("login", () => {
 
     expect(existsSync(join(dir, ".config", "ahood", "credentials.json"))).toBe(true);
   });
+
+  it("fails fast on a 410 with a non-JSON body instead of retrying it as a transient blip (#104)", async () => {
+    const calls: string[] = [];
+    const html = "<!DOCTYPE html>\n<html><head><title>410 Gone</title></head><body>nginx</body></html>";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        calls.push(url);
+        if (url === `${API_URL}/api/v1/auth/cli/device`) {
+          return new Response(
+            JSON.stringify({ code: "ABCD", verification_url: `${API_URL}/cli-auth?code=ABCD`, expires_in: 600 }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.startsWith(`${API_URL}/api/v1/auth/cli/device/`)) {
+          // A 410 (cancelled/expired) whose body is an HTML error page, not
+          // JSON -- res.json() throwing on this must not fall into the
+          // generic "transient, retry" path.
+          return new Response(html, { status: 410, headers: { "Content-Type": "text/html" } });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+
+    await expect(login()).rejects.toThrow(/cancelled or expired/);
+
+    // Exactly one poll attempt (plus the initial device-code request) --
+    // if the old code path were still active, res.json() would throw before
+    // the 410 check ever ran, get caught by the generic retry handler, and
+    // this would still be looping (every 2s, up to 10 minutes) instead of
+    // having already thrown.
+    expect(calls.filter((u) => u.startsWith(`${API_URL}/api/v1/auth/cli/device/`))).toHaveLength(1);
+  });
 });

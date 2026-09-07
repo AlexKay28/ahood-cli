@@ -30,7 +30,6 @@ export async function login(): Promise<void> {
   while (Date.now() < deadline) {
     await sleep(2000);
     let res: Response;
-    let body: PollResponse;
     try {
       // Poll against the CONFIGURED API host (getApiUrl()), not a URL derived
       // from the server-supplied verification_url -- that field is only ever
@@ -38,14 +37,31 @@ export async function login(): Promise<void> {
       // or redirected registry response can't point this at a host that
       // then harvests the device code and hands back an attacker's token.
       res = await apiFetchWithTimeout(`/api/v1/auth/cli/device/${encodeURIComponent(code)}`);
+    } catch (error) {
+      // A THROWN fetch (DNS blip, dropped socket) is transient by nature, and
+      // this loop runs for up to ten minutes while a human walks to their
+      // browser -- one bad network moment must not kill a login that is
+      // about to succeed. The deadline is untouched, so this cannot loop
+      // forever.
+      console.error(`Polling failed (${error instanceof Error ? error.message : String(error)}); retrying...`);
+      continue;
+    }
+    // Checked BEFORE res.json(): these are terminal statuses regardless of
+    // body shape, so a non-JSON body on them (e.g. a proxy/WAF error page --
+    // the same threat class sanitizeErrorMessage guards against elsewhere)
+    // must fail fast here instead of throwing inside the try below and being
+    // swallowed as "transient, retry" for up to ten minutes (ahood-cli#104).
+    if (res.status === 410 || res.status === 404) {
+      throw new Error("This login was cancelled or expired. Run `ahood login` again.");
+    }
+    let body: PollResponse;
+    try {
       body = (await res.json()) as PollResponse;
     } catch (error) {
-      // A THROWN fetch (DNS blip, dropped socket, a body that isn't JSON) is
-      // transient by nature, and this loop runs for up to ten minutes while a
-      // human walks to their browser -- one bad network moment must not kill
-      // a login that is about to succeed. HTTP *statuses* are still decided
-      // below; only the transport failure is retried. The deadline is
-      // untouched, so this cannot loop forever.
+      // A genuinely malformed/non-JSON body on a non-terminal status (e.g. a
+      // transient 502 while still pending) is the same kind of transient
+      // blip a thrown fetch above is -- retry rather than fail the whole
+      // login.
       console.error(`Polling failed (${error instanceof Error ? error.message : String(error)}); retrying...`);
       continue;
     }
@@ -53,9 +69,6 @@ export async function login(): Promise<void> {
       writeCredentials({ token: body.token });
       console.log("Logged in.");
       return;
-    }
-    if (res.status === 410 || res.status === 404) {
-      throw new Error("This login was cancelled or expired. Run `ahood login` again.");
     }
     // status === "pending" -- keep polling.
   }
