@@ -55,4 +55,22 @@ describe("apiJson error sanitization", () => {
     }
     expect((caught as ApiError).message.length).toBeLessThan(300);
   });
+
+  it("resolves with undefined instead of throwing on a 204 No Content success response (#103)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+
+    await expect(apiJson("/x")).resolves.toBeUndefined();
+  });
+
+  it("resolves with undefined for any 2xx with an empty body, not just 204", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 200 })));
+
+    await expect(apiJson("/x")).resolves.toBeUndefined();
+  });
+
+  it("still throws a 'Malformed response' error for a non-empty, non-JSON success body", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("not json", { status: 200 })));
+
+    await expect(apiJson("/x")).rejects.toThrow(/Malformed response/);
+  });
 });

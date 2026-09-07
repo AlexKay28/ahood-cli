@@ -69,8 +69,16 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
     throw new ApiError(res.status, message);
   }
 
+  // A 204 No Content (or any 2xx with an empty body) has nothing to parse --
+  // res.json() throws on empty input, which previously surfaced as a
+  // generic "Malformed response" error even though the request succeeded
+  // (ahood-cli#103). Callers that don't need response data (e.g. token
+  // revoke, which awaits this without using the result) get `undefined`
+  // back instead of a spurious failure.
+  const text = await res.text();
+  if (text === "") return undefined as T;
   try {
-    return (await res.json()) as T;
+    return JSON.parse(text) as T;
   } catch {
     throw new Error(`Malformed response from ${getApiUrl()}${path}: expected JSON.`);
   }
