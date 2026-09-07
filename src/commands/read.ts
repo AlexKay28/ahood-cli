@@ -79,5 +79,11 @@ export async function read(args: string[]): Promise<void> {
   // Plain mode prints the raw content verbatim -- no formatting/labels/
   // trailing decoration -- since the whole point is fast/pipeable access to
   // the exact prompt text (e.g. piping into a file or another tool).
-  console.log(content);
+  // process.stdout.write, not console.log: console.log unconditionally
+  // appends its own "\n", so a well-formed SKILL.md that already ends in one
+  // (the normal case) came out with a second, spurious trailing blank line --
+  // a real, reported round-trip mismatch between "ahood skill read" and the
+  // source file, even though the registry itself stores/serves the content
+  // byte-exact (ahood-cli#90).
+  process.stdout.write(content);
 }

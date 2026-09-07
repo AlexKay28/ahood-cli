@@ -25,19 +25,22 @@ describe("read", () => {
     await expect(read(["alice/.."])).rejects.toThrow(/Invalid skill/);
   });
 
-  it("prints the raw SKILL.md content verbatim in plain mode", async () => {
+  it("prints the raw SKILL.md content verbatim in plain mode, with no extra trailing newline (#90)", async () => {
     const detail = {
       owner: "alice",
       slug: "demo",
-      skill_versions: { version: "1.0.0", skill_md_content: "# Demo Skill\n\nDo the thing." },
+      // Ends in "\n", like a real, well-formed SKILL.md file -- console.log
+      // would append a SECOND one here, which is exactly the bug this test
+      // pins.
+      skill_versions: { version: "1.0.0", skill_md_content: "# Demo Skill\n\nDo the thing.\n" },
     };
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(detail), { status: 200 })));
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
     await read(["alice/demo"]);
 
-    expect(logSpy).toHaveBeenCalledTimes(1);
-    expect(logSpy).toHaveBeenCalledWith("# Demo Skill\n\nDo the thing.");
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(writeSpy).toHaveBeenCalledWith("# Demo Skill\n\nDo the thing.\n");
   });
 
   it("--json emits {version, content} as a single line", async () => {
@@ -68,18 +71,18 @@ describe("read", () => {
     };
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(detail), { status: 200 })));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
     await read(["alice/demo"]);
 
     expect(warnSpy).toHaveBeenCalledWith(
       "WARNING: alice/demo@1.0.0 has been yanked: contains a critical bug",
     );
-    expect(logSpy).toHaveBeenCalledWith("# Demo Skill\n");
+    expect(writeSpy).toHaveBeenCalledWith("# Demo Skill\n");
     // Warning must fire before the content is printed.
     const warnOrder = warnSpy.mock.invocationCallOrder[0];
-    const logOrder = logSpy.mock.invocationCallOrder[0];
-    expect(warnOrder).toBeLessThan(logOrder);
+    const writeOrder = writeSpy.mock.invocationCallOrder[0];
+    expect(warnOrder).toBeLessThan(writeOrder);
   });
 
   it("warns without a reason suffix when yanked_reason is absent", async () => {
@@ -95,7 +98,7 @@ describe("read", () => {
     };
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(detail), { status: 200 })));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
     await read(["alice/demo"]);
 
@@ -110,7 +113,7 @@ describe("read", () => {
     };
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(detail), { status: 200 })));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
     await read(["alice/demo"]);
 
@@ -120,7 +123,7 @@ describe("read", () => {
   it("throws a clear error when there is no published version", async () => {
     const detail = { owner: "alice", slug: "demo", skill_versions: null };
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(detail), { status: 200 })));
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
     await expect(read(["alice/demo"])).rejects.toThrow(/alice\/demo has no published version/);
   });
@@ -132,10 +135,10 @@ describe("read", () => {
       skill_versions: { version: "1.0.0", skill_md_content: null },
     };
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(detail), { status: 200 })));
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
     await expect(read(["alice/demo"])).rejects.toThrow(/no SKILL\.md content available/);
-    expect(logSpy).not.toHaveBeenCalled();
+    expect(writeSpy).not.toHaveBeenCalled();
   });
 
   it("throws a clear error when skill_md_content is an empty string", async () => {
