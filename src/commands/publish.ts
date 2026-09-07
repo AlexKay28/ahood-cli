@@ -53,6 +53,10 @@ const USAGE =
 //   .npmrc / .yarnrc.yml / .netrc / .pypirc -- package-manager/network auth
 //                tokens (npm_..., ghp_...) that don't match the server
 //                scanner's regexes either.
+//   .envrc    -- direnv's own file, commonly holding `export`ed secrets,
+//                exact-matched (not a `.env` prefix match -- "rc" makes it a
+//                distinct name, not a `.env.*` variant) since it doesn't
+//                match the server scanner's regexes either (ahood-cli#97).
 //   id_rsa / id_ed25519 / id_ecdsa / id_dsa (+ .pub) / .ssh -- SSH keys.
 //   .aws / .docker -- cloud and registry credentials.
 //   .DS_Store -- noise.
@@ -64,6 +68,7 @@ const EXCLUDED_NAMES = new Set([
   ".yarnrc.yml",
   ".netrc",
   ".pypirc",
+  ".envrc",
   ".ssh",
   ".aws",
   ".docker",

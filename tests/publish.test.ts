@@ -162,13 +162,14 @@ describe("publish", () => {
     ).rejects.toThrow(/--owner requires a value/);
   });
 
-  it("excludes .git, node_modules, .env, and credential files by name", async () => {
+  it("excludes .git, node_modules, .env, .envrc, and credential files by name", async () => {
     writeFileSync(join(dir, "SKILL.md"), "# demo");
     mkdirSync(join(dir, ".git"), { recursive: true });
     writeFileSync(join(dir, ".git", "config"), "secret remote");
     mkdirSync(join(dir, "node_modules", "x"), { recursive: true });
     writeFileSync(join(dir, "node_modules", "x", "index.js"), "noise");
     writeFileSync(join(dir, ".env"), "SECRET=1");
+    writeFileSync(join(dir, ".envrc"), "export SECRET=1");
     writeFileSync(join(dir, ".npmrc"), "//registry.npmjs.org/:_authToken=abc");
     writeFileSync(join(dir, "id_rsa"), "-----BEGIN OPENSSH PRIVATE KEY-----");
 
