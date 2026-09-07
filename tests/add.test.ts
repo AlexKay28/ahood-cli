@@ -8,6 +8,7 @@ import { pack } from "tar-stream";
 import { add, extractTarGz, downloadVerifiedArchive } from "../src/commands/add.js";
 import { agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { ApiError } from "../src/http.js";
+import { writeLockfileEntry } from "../src/lockfile.js";
 
 vi.mock("../src/secret-prompt.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/secret-prompt.js")>();
@@ -225,6 +226,47 @@ describe("add", () => {
     await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/does not match the one already pinned/);
     // Original install must be untouched.
     expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# demo\n");
+  });
+
+  it("catches a checksum conflict that lands DURING the download, after the early unlocked pre-check already saw none (#101)", async () => {
+    // The early pre-check in add() runs before fetching the archive and sees
+    // no existing entry at all. This stubs the download response to write a
+    // conflicting lockfile entry as a side effect right before returning the
+    // archive -- simulating a concurrent `ahood skill add` process's write
+    // landing in exactly that window. Only the LOCKED, read-check-write at
+    // the final write site (not the early check) can catch this.
+    const archive = await tarGz({ "SKILL.md": "# demo\n" });
+    const archiveChecksum = sha256(archive);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}`) {
+          return new Response(
+            JSON.stringify({ skill_versions: { version: VERSION, manifest: [{ path: "SKILL.md" }], checksum_sha256: archiveChecksum } }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}/download?version=${VERSION}`) {
+          writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), `${OWNER}/${SKILL}`, {
+            version: VERSION,
+            checksum_sha256: "concurrent-writer-won",
+          });
+          return new Response(new Uint8Array(archive), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected request: ${url}` }), { status: 404 });
+      }),
+    );
+
+    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/does not match the one already pinned/);
+
+    // The concurrent writer's entry must survive untouched, and this
+    // process's extracted files must be rolled back rather than left behind
+    // despite the lockfile disagreeing with them.
+    expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
+      [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: "concurrent-writer-won" },
+    });
+    expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
   });
 
   it("stops streaming and throws once the running total crosses the download cap, even with no content-length header (#37)", async () => {

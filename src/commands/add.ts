@@ -5,7 +5,14 @@ import * as tarStream from "tar-stream";
 import { gunzipSync } from "node:zlib";
 import { apiFetch, apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
 import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, AGENTS_ROOT, MCP_CONFIG_PATH } from "../spec.js";
-import { readLockfile, writeLockfileEntry, withLock, writeJsonFileAtomic } from "../lockfile.js";
+import {
+  readLockfile,
+  withLock,
+  writeJsonFileAtomic,
+  writeLockfileEntryVerifyingChecksum,
+  LockfileChecksumConflictError,
+  type LockEntry,
+} from "../lockfile.js";
 import { promptSecret } from "../secret-prompt.js";
 import { UsageError } from "../usage-error.js";
 
@@ -28,6 +35,13 @@ export type VersionMeta = {
   changelog_md?: string | null;
   kind?: "skill" | "agent" | "mcp";
 };
+
+// Shared wording for the checksum-pin tamper-detection guard, used both by
+// the early unlocked fast-fail check in add() and by the real,
+// concurrency-safe enforcement at each write site below (ahood-cli#101).
+function checksumConflictMessage(key: string, meta: VersionMeta, existing: LockEntry): string {
+  return `Refusing to install ${key}@${meta.version}: its checksum (${meta.checksum_sha256}) does not match the one already pinned in the lockfile (${existing.checksum_sha256}) for this exact version. If you trust this change, remove ${key}'s lockfile entry first.`;
+}
 
 // GET /api/v1/skills/{owner}/{skill}/versions/{version} matches the version
 // string with an exact .eq() (verified live against this branch's route) --
@@ -456,7 +470,20 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
     writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
   });
 
-  writeLockfileEntry(LOCKFILE_PATH, `${owner}/${skill}`, { version: meta.version, checksum_sha256: meta.checksum_sha256 });
+  const mcpKey = `${owner}/${skill}`;
+  try {
+    writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, mcpKey, { version: meta.version, checksum_sha256: meta.checksum_sha256 });
+  } catch (error) {
+    if (!(error instanceof LockfileChecksumConflictError)) throw error;
+    // Roll back the .mcp.json merge above under the same lock pattern --
+    // re-read+delete rather than assuming nothing else changed it since.
+    withLock(MCP_CONFIG_PATH, () => {
+      const fileContents = readMcpConfig();
+      delete (fileContents.mcpServers as Record<string, unknown>)[skill];
+      writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
+    });
+    throw new Error(checksumConflictMessage(mcpKey, meta, error.existing));
+  }
   console.log(`Installed ${owner}/${skill}@${meta.version} into ${MCP_CONFIG_PATH} as "${skill}"`);
   if (Object.keys(secretEnv).length > 0) {
     console.warn(`WARNING: ${MCP_CONFIG_PATH} now contains one or more secret values in plaintext -- do not commit it to version control.`);
@@ -506,12 +533,15 @@ export async function add(args: string[]): Promise<void> {
   // with; if a later fetch of the "same" version disagrees, either the
   // published artifact changed after being pinned or the registry response
   // was tampered with in transit -- either way this is not something to
-  // silently accept and overwrite.
+  // silently accept and overwrite. This early, UNLOCKED read is a fast-fail
+  // optimization only (skip an entire download for the common, non-
+  // concurrent case) -- it provides no real guarantee under concurrent
+  // installs. The actual enforcement is the locked, read-check-write
+  // writeLockfileEntryVerifyingChecksum call at each write site below
+  // (ahood-cli#101).
   const existingEntry = readLockfile(LOCKFILE_PATH)[key];
   if (existingEntry && existingEntry.version === meta.version && existingEntry.checksum_sha256 !== meta.checksum_sha256) {
-    throw new Error(
-      `Refusing to install ${key}@${meta.version}: its checksum (${meta.checksum_sha256}) does not match the one already pinned in the lockfile (${existingEntry.checksum_sha256}) for this exact version. If you trust this change, remove ${key}'s lockfile entry first.`,
-    );
+    throw new Error(checksumConflictMessage(key, meta, existingEntry));
   }
 
   if (meta.yanked_at) {
@@ -536,7 +566,13 @@ export async function add(args: string[]): Promise<void> {
     mkdirSync(AGENTS_ROOT, { recursive: true });
     const destPath = agentPath(owner, skill);
     writeFileSync(destPath, content);
-    writeLockfileEntry(LOCKFILE_PATH, key, { version: meta.version, checksum_sha256: meta.checksum_sha256 });
+    try {
+      writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, { version: meta.version, checksum_sha256: meta.checksum_sha256 });
+    } catch (error) {
+      if (!(error instanceof LockfileChecksumConflictError)) throw error;
+      rmSync(destPath, { force: true });
+      throw new Error(checksumConflictMessage(key, meta, error.existing));
+    }
     console.log(`Installed ${key}@${meta.version} to ${destPath}`);
     return;
   }
@@ -550,10 +586,16 @@ export async function add(args: string[]): Promise<void> {
   // project-skill scan actually discovers it (see skillDir's comment in spec.ts).
   const destDir = skillDir(owner, skill);
   await extractFreshVersion(buffer, destDir);
-  writeLockfileEntry(LOCKFILE_PATH, key, {
-    version: meta.version,
-    checksum_sha256: meta.checksum_sha256,
-  });
+  try {
+    writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
+      version: meta.version,
+      checksum_sha256: meta.checksum_sha256,
+    });
+  } catch (error) {
+    if (!(error instanceof LockfileChecksumConflictError)) throw error;
+    rmSync(destDir, { recursive: true, force: true });
+    throw new Error(checksumConflictMessage(key, meta, error.existing));
+  }
 
   console.log(`Installed ${key}@${meta.version} to ${destDir}`);
 }

@@ -1,8 +1,15 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { readLockfile, writeLockfileEntry, removeLockfileEntry } from "../src/lockfile.js";
+import {
+  readLockfile,
+  writeLockfileEntry,
+  removeLockfileEntry,
+  writeLockfileEntryVerifyingChecksum,
+  LockfileChecksumConflictError,
+} from "../src/lockfile.js";
 
 describe("lockfile", () => {
   let dir: string;
@@ -65,5 +72,79 @@ describe("lockfile", () => {
     );
     await Promise.all(writes);
     expect(Object.keys(readLockfile(lockPath))).toHaveLength(8);
+  });
+
+  it("reclaims a lock directory left behind by a process that no longer exists, instead of hanging until the timeout (#100)", () => {
+    const lockDir = `${lockPath}.lock`;
+    mkdirSync(lockDir, { recursive: true });
+    // A process that has already exited by the time spawnSync returns --
+    // its pid is guaranteed dead (barring the astronomically unlikely case
+    // of immediate pid reuse), simulating a hard-killed (SIGKILL/OOM) lock
+    // holder.
+    const dead = spawnSync(process.execPath, ["-e", ""]);
+    writeFileSync(join(lockDir, "pid"), String(dead.pid));
+
+    const start = Date.now();
+    writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "abc" });
+    const elapsed = Date.now() - start;
+
+    expect(readLockfile(lockPath)).toEqual({
+      "alice/my-skill": { version: "1.0.0", checksum_sha256: "abc" },
+    });
+    // Reclaimed almost immediately -- the old code path would instead sit in
+    // the wait/retry loop for close to the full 5s timeout.
+    expect(elapsed).toBeLessThan(2000);
+    expect(existsSync(lockDir)).toBe(false);
+  });
+
+  describe("writeLockfileEntryVerifyingChecksum", () => {
+    it("writes normally when there is no conflicting entry", () => {
+      writeLockfileEntryVerifyingChecksum(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "abc" });
+      expect(readLockfile(lockPath)).toEqual({
+        "alice/my-skill": { version: "1.0.0", checksum_sha256: "abc" },
+      });
+    });
+
+    it("overwrites cleanly when the existing entry is for a different version (an update, not a conflict)", () => {
+      writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "aaa" });
+      writeLockfileEntryVerifyingChecksum(lockPath, "alice/my-skill", { version: "1.1.0", checksum_sha256: "bbb" });
+      expect(readLockfile(lockPath)).toEqual({
+        "alice/my-skill": { version: "1.1.0", checksum_sha256: "bbb" },
+      });
+    });
+
+    it("throws LockfileChecksumConflictError and leaves the existing entry untouched on a same-version checksum mismatch (#101)", () => {
+      writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "aaa" });
+
+      let caught: unknown;
+      try {
+        writeLockfileEntryVerifyingChecksum(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "tampered" });
+      } catch (e) {
+        caught = e;
+      }
+
+      expect(caught).toBeInstanceOf(LockfileChecksumConflictError);
+      expect((caught as LockfileChecksumConflictError).existing).toEqual({ version: "1.0.0", checksum_sha256: "aaa" });
+      // The lockfile itself must be unchanged -- the conflicting write never landed.
+      expect(readLockfile(lockPath)).toEqual({
+        "alice/my-skill": { version: "1.0.0", checksum_sha256: "aaa" },
+      });
+    });
+
+    it("catches a conflict written by a concurrent writer AFTER an earlier unlocked read saw none, closing the TOCTOU window", () => {
+      // Simulates add()'s early, unlocked fast-fail check seeing no entry at
+      // all, then -- before this call's OWN locked check-and-write runs -- a
+      // "concurrent process" (represented here by a plain writeLockfileEntry
+      // call in between) pins a conflicting checksum for the same version.
+      expect(readLockfile(lockPath)["alice/my-skill"]).toBeUndefined();
+      writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "concurrent-writer-won" });
+
+      expect(() =>
+        writeLockfileEntryVerifyingChecksum(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "this-writer-lost" }),
+      ).toThrow(LockfileChecksumConflictError);
+      expect(readLockfile(lockPath)).toEqual({
+        "alice/my-skill": { version: "1.0.0", checksum_sha256: "concurrent-writer-won" },
+      });
+    });
   });
 });
