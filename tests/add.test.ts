@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
-import { add, extractTarGz } from "../src/commands/add.js";
+import { add, extractTarGz, downloadVerifiedArchive } from "../src/commands/add.js";
 import { agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
+import { ApiError } from "../src/http.js";
 
 vi.mock("../src/secret-prompt.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/secret-prompt.js")>();
@@ -835,6 +836,32 @@ describe("add", () => {
     await add([`${OWNER}/${SKILL}`]);
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/scripts\//));
+  });
+
+  it("throws ApiError (not a plain Error) with a sanitized body on a failed download, preserving the HTTP status (#102)", async () => {
+    const html = "<!DOCTYPE html>\n<html><head><title>502 Bad Gateway</title></head><body>nginx</body></html>";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(html, { status: 502, headers: { "Content-Type": "text/html" } })),
+    );
+
+    let caught: unknown;
+    try {
+      await downloadVerifiedArchive(OWNER, SKILL, {
+        version: VERSION,
+        manifest: [{ path: "SKILL.md" }],
+        checksum_sha256: "0".repeat(64),
+        yanked_at: null,
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(502);
+    const message = (caught as ApiError).message;
+    expect(message).not.toContain("<html");
+    expect(message).not.toContain("nginx");
   });
 
 });

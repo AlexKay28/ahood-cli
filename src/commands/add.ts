@@ -3,7 +3,7 @@ import { mkdirSync, renameSync, rmSync, rmdirSync, writeFileSync, readFileSync, 
 import { basename, dirname, join, resolve, sep } from "node:path";
 import * as tarStream from "tar-stream";
 import { gunzipSync } from "node:zlib";
-import { apiFetch, apiJson } from "../http.js";
+import { apiFetch, apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
 import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, AGENTS_ROOT, MCP_CONFIG_PATH } from "../spec.js";
 import { readLockfile, writeLockfileEntry, withLock, writeJsonFileAtomic } from "../lockfile.js";
 import { promptSecret } from "../secret-prompt.js";
@@ -474,8 +474,14 @@ export async function downloadVerifiedArchive(owner: string, skill: string, meta
     { headers: { "X-Ahood-Source": "cli" }, redirect: "follow" },
   );
   if (!downloadRes.ok) {
-    const body = await downloadRes.text().catch(() => "");
-    throw new Error(`Download failed with status ${downloadRes.status}${body ? `: ${body}` : ""}`);
+    // Same host as every other apiJson call, so this must throw ApiError
+    // (not a plain Error) to get the right exitCodeFor mapping (401/404/5xx),
+    // and route the body through sanitizeErrorMessage -- an unsanitized WAF/
+    // proxy HTML page would otherwise dump straight to the terminal here,
+    // exactly what that function exists to prevent elsewhere (ahood-cli#102).
+    const rawBody = await downloadRes.text().catch(() => "");
+    const body = rawBody ? sanitizeErrorMessage(rawBody) : "";
+    throw new ApiError(downloadRes.status, `Download failed with status ${downloadRes.status}${body ? `: ${body}` : ""}`);
   }
   const buffer = await readBoundedBody(downloadRes, MAX_DOWNLOAD_BYTES);
 
