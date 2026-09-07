@@ -17,7 +17,7 @@ type OwnSkill = {
   visibility: string;
   downloads_count: number;
   stars_count: number;
-  profiles: { username: string };
+  profiles: { username: string } | null;
 };
 
 export async function listOwnSkills(): Promise<OwnSkill[]> {
@@ -38,6 +38,10 @@ export async function listSkills(args: string[] = []): Promise<void> {
     return;
   }
   for (const skill of skills) {
-    console.log(`${skill.profiles.username}/${skill.slug} (${skill.visibility}) - ${skill.name}${skill.tagline ? `: ${skill.tagline}` : ""} (${skill.downloads_count} downloads, ${skill.stars_count} stars)`);
+    // profiles comes from a server-side join that can plausibly be null for
+    // an individual row -- degrade that one row instead of crashing the
+    // whole command (ahood-cli#106).
+    const username = skill.profiles?.username ?? "(unknown)";
+    console.log(`${username}/${skill.slug} (${skill.visibility}) - ${skill.name}${skill.tagline ? `: ${skill.tagline}` : ""} (${skill.downloads_count} downloads, ${skill.stars_count} stars)`);
   }
 }

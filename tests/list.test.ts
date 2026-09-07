@@ -81,4 +81,16 @@ describe("listSkills", () => {
 
     await expect(listSkills()).rejects.toThrow(/Unauthorized/);
   });
+
+  it("falls back to '(unknown)' instead of crashing when a row's profiles join is null (#106)", async () => {
+    stubApi(200, {
+      skills: [
+        { slug: "orphaned", name: "Orphaned", tagline: null, visibility: "public", downloads_count: 0, stars_count: 0, profiles: null },
+      ],
+    });
+
+    await listSkills();
+
+    expect(logSpy).toHaveBeenCalledWith("(unknown)/orphaned (public) - Orphaned (0 downloads, 0 stars)");
+  });
 });

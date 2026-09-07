@@ -70,4 +70,26 @@ describe("search", () => {
     expect(requestedUrl.searchParams.has("per_page")).toBe(false);
     expect(requestedUrl.searchParams.has("limit")).toBe(false);
   });
+
+  it("accepts the --limit=5 equals form, not just the space form (#105)", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ skills: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await search(["foo", "--limit=5"]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestedUrl = new URL(fetchMock.mock.calls[0][0] as string);
+    expect(requestedUrl.searchParams.get("per_page")).toBe("5");
+  });
+
+  it("falls back to '(unknown)' instead of crashing when a result's profiles join is null (#106)", async () => {
+    const skills = [{ slug: "demo", name: "Demo", tagline: null, downloads_count: 3, profiles: null }];
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ skills }), { status: 200 })));
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await search(["demo"]);
+
+    expect(logSpy).toHaveBeenCalledWith("(unknown)/demo - Demo (3 downloads)");
+  });
 });
