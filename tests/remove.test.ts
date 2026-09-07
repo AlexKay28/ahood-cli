@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { remove } from "../src/commands/remove.js";
 import { writeLockfileEntry, readLockfile } from "../src/lockfile.js";
-import { agentPath, MCP_CONFIG_PATH } from "../src/spec.js";
+import { agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 
 describe("remove", () => {
   let dir: string;
@@ -27,8 +27,8 @@ describe("remove", () => {
   });
 
   it("removes the installed skill directory and its lockfile entry", async () => {
-    mkdirSync(join(dir, ".claude", "skills", "alice", "demo"), { recursive: true });
-    writeFileSync(join(dir, ".claude", "skills", "alice", "demo", "SKILL.md"), "# demo");
+    mkdirSync(join(dir, skillDir("alice", "demo")), { recursive: true });
+    writeFileSync(join(dir, skillDir("alice", "demo"), "SKILL.md"), "# demo");
     writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/demo", {
       version: "1.0.0",
       checksum_sha256: "abc",
@@ -36,19 +36,18 @@ describe("remove", () => {
 
     await remove(["alice/demo"]);
 
-    expect(existsSync(join(dir, ".claude", "skills", "alice", "demo"))).toBe(false);
+    expect(existsSync(join(dir, skillDir("alice", "demo")))).toBe(false);
     expect(readLockfile(join(dir, ".claude", "skills.lock.json"))).toEqual({});
   });
 
-  it("sweeps the now-empty owner directory but not a sibling skill's", async () => {
-    mkdirSync(join(dir, ".claude", "skills", "alice", "demo"), { recursive: true });
-    mkdirSync(join(dir, ".claude", "skills", "alice", "other"), { recursive: true });
+  it("removing one skill does not touch a sibling skill from the same owner", async () => {
+    mkdirSync(join(dir, skillDir("alice", "demo")), { recursive: true });
+    mkdirSync(join(dir, skillDir("alice", "other")), { recursive: true });
 
     await remove(["alice/demo"]);
 
-    expect(existsSync(join(dir, ".claude", "skills", "alice", "demo"))).toBe(false);
-    expect(existsSync(join(dir, ".claude", "skills", "alice", "other"))).toBe(true);
-    expect(existsSync(join(dir, ".claude", "skills", "alice"))).toBe(true);
+    expect(existsSync(join(dir, skillDir("alice", "demo")))).toBe(false);
+    expect(existsSync(join(dir, skillDir("alice", "other")))).toBe(true);
   });
 
   it("reports failure instead of a false 'Removed' when nothing was installed", async () => {
@@ -119,7 +118,7 @@ describe("remove", () => {
   });
 
   it("does not warn about .mcp.json when removing a skill with no matching entry there", async () => {
-    mkdirSync(join(dir, ".claude", "skills", "alice", "demo"), { recursive: true });
+    mkdirSync(join(dir, skillDir("alice", "demo")), { recursive: true });
     writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: { "unrelated-server": { url: "https://x" } } }, null, 2));
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -130,15 +129,15 @@ describe("remove", () => {
   });
 
   it("rejects a spec that tries to traverse outside .claude/skills/ via '..'", async () => {
-    mkdirSync(join(dir, ".claude", "skills", "alice", "demo"), { recursive: true });
-    mkdirSync(join(dir, ".claude", "skills", "bob", "other"), { recursive: true });
+    mkdirSync(join(dir, skillDir("alice", "demo")), { recursive: true });
+    mkdirSync(join(dir, skillDir("bob", "other")), { recursive: true });
     mkdirSync(join(dir, "outside"), { recursive: true });
     writeFileSync(join(dir, "outside", "important.txt"), "keep me");
 
     await expect(remove(["alice/.."])).rejects.toThrow(/Invalid skill/);
     // The whole skills tree (every owner) must still be intact.
-    expect(existsSync(join(dir, ".claude", "skills", "alice", "demo"))).toBe(true);
-    expect(existsSync(join(dir, ".claude", "skills", "bob", "other"))).toBe(true);
+    expect(existsSync(join(dir, skillDir("alice", "demo")))).toBe(true);
+    expect(existsSync(join(dir, skillDir("bob", "other")))).toBe(true);
 
     await expect(remove(["../outside"])).rejects.toThrow(/Invalid owner/);
     expect(existsSync(join(dir, "outside", "important.txt"))).toBe(true);

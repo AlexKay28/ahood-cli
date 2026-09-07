@@ -7,6 +7,7 @@ import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
 import { update } from "../src/commands/update.js";
 import { writeLockfileEntry } from "../src/lockfile.js";
+import { skillDir } from "../src/spec.js";
 
 const API_URL = "http://ahood.test";
 
@@ -100,7 +101,7 @@ describe("update", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     await update([]);
 
-    expect(readFileSync(join(dir, ".claude", "skills", "alice", "good", "SKILL.md"), "utf-8")).toBe("# good\n");
+    expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe("# good\n");
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("bob/broken"));
     expect(process.exitCode).toBe(1);
     process.exitCode = 0;
@@ -119,7 +120,7 @@ describe("update", () => {
 
     expect(warnSpy).toHaveBeenCalledWith("Skipping alice/never-installed: not currently installed.");
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(existsSync(join(dir, ".claude", "skills", "alice", "never-installed"))).toBe(false);
+    expect(existsSync(join(dir, skillDir("alice", "never-installed")))).toBe(false);
     // No lockfile was ever written -- `update` on a target that was never
     // installed must not create one, let alone pin an entry into it.
     expect(existsSync(lockfilePath)).toBe(false);
@@ -156,7 +157,7 @@ describe("update", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await update(["alice/good", "bob/never-installed"]);
 
-    expect(readFileSync(join(dir, ".claude", "skills", "alice", "good", "SKILL.md"), "utf-8")).toBe("# good\n");
+    expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe("# good\n");
     expect(warnSpy).toHaveBeenCalledWith("Skipping bob/never-installed: not currently installed.");
     expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("bob/never-installed"))).toBe(false);
     expect(process.exitCode).not.toBe(1);
@@ -210,8 +211,8 @@ describe("update", () => {
     // Every skill in the lockfile passes the "is it installed" check, so the
     // not-installed guard must never fire on the no-args path.
     expect(warnSpy).not.toHaveBeenCalled();
-    expect(readFileSync(join(dir, ".claude", "skills", "alice", "good", "SKILL.md"), "utf-8")).toBe("# good\n");
-    expect(readFileSync(join(dir, ".claude", "skills", "alice", "other", "SKILL.md"), "utf-8")).toBe("# other\n");
+    expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe("# good\n");
+    expect(readFileSync(join(dir, skillDir("alice", "other"), "SKILL.md"), "utf-8")).toBe("# other\n");
     expect(process.exitCode).not.toBe(1);
   });
 
@@ -254,7 +255,7 @@ describe("update", () => {
 
   describe("--dry-run", () => {
     const lockfilePath = () => join(dir, ".claude", "skills.lock.json");
-    const skillDirPath = (owner: string, skill: string) => join(dir, ".claude", "skills", owner, skill);
+    const skillDirPath = (owner: string, skill: string) => join(dir, skillDir(owner, skill));
 
     function stubResolveOnly(fetchCalls: string[]) {
       vi.stubGlobal(

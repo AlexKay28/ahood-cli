@@ -1,5 +1,4 @@
-import { existsSync, readdirSync, readFileSync, rmSync, rmdirSync, unlinkSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { removeLockfileEntry } from "../lockfile.js";
 import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, MCP_CONFIG_PATH } from "../spec.js";
 import { UsageError } from "../usage-error.js";
@@ -12,16 +11,11 @@ export async function remove(args: string[]): Promise<void> {
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
   const key = `${owner}/${skill}`;
 
+  // Flat owner@skill directory (see skillDir's comment in spec.ts) -- no
+  // owner-namespace folder to sweep afterward, unlike the old nested layout.
   const dir = skillDir(owner, skill);
   const dirExisted = existsSync(dir);
   if (dirExisted) rmSync(dir, { recursive: true, force: true });
-
-  // Sweep the owner directory once it holds nothing, so uninstalling an
-  // owner's last skill doesn't leave an empty namespace folder behind (npm
-  // does the same with node_modules/@scope). Guarded on emptiness, so another
-  // skill by the same owner is never touched.
-  const ownerDir = dirname(dir);
-  if (existsSync(ownerDir) && readdirSync(ownerDir).length === 0) rmdirSync(ownerDir);
 
   // An agent installs as a single flat file (.claude/agents/<owner>@<skill>.md),
   // never a directory under .claude/skills/ -- skillDir's rmSync above never

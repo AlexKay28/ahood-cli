@@ -540,7 +540,8 @@ export async function add(args: string[]): Promise<void> {
     return;
   }
 
-  // Owner-namespaced on disk, mirroring npm's node_modules/@scope/package.
+  // Flat, owner@skill-joined directory name so Claude Code's own one-level-deep
+  // project-skill scan actually discovers it (see skillDir's comment in spec.ts).
   const destDir = skillDir(owner, skill);
   await extractFreshVersion(buffer, destDir);
   writeLockfileEntry(LOCKFILE_PATH, key, {

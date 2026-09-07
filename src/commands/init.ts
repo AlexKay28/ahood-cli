@@ -33,7 +33,7 @@ function normalizeToSlug(name: string): string {
 // documented Claude Code skill format: YAML frontmatter delimited by `---`
 // lines, with a `name` and a `description` field -- the same shape every
 // real SKILL.md in this ecosystem uses (see e.g. any installed skill under
-// .claude/skills/<owner>/<skill>/SKILL.md). Keeping to exactly those two
+// .claude/skills/<owner>@<skill>/SKILL.md). Keeping to exactly those two
 // fields, rather than inventing extra ones, means nothing here needs
 // updating just because publish.ts's own validation happens to be looser
 // today.

@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { UsageError } from "./usage-error.js";
 
-// Owner and skill segments become filesystem path components (.claude/skills/<owner>/<skill>)
+// Owner and skill segments become filesystem path components (.claude/skills/<owner>@<skill>)
 // and URL path segments, so both are restricted to a safe charset that cannot contain "..",
 // "/", "\", or a leading dot -- this is what closes the path-traversal hole in add/remove
 // (a spec like "alice/.." previously resolved outside .claude/skills/ entirely).
@@ -88,24 +88,35 @@ export function validateExternalUrl(value: string, flag: string): void {
 export const SKILLS_ROOT = join(".claude", "skills");
 export const LOCKFILE_PATH = join(".claude", "skills.lock.json");
 
+// Claude Code's own project-skill loader scans .claude/skills/ exactly one
+// level deep (each immediate child directory is checked for a SKILL.md),
+// not recursively -- so the previous owner-nested layout
+// (.claude/skills/<owner>/<skill>/SKILL.md) was never discovered by Claude
+// Code at all; it only ever worked via this CLI's own commands (ahood-cli#96).
+// Joining owner and skill into one flat directory name with "@" fixes that
+// while staying collision-resistant, mirroring agentPath below: SEGMENT_RE's
+// character class [a-z0-9._-] (case-insensitive) never contains "@", so the
+// joined name always has exactly one "@", unambiguous for any pair of
+// SEGMENT_RE-valid values. "@" is a valid path-segment character on Linux,
+// macOS, and Windows.
 export function skillDir(owner: string, skill: string): string {
-  return join(SKILLS_ROOT, owner, skill);
+  return join(SKILLS_ROOT, `${owner}@${skill}`);
 }
 
 // Claude Code's own subagent loader scans .claude/agents/*.md as flat files
-// (non-recursive), unlike .claude/skills/<owner>/<skill>/ which nests by
-// owner -- a bare .claude/agents/<skill>.md would let two different owners'
-// same-named agent collide and silently overwrite each other. Joining the
-// owner into the filename with "@" keeps the layout flat (so Claude Code
-// still finds it) while staying collision-resistant: SEGMENT_RE's character
-// class is exactly [a-z0-9._-] (case-insensitive), which does not include
-// "@" -- so "@" can never appear inside a valid owner or skill segment, and
-// the joined filename always contains exactly one "@", at the boundary
-// between the two segments. That makes the join unambiguous for any pair of
-// SEGMENT_RE-valid values, including ones containing hyphens (e.g.
-// owner="al-ice"/skill="bob" joins to "al-ice@bob.md", which cannot also be
-// produced by any other valid owner/skill pair). "@" is a valid filename
-// character on Linux, macOS, and Windows.
+// (non-recursive), same reasoning as skillDir above -- a bare
+// .claude/agents/<skill>.md would let two different owners' same-named agent
+// collide and silently overwrite each other. Joining the owner into the
+// filename with "@" keeps the layout flat (so Claude Code still finds it)
+// while staying collision-resistant: SEGMENT_RE's character class is exactly
+// [a-z0-9._-] (case-insensitive), which does not include "@" -- so "@" can
+// never appear inside a valid owner or skill segment, and the joined
+// filename always contains exactly one "@", at the boundary between the two
+// segments. That makes the join unambiguous for any pair of SEGMENT_RE-valid
+// values, including ones containing hyphens (e.g. owner="al-ice"/skill="bob"
+// joins to "al-ice@bob.md", which cannot also be produced by any other valid
+// owner/skill pair). "@" is a valid filename character on Linux, macOS, and
+// Windows.
 export const AGENTS_ROOT = join(".claude", "agents");
 
 export function agentPath(owner: string, skill: string): string {

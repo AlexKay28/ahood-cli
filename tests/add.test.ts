@@ -157,19 +157,19 @@ describe("add", () => {
 
     // The check must happen BEFORE extraction and before the lockfile write --
     // a refactor that reordered it past either would ship green without these.
-    expect(existsSync(join(dir, ".claude", "skills", OWNER, SKILL))).toBe(false);
+    expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
     expect(existsSync(join(dir, ".claude", "skills"))).toBe(false);
     expect(existsSync(join(dir, ".claude", "skills.lock.json"))).toBe(false);
   });
 
-  it("installs under .claude/skills/<owner>/<skill> and pins the lockfile when the checksum matches", async () => {
+  it("installs under .claude/skills/<owner>@<skill> and pins the lockfile when the checksum matches", async () => {
     const archive = await tarGz({ "SKILL.md": "# demo\n" });
     stubApi(archive, sha256(archive));
 
     await add([`${OWNER}/${SKILL}`]);
 
-    // Owner-namespaced: alice/demo-skill and bob/demo-skill must not collide.
-    expect(readFileSync(join(dir, ".claude", "skills", OWNER, SKILL, "SKILL.md"), "utf-8")).toBe("# demo\n");
+    // Owner-namespaced (flat, @-joined): alice/demo-skill and bob/demo-skill must not collide.
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# demo\n");
     expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
       [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: sha256(archive) },
     });
@@ -182,7 +182,6 @@ describe("add", () => {
     stubApi(archive, sha256(archive), [{ path: "../escaped.txt" }]);
 
     await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/unsafe archive entry/);
-    expect(existsSync(join(dir, ".claude", "skills", OWNER, "escaped.txt"))).toBe(false);
     expect(existsSync(join(dir, ".claude", "skills", "escaped.txt"))).toBe(false);
   });
 
@@ -196,14 +195,14 @@ describe("add", () => {
     const v1 = await tarGz({ "SKILL.md": "# v1\n", "old-removed-file.md": "stale\n" });
     stubApi(v1, sha256(v1), [{ path: "SKILL.md" }], "1.0.0");
     await add([`${OWNER}/${SKILL}@1.0.0`]);
-    expect(existsSync(join(dir, ".claude", "skills", OWNER, SKILL, "old-removed-file.md"))).toBe(true);
+    expect(existsSync(join(dir, skillDir(OWNER, SKILL), "old-removed-file.md"))).toBe(true);
 
     const v2 = await tarGz({ "SKILL.md": "# v2\n" });
     stubApi(v2, sha256(v2), [{ path: "SKILL.md" }], "2.0.0");
     await add([`${OWNER}/${SKILL}@2.0.0`]);
 
-    expect(readFileSync(join(dir, ".claude", "skills", OWNER, SKILL, "SKILL.md"), "utf-8")).toBe("# v2\n");
-    expect(existsSync(join(dir, ".claude", "skills", OWNER, SKILL, "old-removed-file.md"))).toBe(false);
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# v2\n");
+    expect(existsSync(join(dir, skillDir(OWNER, SKILL), "old-removed-file.md"))).toBe(false);
   });
 
   it("refuses to decompress an archive whose expanded size is over the cap (decompression-bomb guard)", async () => {
@@ -224,7 +223,7 @@ describe("add", () => {
 
     await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/does not match the one already pinned/);
     // Original install must be untouched.
-    expect(readFileSync(join(dir, ".claude", "skills", OWNER, SKILL, "SKILL.md"), "utf-8")).toBe("# demo\n");
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# demo\n");
   });
 
   it("stops streaming and throws once the running total crosses the download cap, even with no content-length header (#37)", async () => {
@@ -285,15 +284,15 @@ describe("add", () => {
     const dest = join(dir, agentPath(OWNER, SKILL));
     expect(existsSync(dest)).toBe(true);
     expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
-    // A single flat file, not a directory -- distinct from the skills'
-    // owner-nested .claude/skills/<owner>/<skill>/ layout.
-    expect(existsSync(join(dir, ".claude", "skills", OWNER, SKILL))).toBe(false);
+    // A single flat file, not a directory -- distinct from the skills' own
+    // flat, @-joined .claude/skills/<owner>@<skill>/ layout.
+    expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
     expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
       [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: sha256(archive) },
     });
   });
 
-  it("still installs a skill as a directory under .claude/skills/<owner>/<skill>/ (unchanged)", async () => {
+  it("still installs a skill as a directory under .claude/skills/<owner>@<skill>/ (unchanged)", async () => {
     const archive = await tarGz({ "SKILL.md": "# demo\n" });
     stubApi(archive, sha256(archive), [{ path: "SKILL.md" }], VERSION, "skill");
 
@@ -333,7 +332,7 @@ describe("add", () => {
     const dest = join(dir, agentPath(OWNER, SKILL));
     expect(existsSync(dest)).toBe(true);
     expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
-    expect(existsSync(join(dir, ".claude", "skills", OWNER, SKILL))).toBe(false);
+    expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
   });
 
   it("installs an agent through the explicit @version resolution path (GET .../versions/{version}), not just latest", async () => {
@@ -352,7 +351,7 @@ describe("add", () => {
     const dest = join(dir, agentPath(OWNER, SKILL));
     expect(existsSync(dest)).toBe(true);
     expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
-    expect(existsSync(join(dir, ".claude", "skills", OWNER, SKILL))).toBe(false);
+    expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
     expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
       [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: sha256(archive) },
     });
