@@ -31,8 +31,8 @@ const LIST_USAGE = "Usage: ahood group list [--json]";
 const MEMBERS_USAGE = "Usage: ahood group members <group> [--json]";
 const INVITE_LINK_USAGE = "Usage: ahood group invite-link <group> [--json]";
 const JOIN_USAGE = "Usage: ahood group join <invite-url-or-token>";
-const REMOVE_MEMBER_USAGE = "Usage: ahood group remove-member <group> <username>";
-const LEAVE_USAGE = "Usage: ahood group leave <group>";
+const REMOVE_MEMBER_USAGE = "Usage: ahood group remove-member <group> <username> [--yes]";
+const LEAVE_USAGE = "Usage: ahood group leave <group> [--yes]";
 const DELETE_USAGE = "Usage: ahood group delete <group> [--yes]";
 
 // Creates a group (caller becomes owner). Follows edit.ts's convention of
@@ -155,9 +155,23 @@ export async function joinGroup(args: string[]): Promise<void> {
 // "remove yourself"). No flags today, so plain positional filtering is
 // unambiguous.
 export async function removeMember(args: string[]): Promise<void> {
+  const yes = args.includes("--yes");
   const positional = args.filter((a) => !a.startsWith("--"));
   const [slug, username] = positional;
   if (!slug || !username) throw new UsageError(REMOVE_MEMBER_USAGE);
+
+  // Mirrors deleteGroup's confirm-before-destroy pattern (CLAUDE.md:
+  // "Destructive commands ... prompt for confirmation unless --yes is
+  // passed") -- a typo'd username here instantly removes the wrong member
+  // with no other command to undo it (ahood-cli#99).
+  const confirmed = yes
+    ? true
+    : await confirm(`Remove ${username} from ${slug}? Type "yes" to confirm: `);
+
+  if (!confirmed) {
+    console.log("Aborted.");
+    return;
+  }
 
   await apiJson<{ removed: boolean }>(
     `/api/v1/groups/${encodeURIComponent(slug)}/members/${encodeURIComponent(username)}`,
@@ -179,8 +193,18 @@ async function getOwnUsername(): Promise<string> {
 // handles both cases identically (DELETE .../members/{username} with your
 // own username removes you, same as an owner removing someone else).
 export async function leaveGroup(args: string[]): Promise<void> {
+  const yes = args.includes("--yes");
   const slug = args.find((a) => !a.startsWith("--"));
   if (!slug) throw new UsageError(LEAVE_USAGE);
+
+  // Same confirm-before-destroy gate as removeMember -- an accidentally
+  // re-run `leave` drops you from a private group with no other command to
+  // undo it (ahood-cli#99).
+  const confirmed = yes ? true : await confirm(`Leave ${slug}? Type "yes" to confirm: `);
+  if (!confirmed) {
+    console.log("Aborted.");
+    return;
+  }
 
   const username = await getOwnUsername();
   await apiJson<{ removed: boolean }>(

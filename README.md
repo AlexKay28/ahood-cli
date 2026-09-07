@@ -16,7 +16,7 @@ alice/pdf-tools        Merge, split, and compress PDFs from the command line
 bob/pdf-form-filler     Fill PDF form fields from a JSON or CSV data source
 
 $ ahood skill add alice/pdf-tools
-Installed alice/pdf-tools@1.4.0 to .claude/skills/alice/pdf-tools
+Installed alice/pdf-tools@1.4.0 to .claude/skills/alice@pdf-tools
 ```
 
 ---
@@ -116,7 +116,7 @@ description: Merge, split, and compress PDFs from the command line
 ...
 
 $ ahood skill add alice/pdf-tools@1.4.0
-Installed alice/pdf-tools@1.4.0 to .claude/skills/alice/pdf-tools
+Installed alice/pdf-tools@1.4.0 to .claude/skills/alice@pdf-tools
 ```
 </details>
 
@@ -216,7 +216,7 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | `ahood skill add <owner>/<skill>[@version]` | Install a skill into .claude/skills/, pinned in the lockfile. |
 | `ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]` | Move the lockfile pin(s) forward to the latest version, for one skill or all installed skills at once. |
 | `ahood skill outdated [<owner>/<skill> ...] [--json]` | Read-only staleness check comparing current and latest versions (with changelog) for installed skills. |
-| `ahood skill remove <owner>/<skill>` | Uninstall and unpin a skill (local only). |
+| `ahood skill remove <owner>/<skill> [--yes]` | Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed). |
 | `ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a skill you own, changing only the flags you pass. |
 | `ahood skill unpublish <owner>/<skill>[@version] [--yes]` | Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed). |
 | `ahood skill star <owner>/<skill>` | Star a skill. |
@@ -235,8 +235,8 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | `ahood group members <group> [--json]` | List a group's members and their role (owner-only visible to members). |
 | `ahood group invite-link <group> [--json]` | Create (or regenerate) a shareable invite link for a group you own. |
 | `ahood group join <invite-url-or-token>` | Join a group using an invite link or its raw token. |
-| `ahood group remove-member <group> <username>` | Remove a member from a group you own. |
-| `ahood group leave <group>` | Leave a group you belong to. |
+| `ahood group remove-member <group> <username> [--yes]` | Remove a member from a group you own (prompts for confirmation unless --yes is passed). |
+| `ahood group leave <group> [--yes]` | Leave a group you belong to (prompts for confirmation unless --yes is passed). |
 | `ahood group delete <group> [--yes]` | Permanently delete a group you own (prompts for confirmation unless --yes is passed). |
 <!-- COMMANDS_TABLE_END -->
 

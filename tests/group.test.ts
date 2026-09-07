@@ -240,10 +240,30 @@ describe("group commands", () => {
       await expect(removeMember([SLUG])).rejects.toThrow(/Usage: ahood group remove-member/);
     });
 
-    it("DELETEs the member route", async () => {
+    it("does not call the API when the user does not type exactly 'yes' (#99)", async () => {
       const calls = stubApi(200, { removed: true });
+      stubStdio("n");
 
       await removeMember([SLUG, "bob"]);
+
+      expect(calls).toHaveLength(0);
+    });
+
+    it("DELETEs the member route once the user confirms with 'yes'", async () => {
+      const calls = stubApi(200, { removed: true });
+      const stdio = stubStdio("yes");
+
+      await removeMember([SLUG, "bob"]);
+
+      expect(calls[0].url).toBe(`${API_URL}/api/v1/groups/${SLUG}/members/bob`);
+      expect(calls[0].init.method).toBe("DELETE");
+      expect(stdio.promptedWith()).toMatch(/Remove bob from design-team/);
+    });
+
+    it("--yes bypasses the prompt entirely", async () => {
+      const calls = stubApi(200, { removed: true });
+
+      await removeMember([SLUG, "bob", "--yes"]);
 
       expect(calls[0].url).toBe(`${API_URL}/api/v1/groups/${SLUG}/members/bob`);
       expect(calls[0].init.method).toBe("DELETE");
@@ -251,7 +271,7 @@ describe("group commands", () => {
 
     it("surfaces the owner-cannot-be-removed error", async () => {
       stubApi(400, { error: "The group owner cannot be removed -- delete the group instead" });
-      await expect(removeMember([SLUG, "alice"])).rejects.toThrow(/owner cannot be removed/);
+      await expect(removeMember([SLUG, "alice", "--yes"])).rejects.toThrow(/owner cannot be removed/);
     });
   });
 
@@ -260,15 +280,41 @@ describe("group commands", () => {
       await expect(leaveGroup([])).rejects.toThrow(/Usage: ahood group leave/);
     });
 
-    it("resolves the caller's own username via /api/v1/profile, then DELETEs the member route with it", async () => {
+    it("does not call the API when the user does not type exactly 'yes' (#99)", async () => {
+      const calls = stubApiRoutes({
+        "/api/v1/profile": { status: 200, body: { username: "bob" } },
+        [`/api/v1/groups/${SLUG}/members/bob`]: { status: 200, body: { removed: true } },
+      });
+      stubStdio("n");
+
+      await leaveGroup([SLUG]);
+
+      expect(calls).toHaveLength(0);
+    });
+
+    it("resolves the caller's own username via /api/v1/profile, then DELETEs the member route with it, once confirmed", async () => {
+      const calls = stubApiRoutes({
+        "/api/v1/profile": { status: 200, body: { username: "bob" } },
+        [`/api/v1/groups/${SLUG}/members/bob`]: { status: 200, body: { removed: true } },
+      });
+      const stdio = stubStdio("yes");
+
+      await leaveGroup([SLUG]);
+
+      expect(calls.some((c) => c.url === `${API_URL}/api/v1/profile`)).toBe(true);
+      const deleteCall = calls.find((c) => c.init.method === "DELETE");
+      expect(deleteCall?.url).toBe(`${API_URL}/api/v1/groups/${SLUG}/members/bob`);
+      expect(stdio.promptedWith()).toMatch(/Leave design-team/);
+    });
+
+    it("--yes bypasses the prompt entirely", async () => {
       const calls = stubApiRoutes({
         "/api/v1/profile": { status: 200, body: { username: "bob" } },
         [`/api/v1/groups/${SLUG}/members/bob`]: { status: 200, body: { removed: true } },
       });
 
-      await leaveGroup([SLUG]);
+      await leaveGroup([SLUG, "--yes"]);
 
-      expect(calls.some((c) => c.url === `${API_URL}/api/v1/profile`)).toBe(true);
       const deleteCall = calls.find((c) => c.init.method === "DELETE");
       expect(deleteCall?.url).toBe(`${API_URL}/api/v1/groups/${SLUG}/members/bob`);
     });

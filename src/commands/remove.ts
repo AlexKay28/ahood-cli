@@ -1,13 +1,15 @@
 import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
-import { removeLockfileEntry } from "../lockfile.js";
+import { confirm } from "../confirm.js";
+import { readLockfile, removeLockfileEntry } from "../lockfile.js";
 import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, MCP_CONFIG_PATH } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 
-const USAGE = "Usage: ahood skill remove <owner>/<skill>";
+const USAGE = "Usage: ahood skill remove <owner>/<skill> [--yes]";
 
 export async function remove(args: string[]): Promise<void> {
   const spec = args[0];
   if (!spec) throw new UsageError(USAGE);
+  const yes = args.includes("--yes");
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
   const key = `${owner}/${skill}`;
 
@@ -15,25 +17,31 @@ export async function remove(args: string[]): Promise<void> {
   // owner-namespace folder to sweep afterward, unlike the old nested layout.
   const dir = skillDir(owner, skill);
   const dirExisted = existsSync(dir);
-  if (dirExisted) rmSync(dir, { recursive: true, force: true });
-
   // An agent installs as a single flat file (.claude/agents/<owner>@<skill>.md),
-  // never a directory under .claude/skills/ -- skillDir's rmSync above never
-  // touches it. Without this, removing an installed agent silently left the
-  // file on disk (still loaded by Claude Code forever) while reporting
-  // success and clearing the lockfile entry, so a later `update` wouldn't
-  // catch it either (ahood-cli final review finding #2).
+  // never a directory under .claude/skills/ -- distinct from the dir check above.
   const agentFile = agentPath(owner, skill);
   const agentExisted = existsSync(agentFile);
-  if (agentExisted) unlinkSync(agentFile);
-
-  const hadLockfileEntry = removeLockfileEntry(LOCKFILE_PATH, key);
+  const hadLockfileEntry = key in readLockfile(LOCKFILE_PATH);
 
   if (!dirExisted && !agentExisted && !hadLockfileEntry) {
     console.error(`${key} was not installed -- nothing to remove.`);
     process.exitCode = 1;
     return;
   }
+
+  // Matches unpublish.ts/group.ts's confirm-before-destroy pattern (CLAUDE.md:
+  // "Destructive commands ... prompt for confirmation unless --yes is passed").
+  // Checked only once something is actually installed, so a no-op remove of an
+  // uninstalled skill never blocks on a prompt (ahood-cli#98).
+  const confirmed = yes ? true : await confirm(`Remove ${key} from this project? Type "yes" to confirm: `);
+  if (!confirmed) {
+    console.log("Aborted.");
+    return;
+  }
+
+  if (dirExisted) rmSync(dir, { recursive: true, force: true });
+  if (agentExisted) unlinkSync(agentFile);
+  removeLockfileEntry(LOCKFILE_PATH, key);
 
   // An mcp-kind install has no directory or agent file on disk -- its only
   // footprint here is the lockfile entry just cleared above and a live

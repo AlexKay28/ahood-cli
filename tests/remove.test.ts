@@ -1,10 +1,32 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { Readable, Writable } from "node:stream";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { remove } from "../src/commands/remove.js";
 import { writeLockfileEntry, readLockfile } from "../src/lockfile.js";
 import { agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
+
+// remove() reads a confirmation line from stdin via node:readline/promises --
+// feed it one directly instead of touching the real terminal, matching
+// unpublish.test.ts's own stub.
+function stubStdio(answer: string): { promptedWith(): string } {
+  const written: string[] = [];
+  const fakeStdin = new Readable({ read() {} }) as unknown as NodeJS.ReadStream & { fd: 0 };
+  const fakeStdout = new Writable({
+    write(chunk, _enc, cb) {
+      written.push(chunk.toString());
+      cb();
+    },
+  }) as unknown as NodeJS.WriteStream & { fd: 1 };
+  vi.spyOn(process, "stdin", "get").mockReturnValue(fakeStdin);
+  vi.spyOn(process, "stdout", "get").mockReturnValue(fakeStdout);
+  queueMicrotask(() => {
+    fakeStdin.push(`${answer}\n`);
+    fakeStdin.push(null);
+  });
+  return { promptedWith: () => written.join("") };
+}
 
 describe("remove", () => {
   let dir: string;
@@ -26,15 +48,46 @@ describe("remove", () => {
     await expect(remove([])).rejects.toThrow(/Usage: ahood skill remove/);
   });
 
-  it("removes the installed skill directory and its lockfile entry", async () => {
+  it("does not remove anything when the user does not confirm with 'yes' (#98)", async () => {
+    mkdirSync(join(dir, skillDir("alice", "demo")), { recursive: true });
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/demo", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+    });
+    const stdio = stubStdio("n");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await remove(["alice/demo"]);
+
+    expect(existsSync(join(dir, skillDir("alice", "demo")))).toBe(true);
+    expect(readLockfile(join(dir, ".claude", "skills.lock.json"))).toHaveProperty("alice/demo");
+    expect(logSpy).toHaveBeenCalledWith("Aborted.");
+    expect(stdio.promptedWith()).toMatch(/Remove alice\/demo/);
+  });
+
+  it("removes the installed skill directory and its lockfile entry once confirmed with 'yes'", async () => {
     mkdirSync(join(dir, skillDir("alice", "demo")), { recursive: true });
     writeFileSync(join(dir, skillDir("alice", "demo"), "SKILL.md"), "# demo");
     writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/demo", {
       version: "1.0.0",
       checksum_sha256: "abc",
     });
+    stubStdio("yes");
 
     await remove(["alice/demo"]);
+
+    expect(existsSync(join(dir, skillDir("alice", "demo")))).toBe(false);
+    expect(readLockfile(join(dir, ".claude", "skills.lock.json"))).toEqual({});
+  });
+
+  it("--yes bypasses the prompt entirely, for scripted/CI use", async () => {
+    mkdirSync(join(dir, skillDir("alice", "demo")), { recursive: true });
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/demo", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+    });
+
+    await remove(["alice/demo", "--yes"]);
 
     expect(existsSync(join(dir, skillDir("alice", "demo")))).toBe(false);
     expect(readLockfile(join(dir, ".claude", "skills.lock.json"))).toEqual({});
@@ -44,14 +97,17 @@ describe("remove", () => {
     mkdirSync(join(dir, skillDir("alice", "demo")), { recursive: true });
     mkdirSync(join(dir, skillDir("alice", "other")), { recursive: true });
 
-    await remove(["alice/demo"]);
+    await remove(["alice/demo", "--yes"]);
 
     expect(existsSync(join(dir, skillDir("alice", "demo")))).toBe(false);
     expect(existsSync(join(dir, skillDir("alice", "other")))).toBe(true);
   });
 
-  it("reports failure instead of a false 'Removed' when nothing was installed", async () => {
+  it("reports failure instead of a false 'Removed' when nothing was installed, without prompting", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // No stdio stub -- if remove() prompted here, reading from the real
+    // stdin in a test run would hang, so this also pins that the not-
+    // installed check happens BEFORE the confirm() gate.
     await remove(["nobody/nothing"]);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/was not installed/));
     expect(process.exitCode).toBe(1);
@@ -67,7 +123,7 @@ describe("remove", () => {
       checksum_sha256: "abc",
     });
 
-    await remove(["alice/reviewer"]);
+    await remove(["alice/reviewer", "--yes"]);
 
     expect(existsSync(dest)).toBe(false);
     expect(readLockfile(join(dir, ".claude", "skills.lock.json"))).toEqual({});
@@ -104,7 +160,7 @@ describe("remove", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    await remove(["alice/weather"]);
+    await remove(["alice/weather", "--yes"]);
 
     expect(logSpy).toHaveBeenCalledWith("Removed alice/weather");
     expect(warnSpy).toHaveBeenCalledWith(
@@ -123,7 +179,7 @@ describe("remove", () => {
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    await remove(["alice/demo"]);
+    await remove(["alice/demo", "--yes"]);
 
     expect(warnSpy).not.toHaveBeenCalled();
   });
@@ -134,12 +190,12 @@ describe("remove", () => {
     mkdirSync(join(dir, "outside"), { recursive: true });
     writeFileSync(join(dir, "outside", "important.txt"), "keep me");
 
-    await expect(remove(["alice/.."])).rejects.toThrow(/Invalid skill/);
+    await expect(remove(["alice/..", "--yes"])).rejects.toThrow(/Invalid skill/);
     // The whole skills tree (every owner) must still be intact.
     expect(existsSync(join(dir, skillDir("alice", "demo")))).toBe(true);
     expect(existsSync(join(dir, skillDir("bob", "other")))).toBe(true);
 
-    await expect(remove(["../outside"])).rejects.toThrow(/Invalid owner/);
+    await expect(remove(["../outside", "--yes"])).rejects.toThrow(/Invalid owner/);
     expect(existsSync(join(dir, "outside", "important.txt"))).toBe(true);
   });
 });

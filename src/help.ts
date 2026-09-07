@@ -147,9 +147,9 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     examples: ["ahood skill outdated", "ahood skill outdated alice/pdf-tools --json"],
   },
   {
-    usage: "ahood skill remove <owner>/<skill>",
-    summary: "Uninstall and unpin a skill (local only).",
-    desc: "Uninstall and unpin (local only).",
+    usage: "ahood skill remove <owner>/<skill> [--yes]",
+    summary: "Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed).",
+    desc: "Uninstall and unpin (local only). Prompts for confirmation unless --yes is passed.",
   },
   {
     usage: "ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
@@ -288,16 +288,21 @@ export const GROUP_COMMANDS_HELP: CommandHelp[] = [
     ],
   },
   {
-    usage: "ahood group remove-member <group> <username>",
-    summary: "Remove a member from a group you own.",
+    usage: "ahood group remove-member <group> <username> [--yes]",
+    summary: "Remove a member from a group you own (prompts for confirmation unless --yes is passed).",
     desc:
       "Remove a member from a group you own. The group's owner cannot be removed this way -- delete the " +
-      "group instead. Only the group's owner can remove someone other than themselves.",
+      "group instead. Only the group's owner can remove someone other than themselves. Prompts for a typed " +
+      "\"yes\" unless --yes is passed.",
+    flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
   },
   {
-    usage: "ahood group leave <group>",
-    summary: "Leave a group you belong to.",
-    desc: "Leave a group you belong to. The group's owner cannot leave -- delete the group instead.",
+    usage: "ahood group leave <group> [--yes]",
+    summary: "Leave a group you belong to (prompts for confirmation unless --yes is passed).",
+    desc:
+      "Leave a group you belong to. The group's owner cannot leave -- delete the group instead. Prompts for " +
+      "a typed \"yes\" unless --yes is passed.",
+    flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
   },
   {
     usage: "ahood group delete <group> [--yes]",
