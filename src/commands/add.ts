@@ -577,6 +577,7 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
   // arbitrary time may have passed since the pre-check -- the download, and
   // any secret prompt inside resolveMcpServerConfig -- during which another
   // process could have changed the entry.
+  let previousOnDisk: unknown;
   withLock(MCP_CONFIG_PATH, () => {
     const fresh = readMcpConfig();
     const freshServers = fresh.mcpServers as Record<string, unknown>;
@@ -584,6 +585,7 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
     if (freshExisting !== undefined && (recordedHash === undefined || hashMcpServerConfig(freshExisting) !== recordedHash)) {
       throw new Error(`${key}'s .mcp.json entry changed while updating -- refusing to overwrite it. Re-run \`ahood skill update ${key}\` if this was unexpected.`);
     }
+    previousOnDisk = freshExisting;
     freshServers[skill] = serverConfig;
     writeJsonFileAtomic(MCP_CONFIG_PATH, fresh);
   });
@@ -596,6 +598,21 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
     });
   } catch (error) {
     if (!(error instanceof LockfileChecksumConflictError)) throw error;
+    // Roll back the .mcp.json overwrite above under the same lock pattern,
+    // restoring the entry to what it was before this update touched it --
+    // not deleting it, unlike installMcpEntry's rollback: unless this was
+    // the self-heal-a-missing-entry case (previousOnDisk undefined), there
+    // WAS a working entry here before this update began.
+    withLock(MCP_CONFIG_PATH, () => {
+      const fileContents = readMcpConfig();
+      const mcpServers = fileContents.mcpServers as Record<string, unknown>;
+      if (previousOnDisk === undefined) {
+        delete mcpServers[skill];
+      } else {
+        mcpServers[skill] = previousOnDisk;
+      }
+      writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
+    });
     throw new Error(checksumConflictMessage(key, meta, error.existing));
   }
 
