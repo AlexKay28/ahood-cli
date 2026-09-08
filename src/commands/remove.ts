@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, rmSync, unlinkSync } from "node:fs";
 import { confirm } from "../confirm.js";
-import { readLockfile, removeLockfileEntry } from "../lockfile.js";
+import { readLockfile, removeLockfileEntry, withLock, writeJsonFileAtomic } from "../lockfile.js";
 import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, MCP_CONFIG_PATH } from "../spec.js";
+import { readMcpConfig, hashMcpServerConfig } from "./add.js";
 import { UsageError } from "../usage-error.js";
 
 const USAGE = "Usage: ahood skill remove <owner>/<skill> [--yes]";
@@ -21,7 +22,8 @@ export async function remove(args: string[]): Promise<void> {
   // never a directory under .claude/skills/ -- distinct from the dir check above.
   const agentFile = agentPath(owner, skill);
   const agentExisted = existsSync(agentFile);
-  const hadLockfileEntry = key in readLockfile(LOCKFILE_PATH);
+  const lockEntry = readLockfile(LOCKFILE_PATH)[key];
+  const hadLockfileEntry = lockEntry !== undefined;
 
   if (!dirExisted && !agentExisted && !hadLockfileEntry) {
     console.error(`${key} was not installed -- nothing to remove.`);
@@ -46,34 +48,58 @@ export async function remove(args: string[]): Promise<void> {
   // An mcp-kind install has no directory or agent file on disk -- its only
   // footprint here is the lockfile entry just cleared above and a live
   // entry in .mcp.json (which add.ts's installMcpEntry merged in, possibly
-  // holding a resolved secret in its `env`). remove() doesn't attempt a real
-  // mcp removal, but staying silent about that entry repeats the exact
-  // false-assurance bug already fixed once for agent installs above: a user
-  // who removes an mcp artifact because they no longer trust it would be
-  // told it's gone while the MCP server (and its credential) still runs on
-  // the next Claude Code start -- and since the lockfile pin is now cleared,
-  // nothing will ever surface this again via `list`/`update`. So: warn
-  // instead of pretending it's gone.
-  if (existsSync(MCP_CONFIG_PATH)) {
-    try {
-      const parsed = JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8"));
-      const mcpServers = parsed?.mcpServers;
-      if (
-        mcpServers &&
-        typeof mcpServers === "object" &&
-        !Array.isArray(mcpServers) &&
-        Object.prototype.hasOwnProperty.call(mcpServers, skill)
-      ) {
+  // holding a resolved secret in its `env`). Real removal (delete that one
+  // key) only happens when the on-disk entry's fingerprint still matches
+  // what was recorded at install/update time -- same posture as add.ts's
+  // own assertNoCollision: never blind-write/delete something this process
+  // didn't verify it still owns. Without SOME check here, "Removed" would
+  // repeat the exact false-assurance bug already fixed once for agent
+  // installs above (a user told it's gone while the MCP server, and its
+  // credential, still runs on the next Claude Code start) -- but a hand-
+  // edited entry (fingerprint mismatch, or no fingerprint recorded at all,
+  // e.g. an mcp entry installed before this field existed) is left in
+  // place and warned about instead, exactly as before this fix.
+  let removedMcpEntry = false;
+  let mcpEntryModified = false;
+  try {
+    const fileContents = readMcpConfig();
+    const mcpServers = fileContents.mcpServers as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(mcpServers, skill)) {
+      const recordedHash = lockEntry?.mcp_config_hash;
+      const currentHash = hashMcpServerConfig(mcpServers[skill]);
+      if (recordedHash !== undefined) {
+        mcpEntryModified = recordedHash !== currentHash;
+      }
+      if (recordedHash !== undefined && !mcpEntryModified) {
+        // Re-check under lock rather than trusting the read above -- another
+        // process could have changed or removed the entry in between,
+        // mirroring add.ts's own re-check-under-lock before it writes.
+        withLock(MCP_CONFIG_PATH, () => {
+          const fresh = readMcpConfig();
+          const freshServers = fresh.mcpServers as Record<string, unknown>;
+          if (
+            Object.prototype.hasOwnProperty.call(freshServers, skill) &&
+            hashMcpServerConfig(freshServers[skill]) === recordedHash
+          ) {
+            delete freshServers[skill];
+            writeJsonFileAtomic(MCP_CONFIG_PATH, fresh);
+            removedMcpEntry = true;
+          }
+        });
+      }
+      if (!removedMcpEntry) {
         console.warn(
-          `WARNING: ${key} still has an entry in ${MCP_CONFIG_PATH} (which may contain secrets you entered) -- remove it manually.`,
+          `WARNING: ${key} still has an entry in ${MCP_CONFIG_PATH} (which may contain secrets you entered)` +
+            (mcpEntryModified ? " -- it appears to have been modified since install" : "") +
+            ` -- remove it manually.`,
         );
       }
-    } catch {
-      // A malformed .mcp.json isn't this command's problem to fix or crash
-      // on -- add.ts's readMcpConfig is the strict validator for that path.
-      // Skip the warning rather than throw here.
     }
+  } catch {
+    // A malformed .mcp.json isn't this command's problem to fix or crash
+    // on -- add.ts's readMcpConfig is the strict validator for that path.
+    // Skip the warning rather than throw here.
   }
 
-  console.log(`Removed ${key}`);
+  console.log(removedMcpEntry ? `Removed ${key} (including its ${MCP_CONFIG_PATH} entry)` : `Removed ${key}`);
 }
