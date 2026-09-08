@@ -1,13 +1,14 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
 import { update } from "../src/commands/update.js";
-import { writeLockfileEntry } from "../src/lockfile.js";
-import { skillDir } from "../src/spec.js";
+import { writeLockfileEntry, readLockfile } from "../src/lockfile.js";
+import { skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
+import { hashMcpServerConfig } from "../src/commands/add.js";
 
 const API_URL = "http://ahood.test";
 
@@ -216,11 +217,13 @@ describe("update", () => {
     expect(process.exitCode).not.toBe(1);
   });
 
-  it("skips an installed mcp artifact with a clean status message instead of always failing (finding #2)", async () => {
-    // add() always hits the .mcp.json collision check for an mcp entry that's
-    // already installed -- without a skip, `ahood skill update` with no args
-    // would report 1 failure and exit 1 for every user who has an mcp
-    // artifact installed, even when nothing needs updating.
+  it("reports an already-up-to-date mcp artifact as a clean status, not a warning or failure (ahood-cli#169)", async () => {
+    // Real mcp-update support (ahood-cli#169) means an mcp entry is no
+    // longer unconditionally skipped -- but one already at "latest" still
+    // has nothing to do, and (unlike skill/agent, which always blindly
+    // re-extracts even when unchanged) is deliberately short-circuited
+    // before hitting /download, so an up-to-date entry with a secret in its
+    // env never re-triggers a masked prompt for no reason.
     writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
       version: "1.0.0",
       checksum_sha256: "abc",
@@ -237,20 +240,142 @@ describe("update", () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
-      // The download endpoint must never be hit for a skipped mcp entry.
+      // The download endpoint must never be hit for an already-up-to-date entry.
       throw new Error(`unexpected fetch: ${url}`);
     });
     vi.stubGlobal("fetch", fetchSpy);
 
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await update([]);
 
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("alice/weather"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("alice/weather is already up to date"));
+    expect(warnSpy).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
     expect(process.exitCode).not.toBe(1);
     expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("/download"))).toBe(false);
+  });
+
+  it("performs a real update when a newer version is available and the fingerprint matches (ahood-cli#169)", async () => {
+    const oldEntry = { url: "https://mcp.example.com/v1/sse" };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: { weather: oldEntry } }, null, 2));
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: "old-checksum",
+      mcp_config_hash: hashMcpServerConfig(oldEntry),
+    });
+
+    const manifest = { name: "weather", description: "x", remotes: [{ url: "https://mcp.example.com/v2/sse" }] };
+    const archive = await tarGz({ "server.json": JSON.stringify(manifest) });
+    const checksum = sha256(archive);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `${API_URL}/api/v1/skills/alice/weather`) {
+          return new Response(
+            JSON.stringify({
+              skill_versions: { version: "2.0.0", manifest: [{ path: "server.json" }], checksum_sha256: checksum },
+              kind: "mcp",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === `${API_URL}/api/v1/skills/alice/weather/download?version=2.0.0`) {
+          return new Response(new Uint8Array(archive), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+
+    await update([]);
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers.weather).toEqual({ url: "https://mcp.example.com/v2/sse" });
+    const lockfile = readLockfile(join(dir, ".claude", "skills.lock.json"));
+    expect(lockfile["alice/weather"].version).toBe("2.0.0");
+    expect(lockfile["alice/weather"].mcp_config_hash).toBe(hashMcpServerConfig({ url: "https://mcp.example.com/v2/sse" }));
+    expect(process.exitCode).not.toBe(1);
+  });
+
+  it("refuses to update when the on-disk entry doesn't match the recorded fingerprint (hand-edited) (ahood-cli#169)", async () => {
+    const installedEntry = { url: "https://mcp.example.com/v1/sse" };
+    const handEditedEntry = { url: "https://mcp.example.com/v1/sse", headers: { "X-Custom": "added-by-hand" } };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: { weather: handEditedEntry } }, null, 2));
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: "old-checksum",
+      mcp_config_hash: hashMcpServerConfig(installedEntry),
+    });
+
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${API_URL}/api/v1/skills/alice/weather`) {
+        return new Response(
+          JSON.stringify({
+            skill_versions: { version: "2.0.0", manifest: [{ path: "server.json" }], checksum_sha256: "irrelevant" },
+            kind: "mcp",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await update([]);
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/modified since install/));
+    expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("/download"))).toBe(false);
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers.weather).toEqual(handEditedEntry);
+    const lockfile = readLockfile(join(dir, ".claude", "skills.lock.json"));
+    expect(lockfile["alice/weather"].version).toBe("1.0.0"); // pin NOT moved forward
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+  });
+
+  it("self-heals by installing fresh when the .mcp.json entry is missing despite a lockfile pin (ahood-cli#169)", async () => {
+    // No .mcp.json file at all -- e.g. deleted by hand without going through `ahood skill remove`.
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: "old-checksum",
+      mcp_config_hash: "some-stale-hash-that-cant-match-anything",
+    });
+
+    const manifest = { name: "weather", description: "x", remotes: [{ url: "https://mcp.example.com/v2/sse" }] };
+    const archive = await tarGz({ "server.json": JSON.stringify(manifest) });
+    const checksum = sha256(archive);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `${API_URL}/api/v1/skills/alice/weather`) {
+          return new Response(
+            JSON.stringify({
+              skill_versions: { version: "2.0.0", manifest: [{ path: "server.json" }], checksum_sha256: checksum },
+              kind: "mcp",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === `${API_URL}/api/v1/skills/alice/weather/download?version=2.0.0`) {
+          return new Response(new Uint8Array(archive), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+
+    await update([]);
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers.weather).toEqual({ url: "https://mcp.example.com/v2/sse" });
+    expect(process.exitCode).not.toBe(1);
   });
 
   describe("--dry-run", () => {

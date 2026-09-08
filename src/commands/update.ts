@@ -1,6 +1,6 @@
 import { LOCKFILE_PATH, parseOwnerSkill } from "../spec.js";
 import { readLockfile } from "../lockfile.js";
-import { add, fetchVersionMeta } from "./add.js";
+import { add, fetchVersionMeta, updateMcpEntry } from "./add.js";
 import { UsageError } from "../usage-error.js";
 
 const USAGE = "Usage: ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]";
@@ -124,18 +124,27 @@ export async function update(args: string[]): Promise<void> {
     try {
       // add() always hits the .mcp.json collision check for an mcp-kind
       // entry that's already installed (that's the very definition of
-      // "already installed" for that kind), so calling it unconditionally
-      // here would make `ahood skill update` with no arguments permanently
-      // report a failure and exit 1 for every user who has ever installed
-      // an mcp artifact, even when nothing needs updating. fetchVersionMeta
-      // already resolves `kind` as part of the normal "latest" lookup add()
-      // itself does, so resolving it here first lets this skip cleanly
-      // instead of updating and hitting that guaranteed error. This is a
-      // skip-and-report-cleanly fix, not real mcp-update support.
+      // "already installed" for that kind), so it can never be called
+      // unconditionally here the way it is for skill/agent kinds below --
+      // fetchVersionMeta resolves `kind` as part of the normal "latest"
+      // lookup add() itself does, so resolving it here first lets an
+      // mcp-kind entry route to updateMcpEntry (ahood-cli#169's real
+      // mcp-update support) instead.
       const { owner, skill } = parseOwnerSkill(ownerSlashSkill, USAGE);
       const meta = await fetchVersionMeta(owner, skill, "latest");
       if (meta.kind === "mcp") {
-        console.warn(`Skipping ${ownerSlashSkill}: mcp artifacts aren't updatable via this command yet.`);
+        const currentEntry = lockfile[ownerSlashSkill];
+        if (currentEntry && currentEntry.version === meta.version) {
+          // Matches skill/agent update's own "nothing to do" case for a
+          // pin that's already at latest -- not a warning (nothing's
+          // wrong), and, unlike skill/agent (which always blindly
+          // re-extracts even when nothing changed), skipped here
+          // specifically so an up-to-date mcp entry with a secret in its
+          // env never re-triggers a masked prompt for no reason.
+          console.log(`${ownerSlashSkill} is already up to date (v${meta.version}).`);
+          continue;
+        }
+        await updateMcpEntry(owner, skill, meta, currentEntry);
         continue;
       }
       await add([ownerSlashSkill]); // no @version -- resolves to latest again
