@@ -1,5 +1,5 @@
 import { apiJson } from "../http.js";
-import { flagValue } from "../flags.js";
+import { flagValue, parseSearchQuery } from "../flags.js";
 import { UsageError } from "../usage-error.js";
 
 type SearchResult = {
@@ -24,17 +24,7 @@ export async function searchSkills(query: string, limit?: number): Promise<Searc
 export async function search(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const limitStr = flagValue(args, "--limit");
-  // Strips both accepted forms flagValue itself supports -- "--limit 5" (this
-  // token plus its following positional) and "--limit=5" (one combined
-  // token) -- the latter previously survived into queryParts and tripped the
-  // unknownFlag check below (ahood-cli#105).
-  const queryParts = args.filter(
-    (a, i) => a !== "--json" && a !== "--limit" && !a.startsWith("--limit=") && args[i - 1] !== "--limit",
-  );
-  const unknownFlag = queryParts.find((a) => a.startsWith("--"));
-  if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${USAGE}`);
-  const query = queryParts.join(" ");
-  if (!query) throw new UsageError(USAGE);
+  const query = parseSearchQuery(args, USAGE);
   if (limitStr !== undefined && (!/^\d+$/.test(limitStr) || Number(limitStr) < 1)) {
     throw new UsageError(`--limit must be a positive integer (got "${limitStr}").\n${USAGE}`);
   }

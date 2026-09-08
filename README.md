@@ -252,7 +252,7 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | `ahood snap unshare <id> [--yes]` | Revoke a snap's share link (the snap itself is untouched; prompts for confirmation unless --yes is passed). |
 <!-- COMMANDS_TABLE_END -->
 
-Run `ahood --help`, `ahood skill --help`, `ahood group --help`, or `ahood <command> --help` (also `ahood help <command>` / `ahood help skill <verb>` / `ahood help group <verb>`) for the same reference — including per-command flags and examples — directly in your terminal. `ahood --version` prints the installed CLI version.
+Run `ahood --help`, `ahood skill --help`, `ahood group --help`, `ahood snap --help`, or `ahood <command> --help` (also `ahood help <command>` / `ahood help skill <verb>` / `ahood help group <verb>` / `ahood help snap <verb>`) for the same reference — including per-command flags and examples — directly in your terminal. `ahood --version` prints the installed CLI version.
 
 ## Exit codes
 

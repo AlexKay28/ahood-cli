@@ -315,8 +315,10 @@ async function main() {
     process.exit(2);
   }
 
-  // Group commands (currently just "skill") own their own --help handling
-  // at both the group and per-verb level -- don't intercept here.
+  // Entities with their own sub-dispatch ("skill", "group", "snap" --
+  // GROUP_COMMANDS despite the name, unrelated to the "group" entity itself)
+  // own their own --help handling at both the entity and per-verb level --
+  // don't intercept here.
   if (!GROUP_COMMANDS.has(command) && (args.includes("--help") || args.includes("-h"))) {
     const entry = findCommandHelp(command);
     console.log(entry ? formatCommandHelp(entry) : formatHelp());

@@ -1,5 +1,5 @@
 import { apiJson } from "../http.js";
-import { flagValue } from "../flags.js";
+import { flagValue, parseSearchQuery } from "../flags.js";
 import { confirm } from "../confirm.js";
 import { UsageError } from "../usage-error.js";
 
@@ -82,7 +82,12 @@ function printSnaps(jsonOutput: boolean, snaps: SnapSummary[], emptyMessage: str
 
 export async function createSnap(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
-  const positional = args.filter((a) => a !== "--json")[0];
+  // Joined, not just args[0] -- an unquoted multi-word note (e.g. `ahood
+  // snap create Debugged the flaky CI step`) arrives as multiple positional
+  // tokens, and taking only the first one silently dropped the rest with no
+  // error. Mirrors searchSnaps' own query-joining below.
+  const positionals = args.filter((a) => a !== "--json");
+  const positional = positionals.length > 0 ? positionals.join(" ") : undefined;
 
   let content: string;
   if (positional !== undefined) {
@@ -122,35 +127,28 @@ export async function listSnaps(args: string[]): Promise<void> {
   const qs = new URLSearchParams();
   if (limitStr !== undefined) qs.set("limit", limitStr);
   const query = qs.toString();
-  const { snaps } = await apiJson<{ snaps: SnapSummary[]; next_cursor: string | null }>(
+  const { snaps } = await apiJson<{ snaps: SnapSummary[] | null; next_cursor: string | null }>(
     `/api/v1/snaps${query ? `?${query}` : ""}`,
   );
 
-  printSnaps(jsonOutput, snaps, "You have no snaps yet. Run `ahood snap create <content>` to make one.");
+  // ?? [], not a bare destructure -- a degraded response (snaps: null)
+  // must degrade to "no snaps" instead of crashing, matching list.ts/
+  // search.ts's own guard for the identical shape (ahood-cli#106).
+  printSnaps(jsonOutput, snaps ?? [], "You have no snaps yet. Run `ahood snap create <content>` to make one.");
 }
 
 export async function searchSnaps(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const limitStr = flagValue(args, "--limit");
-  // Strips both accepted forms flagValue itself supports -- "--limit 5" (this
-  // token plus its following positional) and "--limit=5" (one combined
-  // token) -- the latter previously survived into queryParts in search.ts
-  // and tripped the unknownFlag check below (ahood-cli#105); mirrored here
-  // exactly so this new command doesn't reintroduce that bug.
-  const queryParts = args.filter(
-    (a, i) => a !== "--json" && a !== "--limit" && !a.startsWith("--limit=") && args[i - 1] !== "--limit",
-  );
-  const unknownFlag = queryParts.find((a) => a.startsWith("--"));
-  if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${SEARCH_USAGE}`);
-  const query = queryParts.join(" ");
-  if (!query) throw new UsageError(SEARCH_USAGE);
+  const query = parseSearchQuery(args, SEARCH_USAGE);
   validateLimit(limitStr, SEARCH_USAGE);
 
   const qs = new URLSearchParams({ q: query });
   if (limitStr !== undefined) qs.set("limit", limitStr);
-  const { snaps } = await apiJson<{ snaps: SnapSummary[]; next_cursor: string | null }>(`/api/v1/snaps?${qs}`);
+  const { snaps } = await apiJson<{ snaps: SnapSummary[] | null; next_cursor: string | null }>(`/api/v1/snaps?${qs}`);
 
-  printSnaps(jsonOutput, snaps, "No snaps found.");
+  // ?? [] -- see listSnaps' identical guard above (ahood-cli#106).
+  printSnaps(jsonOutput, snaps ?? [], "No snaps found.");
 }
 
 export async function showSnap(args: string[]): Promise<void> {

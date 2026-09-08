@@ -109,6 +109,14 @@ describe("snap commands", () => {
       expect(JSON.parse(calls[0].init.body as string)).toEqual({ content: "explicit content" });
     });
 
+    it("joins multiple unquoted positional words instead of silently dropping everything after the first", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-07T00:00:00.000Z" });
+
+      await createSnap(["Debugged", "the", "flaky", "CI", "step"]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ content: "Debugged the flaky CI step" });
+    });
+
     it("rejects blank/whitespace-only content", async () => {
       await expect(createSnap(["   "])).rejects.toThrow(/Usage: ahood snap create/);
     });
@@ -206,6 +214,15 @@ describe("snap commands", () => {
     it("rejects a non-positive --limit", async () => {
       await expect(listSnaps(["--limit", "0"])).rejects.toThrow(/--limit must be a positive integer/);
     });
+
+    it("degrades to the empty-list message instead of crashing when the server returns snaps: null", async () => {
+      stubApi(200, { snaps: null, next_cursor: null });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await listSnaps([]);
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/no snaps yet/));
+    });
   });
 
   describe("searchSnaps", () => {
@@ -265,6 +282,15 @@ describe("snap commands", () => {
 
     it("prints a friendly message when there are no results", async () => {
       stubApi(200, { snaps: [], next_cursor: null });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await searchSnaps(["nothing"]);
+
+      expect(logSpy).toHaveBeenCalledWith("No snaps found.");
+    });
+
+    it("degrades to the empty-results message instead of crashing when the server returns snaps: null", async () => {
+      stubApi(200, { snaps: null, next_cursor: null });
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
       await searchSnaps(["nothing"]);

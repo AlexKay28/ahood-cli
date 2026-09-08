@@ -29,3 +29,22 @@ export function flagValue(args: string[], flag: string): string | undefined {
   }
   return undefined;
 }
+
+// Shared by every "<verb> <query> [--json] [--limit <n>]" command (skill
+// search, snap search) -- factored out after this exact logic was
+// duplicated verbatim between them, which is exactly how ahood-cli#105's
+// "--limit=5 misparsed as an unknown flag" bug could have silently come
+// back in one copy while being fixed in the other. Strips --json and
+// --limit (both "--limit N" and "--limit=N" forms) from the positional
+// args, rejects any other unrecognized "--" flag, and joins what's left
+// into a single query string.
+export function parseSearchQuery(args: string[], usage: string): string {
+  const queryParts = args.filter(
+    (a, i) => a !== "--json" && a !== "--limit" && !a.startsWith("--limit=") && args[i - 1] !== "--limit",
+  );
+  const unknownFlag = queryParts.find((a) => a.startsWith("--"));
+  if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${usage}`);
+  const query = queryParts.join(" ");
+  if (!query) throw new UsageError(usage);
+  return query;
+}
