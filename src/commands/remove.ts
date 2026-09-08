@@ -61,44 +61,62 @@ export async function remove(args: string[]): Promise<void> {
   // place and warned about instead, exactly as before this fix.
   let removedMcpEntry = false;
   let mcpEntryModified = false;
+  let mcpEntryPresent = false;
+  let recordedHash: string | undefined;
   try {
     const fileContents = readMcpConfig();
     const mcpServers = fileContents.mcpServers as Record<string, unknown>;
-    if (Object.prototype.hasOwnProperty.call(mcpServers, skill)) {
-      const recordedHash = lockEntry?.mcp_config_hash;
+    mcpEntryPresent = Object.prototype.hasOwnProperty.call(mcpServers, skill);
+    if (mcpEntryPresent) {
+      recordedHash = lockEntry?.mcp_config_hash;
       const currentHash = hashMcpServerConfig(mcpServers[skill]);
       if (recordedHash !== undefined) {
         mcpEntryModified = recordedHash !== currentHash;
-      }
-      if (recordedHash !== undefined && !mcpEntryModified) {
-        // Re-check under lock rather than trusting the read above -- another
-        // process could have changed or removed the entry in between,
-        // mirroring add.ts's own re-check-under-lock before it writes.
-        withLock(MCP_CONFIG_PATH, () => {
-          const fresh = readMcpConfig();
-          const freshServers = fresh.mcpServers as Record<string, unknown>;
-          if (
-            Object.prototype.hasOwnProperty.call(freshServers, skill) &&
-            hashMcpServerConfig(freshServers[skill]) === recordedHash
-          ) {
-            delete freshServers[skill];
-            writeJsonFileAtomic(MCP_CONFIG_PATH, fresh);
-            removedMcpEntry = true;
-          }
-        });
-      }
-      if (!removedMcpEntry) {
-        console.warn(
-          `WARNING: ${key} still has an entry in ${MCP_CONFIG_PATH} (which may contain secrets you entered)` +
-            (mcpEntryModified ? " -- it appears to have been modified since install" : "") +
-            ` -- remove it manually.`,
-        );
       }
     }
   } catch {
     // A malformed .mcp.json isn't this command's problem to fix or crash
     // on -- add.ts's readMcpConfig is the strict validator for that path.
-    // Skip the warning rather than throw here.
+    // mcpEntryPresent stays false, so there's nothing to warn about either:
+    // if we can't even read the file, we can't know whether this skill has
+    // an entry in it.
+  }
+
+  if (mcpEntryPresent && recordedHash !== undefined && !mcpEntryModified) {
+    try {
+      // Re-check under lock rather than trusting the read above -- another
+      // process could have changed or removed the entry in between,
+      // mirroring add.ts's own re-check-under-lock before it writes. This
+      // try/catch is deliberately separate from the read above: a failure
+      // HERE (a lock-acquisition timeout, an EACCES/ENOSPC/etc. write
+      // failure) must still fall through to the warning below rather than
+      // being silently swallowed -- letting it share the read's catch block
+      // was the exact bug that let a failed delete print a bare "Removed"
+      // with the credential still live (the false-assurance case this
+      // whole mechanism exists to prevent).
+      withLock(MCP_CONFIG_PATH, () => {
+        const fresh = readMcpConfig();
+        const freshServers = fresh.mcpServers as Record<string, unknown>;
+        if (
+          Object.prototype.hasOwnProperty.call(freshServers, skill) &&
+          hashMcpServerConfig(freshServers[skill]) === recordedHash
+        ) {
+          delete freshServers[skill];
+          writeJsonFileAtomic(MCP_CONFIG_PATH, fresh);
+          removedMcpEntry = true;
+        }
+      });
+    } catch {
+      // removedMcpEntry stays false -- falls through to the warning below.
+    }
+  }
+
+  if (mcpEntryPresent && !removedMcpEntry) {
+    console.warn(
+      `WARNING: ${key} still has an entry in ${MCP_CONFIG_PATH} (which may contain secrets you entered)` +
+        (mcpEntryModified ? " -- it appears to have been modified since install" : "") +
+        ` -- remove it manually.`,
+    );
   }
 
   console.log(removedMcpEntry ? `Removed ${key} (including its ${MCP_CONFIG_PATH} entry)` : `Removed ${key}`);

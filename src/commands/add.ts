@@ -556,15 +556,24 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
   const mcpServers = fileContents.mcpServers as Record<string, unknown>;
   const existingOnDisk = Object.prototype.hasOwnProperty.call(mcpServers, skill) ? mcpServers[skill] : undefined;
 
+  // Both refusal messages below point at manually editing .mcp.json, not
+  // `ahood skill remove` -- remove refuses to delete an entry under
+  // exactly these same two conditions (no recorded fingerprint, or a
+  // fingerprint mismatch), so telling the user to "remove then add" would
+  // send them into a sequence where remove leaves the entry in place *and*
+  // clears the lockfile pin, and the follow-up add then fails on the very
+  // same entry as a collision -- pin gone, credential still live, no CLI
+  // path forward. Editing .mcp.json by hand and then running `add` is the
+  // only sequence that actually resolves the state.
   if (existingOnDisk !== undefined) {
     if (recordedHash === undefined) {
       throw new Error(
-        `Cannot verify ${key}'s .mcp.json entry matches what ahood last installed (no recorded fingerprint) -- remove and reinstall to enable automatic updates.`,
+        `Cannot verify ${key}'s .mcp.json entry matches what ahood last installed (no recorded fingerprint) -- delete the "${skill}" entry from mcpServers in .mcp.json by hand, then run \`ahood skill add ${key}\` to reinstall and enable automatic updates going forward.`,
       );
     }
     if (hashMcpServerConfig(existingOnDisk) !== recordedHash) {
       throw new Error(
-        `${key}'s .mcp.json entry appears to have been modified since install -- refusing to overwrite it. Remove it manually first, or run \`ahood skill remove ${key}\` then \`ahood skill add ${key}\`.`,
+        `${key}'s .mcp.json entry appears to have been modified since install -- refusing to overwrite it. Delete the "${skill}" entry from mcpServers in .mcp.json by hand, then run \`ahood skill add ${key}\` to reinstall.`,
       );
     }
   }

@@ -378,6 +378,43 @@ describe("update", () => {
     expect(process.exitCode).not.toBe(1);
   });
 
+  it("refuses to update when no fingerprint was ever recorded (a legacy entry predating this field) (ahood-cli#169)", async () => {
+    const existingEntry = { url: "https://mcp.example.com/v1/sse" };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: { weather: existingEntry } }, null, 2));
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: "old-checksum",
+      // no mcp_config_hash -- simulates an mcp entry installed before this field existed.
+    });
+
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${API_URL}/api/v1/skills/alice/weather`) {
+        return new Response(
+          JSON.stringify({
+            skill_versions: { version: "2.0.0", manifest: [{ path: "server.json" }], checksum_sha256: "irrelevant" },
+            kind: "mcp",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await update([]);
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/no recorded fingerprint/));
+    expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("/download"))).toBe(false);
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers.weather).toEqual(existingEntry); // untouched
+    const lockfile = readLockfile(join(dir, ".claude", "skills.lock.json"));
+    expect(lockfile["alice/weather"].version).toBe("1.0.0"); // pin NOT moved forward
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+  });
+
   describe("--dry-run", () => {
     const lockfilePath = () => join(dir, ".claude", "skills.lock.json");
     const skillDirPath = (owner: string, skill: string) => join(dir, skillDir(owner, skill));
