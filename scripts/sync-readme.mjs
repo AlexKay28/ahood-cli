@@ -31,9 +31,8 @@ execFileSync(existsSync(tscBin) ? tscBin : "npx", existsSync(tscBin) ? ["-p", "t
   stdio: "inherit",
 });
 
-const { TOP_LEVEL_COMMANDS_HELP, SKILL_COMMANDS_HELP, GROUP_COMMANDS_HELP, usageWithAliases } = await import(
-  path.join(rootDir, "dist", "help.js")
-);
+const { TOP_LEVEL_COMMANDS_HELP, SKILL_COMMANDS_HELP, GROUP_COMMANDS_HELP, SNAP_COMMANDS_HELP, usageWithAliases } =
+  await import(path.join(rootDir, "dist", "help.js"));
 
 // Markdown table cells split on every unescaped `|`, even inside a code
 // span, so any `|` in a usage string (e.g. "view|show" aliases, or
@@ -49,9 +48,10 @@ function renderTable(entries) {
   return ["| Command | What it does |", "| --- | --- |", ...rows].join("\n");
 }
 
-// Three tables, gh-style: account-scoped commands (login/logout/whoami/
+// Four tables, gh-style: account-scoped commands (login/logout/whoami/
 // token/completion) stay flat; skill-entity commands are reached as
-// `ahood skill <verb>`; group-entity commands as `ahood group <verb>`.
+// `ahood skill <verb>`; group-entity commands as `ahood group <verb>`;
+// snap-entity commands as `ahood snap <verb>`.
 function renderTables() {
   return [
     "### Account",
@@ -65,6 +65,10 @@ function renderTables() {
     "### Group",
     "",
     renderTable(GROUP_COMMANDS_HELP),
+    "",
+    "### Snap",
+    "",
+    renderTable(SNAP_COMMANDS_HELP),
   ].join("\n");
 }
 

@@ -97,6 +97,35 @@ describe("ahood group dispatch (built CLI)", () => {
   });
 });
 
+describe("ahood snap dispatch (built CLI)", () => {
+  it("`ahood snap` with no args prints the snap help and exits 0", () => {
+    const { stdout, status } = runCli(["snap"]);
+    expect(status).toBe(0);
+    expect(stdout).toContain("ahood snap -- capture and search private, session-scoped notes");
+    expect(stdout).toContain("ahood snap create");
+  });
+
+  it("`ahood snap badverb` prints 'Unknown snap command', a did-you-mean, and exits 2", () => {
+    const { stderr, status } = runCli(["snap", "badverb"]);
+    expect(status).toBe(2);
+    expect(stderr).toContain("Unknown snap command: badverb");
+    expect(stderr).toContain("Run `ahood snap --help` for a list of commands.");
+  });
+
+  it("`ahood snap show --help` prints that command's specific help, not the group help", () => {
+    const { stdout, status } = runCli(["snap", "show", "--help"]);
+    expect(status).toBe(0);
+    expect(stdout).toContain("ahood snap show <id>");
+    expect(stdout).not.toContain("ahood snap -- capture and search private, session-scoped notes");
+  });
+
+  it("`ahood snap` is registered alongside `ahood skill`/`ahood group` at the top level", () => {
+    const { stdout, status } = runCli(["--help"]);
+    expect(status).toBe(0);
+    expect(stdout).toContain("ahood snap <command>");
+  });
+});
+
 describe("invocation via a symlink (how npm's installed `ahood` bin actually works)", () => {
   // Regression test for a real incident: npm's installed bin is a symlink
   // to dist/index.js (`npm install -g` / npx both create one), not a copy.
@@ -165,6 +194,18 @@ describe("dispatchGroup (in-process)", () => {
     const spy = vi.spyOn(GROUP_VERBS, "list").mockImplementation(async () => {});
 
     await dispatchGroup(["list", "--json"]);
+
+    expect(spy).toHaveBeenCalledWith(["--json"]);
+    spy.mockRestore();
+  });
+});
+
+describe("dispatchSnap (in-process)", () => {
+  it("`ahood snap list ...` invokes the underlying handler with the sliced args", async () => {
+    const { dispatchSnap, SNAP_VERBS } = await import("../src/index.js");
+    const spy = vi.spyOn(SNAP_VERBS, "list").mockImplementation(async () => {});
+
+    await dispatchSnap(["list", "--json"]);
 
     expect(spy).toHaveBeenCalledWith(["--json"]);
     spy.mockRestore();

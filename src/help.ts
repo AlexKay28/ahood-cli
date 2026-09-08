@@ -314,6 +314,72 @@ export const GROUP_COMMANDS_HELP: CommandHelp[] = [
   },
 ];
 
+// Every snap-entity verb, all reached as `ahood snap <verb>` -- mirrors
+// GROUP_COMMANDS_HELP above, just for the "Snaps" feature (ahood-cli#107):
+// a private, freeform text note capturing "what happened this session",
+// searchable later by its owner, optionally shareable via a revocable link,
+// never public otherwise.
+export const SNAP_COMMANDS_HELP: CommandHelp[] = [
+  {
+    usage: "ahood snap create <content> [--json]",
+    summary: "Capture a new private snap, from an argument or piped stdin.",
+    desc:
+      "Capture a new private snap. Pass the content as an argument, or omit it and pipe content on stdin " +
+      "(e.g. `echo \"...\" | ahood snap create`, or a piped heredoc) -- useful for capturing a whole session's " +
+      "worth of freeform text at once. Prints the new snap's id on success.",
+    flags: ["--json    Emit {id, created_at} instead of just the bare id."],
+    examples: ['ahood snap create "Debugged the flaky CI step, root cause was a race in the cache key."', 'echo "..." | ahood snap create'],
+  },
+  {
+    usage: "ahood snap list [--json] [--limit <n>]",
+    summary: "List your own snaps, most recent first.",
+    desc: "List your own snaps: id, a truncated content preview, created_at, and a (shared) marker if shared.",
+    flags: [
+      "--json        Emit the raw snap objects instead of formatted lines.",
+      "--limit <n>   Cap the number of results.",
+    ],
+  },
+  {
+    usage: "ahood snap search <query> [--json] [--limit <n>]",
+    summary: "Search your own snaps by content.",
+    desc: "Search your own snaps by content. Same output shape as `ahood snap list`.",
+    flags: [
+      "--json        Emit the raw snap objects instead of formatted lines.",
+      "--limit <n>   Cap the number of results.",
+    ],
+    examples: ["ahood snap search flaky-ci"],
+  },
+  {
+    usage: "ahood snap show <id> [--json]",
+    summary: "Print a single snap's full content.",
+    desc:
+      "Print a single snap's full content. Plain mode prints the raw content verbatim to stdout -- no " +
+      "formatting, no labels -- so it's safe to pipe into a file or another tool.",
+    flags: ["--json    Emit the full snap object instead of the raw content."],
+  },
+  {
+    usage: "ahood snap remove <id> [--yes]",
+    summary: "Permanently delete a snap (prompts for confirmation unless --yes is passed).",
+    desc: "Permanently delete a snap. Irreversible. Prompts for a typed \"yes\" unless --yes is passed.",
+    flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+  },
+  {
+    usage: "ahood snap share <id> [--json]",
+    summary: "Mint (or return the existing) shareable link for a snap.",
+    desc: "Mint or return the existing shareable link for a snap. Idempotent -- safe to run more than once.",
+    flags: ["--json    Emit {share_url} instead of just the bare URL."],
+  },
+  {
+    usage: "ahood snap unshare <id> [--yes]",
+    summary: "Revoke a snap's share link (the snap itself is untouched; prompts for confirmation unless --yes is passed).",
+    desc:
+      "Revoke a snap's share link -- the snap itself is untouched, and re-running `ahood snap share` mints a new " +
+      "link. Prompts for a typed \"yes\" unless --yes is passed, since anyone using the old link loses access " +
+      "immediately.",
+    flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+  },
+];
+
 // Exported so other consumers of the command list (e.g. shell completion) can
 // surface aliases without needing their own copy of this map. Aliases apply
 // at the skill-verb level today (e.g. "show" for "view"); nothing at the
@@ -327,6 +393,7 @@ export const COMMAND_ALIASES: Record<string, string> = { show: "view" };
 const ENTITY_COMMANDS_HELP: Record<string, CommandHelp[]> = {
   skill: SKILL_COMMANDS_HELP,
   group: GROUP_COMMANDS_HELP,
+  snap: SNAP_COMMANDS_HELP,
 };
 
 // Two-token lookup for an entity verb (findCommandHelp("skill", "search"),
@@ -335,6 +402,17 @@ const ENTITY_COMMANDS_HELP: Record<string, CommandHelp[]> = {
 export function findCommandHelp(command: string, subcommand?: string): CommandHelp | undefined {
   const entityList = ENTITY_COMMANDS_HELP[command];
   if (entityList && subcommand !== undefined) {
+    // Try the literal verb first -- COMMAND_ALIASES is a single global map
+    // ("show" -> "view", for skill's alias), but a different entity can
+    // have its own real verb that happens to share the alias's name (e.g.
+    // `ahood snap show`, a real verb, not an alias for anything). Resolving
+    // through COMMAND_ALIASES unconditionally would send that lookup to a
+    // nonexistent "ahood snap view" entry instead of the literal "ahood
+    // snap show" one that's actually in this list.
+    const literal = entityList.find(
+      (c) => c.usage.startsWith(`ahood ${command} ${subcommand} `) || c.usage === `ahood ${command} ${subcommand}`,
+    );
+    if (literal) return literal;
     const resolved = COMMAND_ALIASES[subcommand] ?? subcommand;
     return entityList.find(
       (c) => c.usage.startsWith(`ahood ${command} ${resolved} `) || c.usage === `ahood ${command} ${resolved}`,
@@ -461,19 +539,37 @@ export function formatGroupHelp(): string {
   ].join("\n");
 }
 
+// `ahood snap --help` -- the group-level listing for every snap verb.
+export function formatSnapHelp(): string {
+  const lines = formatCommandTable(SNAP_COMMANDS_HELP.map((c) => ({ usage: usageWithAliases(c), summary: c.summary })));
+  return [
+    "ahood snap -- capture and search private, session-scoped notes",
+    "",
+    "Commands:",
+    ...lines,
+    "",
+    "Run `ahood snap <command> --help` for a single command's flags and examples.",
+  ].join("\n");
+}
+
 // `ahood --help` -- the top-level listing: account commands rendered in
-// full, plus a single summary line each pointing at `ahood skill --help`
-// and `ahood group --help` for their (much longer) entity command lists.
+// full, plus a single summary line each pointing at `ahood skill --help`,
+// `ahood group --help`, and `ahood snap --help` for their (much longer)
+// entity command lists.
 export function formatHelp(): string {
   const skillGroupUsage = "ahood skill <command>";
   const skillGroupSummary = "Search, install, and publish skills -- run `ahood skill --help` for the full list.";
   const groupGroupUsage = "ahood group <command>";
   const groupGroupSummary =
     "Create private groups and share skills with them -- run `ahood group --help` for the full list.";
+  const snapGroupUsage = "ahood snap <command>";
+  const snapGroupSummary =
+    "Capture and search private, session-scoped notes -- run `ahood snap --help` for the full list.";
   const lines = formatCommandTable([
     ...TOP_LEVEL_COMMANDS_HELP.map((c) => ({ usage: usageWithAliases(c), summary: c.summary })),
     { usage: skillGroupUsage, summary: skillGroupSummary },
     { usage: groupGroupUsage, summary: groupGroupSummary },
+    { usage: snapGroupUsage, summary: snapGroupSummary },
   ]);
   return [
     "ahood -- CLI for the ahood skills registry (https://ahood.vercel.app)",
@@ -489,6 +585,7 @@ export function formatHelp(): string {
     "Run `ahood <command> --help` (or `ahood help <command>`) for a single command's flags and examples.",
     "Run `ahood skill --help` for the full list of skill commands.",
     "Run `ahood group --help` for the full list of group commands.",
+    "Run `ahood snap --help` for the full list of snap commands.",
     "Run `ahood --version` to print the installed CLI version.",
     "",
     "Exit codes: 0 success, 1 general error, 2 usage/validation error,",

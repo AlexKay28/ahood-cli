@@ -31,7 +31,16 @@ import {
   leaveGroup,
   deleteGroup,
 } from "./commands/group.js";
-import { formatHelp, formatSkillHelp, formatGroupHelp, formatCommandHelp, findCommandHelp } from "./help.js";
+import {
+  createSnap,
+  listSnaps,
+  searchSnaps,
+  showSnap,
+  removeSnap,
+  shareSnap,
+  unshareSnap,
+} from "./commands/snap.js";
+import { formatHelp, formatSkillHelp, formatGroupHelp, formatSnapHelp, formatCommandHelp, findCommandHelp } from "./help.js";
 import { ApiError } from "./http.js";
 import { exitCodeFor } from "./exit-code.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
@@ -80,10 +89,23 @@ const GROUP_VERBS: Record<string, (args: string[]) => Promise<void>> = {
   delete: deleteGroup,
 };
 
+// Every snap-entity verb, reached only as `ahood snap <verb>` -- see
+// dispatchSnap() below. Mirrors GROUP_VERBS above exactly; a snap is a pure
+// API-client entity like a group, with no local filesystem footprint.
+const SNAP_VERBS: Record<string, (args: string[]) => Promise<void>> = {
+  create: createSnap,
+  list: listSnaps,
+  search: searchSnaps,
+  show: showSnap,
+  remove: removeSnap,
+  share: shareSnap,
+  unshare: unshareSnap,
+};
+
 // Top level is now just account/auth-scoped commands (not entity-specific --
-// same reasoning `gh auth login` isn't `gh account login`) plus the `skill`
-// and `group` entity groups. Future entities (e.g. "personality",
-// "protocols") get their own entry here alongside these two.
+// same reasoning `gh auth login` isn't `gh account login`) plus the `skill`,
+// `group`, and `snap` entity groups. Future entities get their own entry
+// here alongside these.
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   login: () => login(),
   logout: () => logout(),
@@ -93,6 +115,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   mcp,
   skill: dispatchSkill,
   group: dispatchGroup,
+  snap: dispatchSnap,
 };
 
 // Commands whose handler owns its own --help handling (at both the group
@@ -101,8 +124,9 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
 // instead of the generic top-level interception in main(). Despite the
 // name, this Set has nothing to do with the "Groups" feature -- "group"
 // here just means "a command that owns its own sub-verb dispatch", the same
-// sense "skill" already used before "group" (the entity) existed.
-const GROUP_COMMANDS = new Set(["skill", "group"]);
+// sense "skill" already used before "group" (the entity) existed. "snap"
+// joins this set for the exact same reason (ahood-cli#107).
+const GROUP_COMMANDS = new Set(["skill", "group", "snap"]);
 
 function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
@@ -139,6 +163,10 @@ function closestSkillCommand(input: string): string | undefined {
 
 function closestGroupVerb(input: string): string | undefined {
   return closestOf(input, Object.keys(GROUP_VERBS));
+}
+
+function closestSnapVerb(input: string): string | undefined {
+  return closestOf(input, Object.keys(SNAP_VERBS));
 }
 
 // `ahood skill <verb> [...]` -- owns its own help handling at both the
@@ -200,6 +228,36 @@ async function dispatchGroup(args: string[]): Promise<void> {
   await handler(rest);
 }
 
+// `ahood snap <verb> [...]` -- owns its own help handling at both the
+// group level (`ahood snap` / `ahood snap --help`) and the per-verb level
+// (`ahood snap <verb> --help`), exactly mirroring dispatchSkill()/
+// dispatchGroup() above.
+async function dispatchSnap(args: string[]): Promise<void> {
+  const [sub, ...rest] = args;
+
+  if (!sub || sub === "--help" || sub === "-h") {
+    console.log(formatSnapHelp());
+    return;
+  }
+
+  const handler = SNAP_VERBS[sub];
+  if (!handler) {
+    console.error(`Unknown snap command: ${sub}`);
+    const suggestion = closestSnapVerb(sub);
+    if (suggestion) console.error(`Did you mean '${suggestion}'?`);
+    console.error("Run `ahood snap --help` for a list of commands.");
+    process.exit(2);
+  }
+
+  if (rest.includes("--help") || rest.includes("-h")) {
+    const entry = findCommandHelp("snap", sub);
+    console.log(entry ? formatCommandHelp(entry) : formatSnapHelp());
+    return;
+  }
+
+  await handler(rest);
+}
+
 async function main() {
   const [command, ...args] = process.argv.slice(2);
 
@@ -220,6 +278,12 @@ async function main() {
       const verb = args[1];
       const entry = verb ? findCommandHelp("group", verb) : undefined;
       console.log(entry ? formatCommandHelp(entry) : formatGroupHelp());
+      return;
+    }
+    if (sub === "snap") {
+      const verb = args[1];
+      const entry = verb ? findCommandHelp("snap", verb) : undefined;
+      console.log(entry ? formatCommandHelp(entry) : formatSnapHelp());
       return;
     }
     const entry = sub ? findCommandHelp(sub) : undefined;
@@ -288,4 +352,4 @@ if (isEntrypoint) {
 }
 
 // Exported for tests only -- the CLI itself only ever calls main() above.
-export { main, dispatchSkill, dispatchGroup, COMMANDS, SKILL_COMMANDS, GROUP_VERBS };
+export { main, dispatchSkill, dispatchGroup, dispatchSnap, COMMANDS, SKILL_COMMANDS, GROUP_VERBS, SNAP_VERBS };
