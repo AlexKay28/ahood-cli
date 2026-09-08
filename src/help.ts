@@ -327,19 +327,27 @@ export const GROUP_COMMANDS_HELP: CommandHelp[] = [
 // never public otherwise.
 export const SNAP_COMMANDS_HELP: CommandHelp[] = [
   {
-    usage: "ahood snap create <content> [--json]",
+    usage: "ahood snap create <content> [--tags tag1,tag2] [--json]",
     summary: "Capture a new private snap, from an argument or piped stdin.",
     desc:
       "Capture a new private snap. Pass the content as an argument, or omit it and pipe content on stdin " +
       "(e.g. `echo \"...\" | ahood snap create`, or a piped heredoc) -- useful for capturing a whole session's " +
       "worth of freeform text at once. Prints the new snap's id on success.",
-    flags: ["--json    Emit {id, created_at} instead of just the bare id."],
-    examples: ['ahood snap create "Debugged the flaky CI step, root cause was a race in the cache key."', 'echo "..." | ahood snap create'],
+    flags: [
+      "--tags <comma,separated>   Attach tags to the new snap.",
+      "--json                     Emit {id, created_at} instead of just the bare id.",
+    ],
+    examples: [
+      'ahood snap create "Debugged the flaky CI step, root cause was a race in the cache key." --tags deploy,bugfix',
+      'echo "..." | ahood snap create',
+    ],
   },
   {
     usage: "ahood snap list [--json] [--limit <n>]",
     summary: "List your own snaps, most recent first.",
-    desc: "List your own snaps: id, a truncated content preview, created_at, and a (shared) marker if shared.",
+    desc:
+      "List your own snaps: id, a truncated content preview, created_at, a (shared) marker if shared, and " +
+      "any tags in brackets.",
     flags: [
       "--json        Emit the raw snap objects instead of formatted lines.",
       "--limit <n>   Cap the number of results.",
@@ -383,6 +391,16 @@ export const SNAP_COMMANDS_HELP: CommandHelp[] = [
       "link. Prompts for a typed \"yes\" unless --yes is passed, since anyone using the old link loses access " +
       "immediately.",
     flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+  },
+  {
+    usage: "ahood snap tags <id> [tag1,tag2,...] [--json]",
+    summary: "Replace a snap's tags (omit the tag list, or pass an empty one, to clear all tags).",
+    desc:
+      "Replace the full set of tags on a snap -- this is not a merge, so any existing tags not listed are " +
+      "dropped. Omitting the tag list entirely, or passing an empty string, clears all tags. No confirmation " +
+      "prompt: unlike remove/unshare this only touches metadata, never the snap's content or shareability.",
+    flags: ["--json    Emit {id, tags} instead of a plain-text summary."],
+    examples: ["ahood snap tags snap_123 deploy,bugfix", 'ahood snap tags snap_123 ""'],
   },
 ];
 

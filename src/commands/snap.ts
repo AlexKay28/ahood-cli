@@ -14,6 +14,7 @@ type SnapSummary = {
   created_at: string;
   updated_at: string;
   shared: boolean;
+  tags: string[];
 };
 
 type SnapDetail = {
@@ -23,15 +24,17 @@ type SnapDetail = {
   updated_at: string;
   shared: boolean;
   share_url: string | null;
+  tags: string[];
 };
 
-const CREATE_USAGE = "Usage: ahood snap create <content> (or pipe content on stdin)";
+const CREATE_USAGE = "Usage: ahood snap create <content> [--tags tag1,tag2] (or pipe content on stdin)";
 const LIST_USAGE = "Usage: ahood snap list [--json] [--limit <n>]";
 const SEARCH_USAGE = "Usage: ahood snap search <query> [--json] [--limit <n>]";
 const SHOW_USAGE = "Usage: ahood snap show <id> [--json]";
 const REMOVE_USAGE = "Usage: ahood snap remove <id> [--yes]";
 const SHARE_USAGE = "Usage: ahood snap share <id> [--json]";
 const UNSHARE_USAGE = "Usage: ahood snap unshare <id> [--yes]";
+const TAGS_USAGE = "Usage: ahood snap tags <id> [tag1,tag2,...] [--json] (omit or pass an empty value to clear all tags)";
 
 // There's no existing "read stdin to completion" helper in this codebase to
 // reuse -- confirm.ts and secret-prompt.ts both only ever read a single
@@ -76,17 +79,27 @@ function printSnaps(jsonOutput: boolean, snaps: SnapSummary[], emptyMessage: str
     // breaks the "one line per snap" contract.
     const flat = snap.content_preview.replace(/\s+/g, " ").trim();
     const preview = flat.length > 60 ? `${flat.slice(0, 60)}...` : flat;
-    console.log(`${snap.id} - ${preview} (${snap.created_at})${snap.shared ? " (shared)" : ""}`);
+    // ?? [] -- see listSnaps/searchSnaps' identical degrade-on-null guard
+    // below; a snap predating the tags column, or a degraded response,
+    // should just show no tags rather than crashing on undefined.length.
+    const tags = snap.tags ?? [];
+    const tagsSuffix = tags.length > 0 ? ` [${tags.join(", ")}]` : "";
+    console.log(`${snap.id} - ${preview} (${snap.created_at})${snap.shared ? " (shared)" : ""}${tagsSuffix}`);
   }
 }
 
 export async function createSnap(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
+  const tagsArg = flagValue(args, "--tags");
   // Joined, not just args[0] -- an unquoted multi-word note (e.g. `ahood
   // snap create Debugged the flaky CI step`) arrives as multiple positional
   // tokens, and taking only the first one silently dropped the rest with no
-  // error. Mirrors searchSnaps' own query-joining below.
-  const positionals = args.filter((a) => a !== "--json");
+  // error. Mirrors searchSnaps' own query-joining below. --tags and its
+  // value (both "--tags x" and "--tags=x" forms) are stripped the same way
+  // --json is, so they never leak into the joined content.
+  const positionals = args.filter(
+    (a, i) => a !== "--json" && a !== "--tags" && !a.startsWith("--tags=") && args[i - 1] !== "--tags",
+  );
   const positional = positionals.length > 0 ? positionals.join(" ") : undefined;
 
   let content: string;
@@ -106,10 +119,22 @@ export async function createSnap(args: string[]): Promise<void> {
 
   if (!content.trim()) throw new UsageError(CREATE_USAGE);
 
+  // Same comma-split convention as `ahood skill publish --tags`/`edit
+  // --tags`. Omitted entirely when --tags wasn't passed at all, so the
+  // request body matches the "omitting tags is equivalent to []" contract
+  // exactly instead of always sending an (empty) tags array.
+  const body: { content: string; tags?: string[] } = { content };
+  if (tagsArg !== undefined) {
+    body.tags = tagsArg
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+  }
+
   const created = await apiJson<{ id: string; created_at: string }>("/api/v1/snaps", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
   });
 
   if (jsonOutput) {
@@ -231,4 +256,39 @@ export async function unshareSnap(args: string[]): Promise<void> {
 
   await apiJson<{ shared: boolean }>(`/api/v1/snaps/${encodeURIComponent(id)}/share`, { method: "DELETE" });
   console.log(`Unshared snap ${id}.`);
+}
+
+export async function tagsSnap(args: string[]): Promise<void> {
+  const jsonOutput = args.includes("--json");
+  const positionals = args.filter((a) => a !== "--json");
+  const id = positionals[0];
+  if (!id) throw new UsageError(TAGS_USAGE);
+
+  // PATCH replaces the full tag set (not a merge) -- omitting the tags
+  // argument, or passing an empty string, both clear every tag, matching
+  // the "pass [] to clear" contract of the endpoint itself.
+  const tagsArg = positionals[1];
+  const tags = tagsArg
+    ? tagsArg
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+    : [];
+
+  // No confirm() gate, unlike remove/unshare -- this only replaces metadata
+  // (tags), never the snap's content or its shareability, and re-running
+  // `tags` with the old set restores it exactly. Per ahood-cli#114's spec.
+  const updated = await apiJson<{ id: string; tags: string[] }>(`/api/v1/snaps/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tags }),
+  });
+
+  if (jsonOutput) {
+    console.log(JSON.stringify(updated));
+    return;
+  }
+  console.log(
+    updated.tags.length > 0 ? `Tags for ${updated.id}: ${updated.tags.join(", ")}` : `Cleared tags for ${updated.id}.`,
+  );
 }

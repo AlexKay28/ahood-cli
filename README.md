@@ -243,13 +243,14 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 
 | Command | What it does |
 | --- | --- |
-| `ahood snap create <content> [--json]` | Capture a new private snap, from an argument or piped stdin. |
+| `ahood snap create <content> [--tags tag1,tag2] [--json]` | Capture a new private snap, from an argument or piped stdin. |
 | `ahood snap list [--json] [--limit <n>]` | List your own snaps, most recent first. |
 | `ahood snap search <query> [--json] [--limit <n>]` | Search your own snaps by content. |
 | `ahood snap show <id> [--json]` | Print a single snap's full content. |
 | `ahood snap remove <id> [--yes]` | Permanently delete a snap (prompts for confirmation unless --yes is passed). |
 | `ahood snap share <id> [--json]` | Mint (or return the existing) shareable link for a snap. |
 | `ahood snap unshare <id> [--yes]` | Revoke a snap's share link (the snap itself is untouched; prompts for confirmation unless --yes is passed). |
+| `ahood snap tags <id> [tag1,tag2,...] [--json]` | Replace a snap's tags (omit the tag list, or pass an empty one, to clear all tags). |
 <!-- COMMANDS_TABLE_END -->
 
 Run `ahood --help`, `ahood skill --help`, `ahood group --help`, `ahood snap --help`, or `ahood <command> --help` (also `ahood help <command>` / `ahood help skill <verb>` / `ahood help group <verb>` / `ahood help snap <verb>`) for the same reference — including per-command flags and examples — directly in your terminal. `ahood --version` prints the installed CLI version.

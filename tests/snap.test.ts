@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { Readable, Writable } from "node:stream";
-import { createSnap, listSnaps, searchSnaps, showSnap, removeSnap, shareSnap, unshareSnap } from "../src/commands/snap.js";
+import { createSnap, listSnaps, searchSnaps, showSnap, removeSnap, shareSnap, unshareSnap, tagsSnap } from "../src/commands/snap.js";
 
 const API_URL = "http://ahood.test";
 const ID = "snap_123";
@@ -144,6 +144,33 @@ describe("snap commands", () => {
       stubApi(400, { error: "Content is required" });
       await expect(createSnap(["hello"])).rejects.toThrow(/Content is required/);
     });
+
+    it("does not send a tags field when --tags is omitted", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
+
+      await createSnap(["hello"]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ content: "hello" });
+    });
+
+    it("sends --tags as a trimmed, comma-split tags array without leaking it into the content", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
+
+      await createSnap(["Debugged", "the", "flaky", "CI", "step", "--tags", "deploy, bugfix"]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({
+        content: "Debugged the flaky CI step",
+        tags: ["deploy", "bugfix"],
+      });
+    });
+
+    it("accepts the --tags=value equals form", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
+
+      await createSnap(["hello", "--tags=deploy,bugfix"]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ content: "hello", tags: ["deploy", "bugfix"] });
+    });
   });
 
   describe("listSnaps", () => {
@@ -170,6 +197,30 @@ describe("snap commands", () => {
       await listSnaps([]);
 
       expect(logSpy).toHaveBeenCalledWith(`${ID} - note (now) (shared)`);
+    });
+
+    it("appends tags in brackets after the (shared) marker when present", async () => {
+      stubApi(200, {
+        snaps: [{ id: ID, content_preview: "note", created_at: "now", updated_at: "now", shared: true, tags: ["deploy", "bugfix"] }],
+        next_cursor: null,
+      });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await listSnaps([]);
+
+      expect(logSpy).toHaveBeenCalledWith(`${ID} - note (now) (shared) [deploy, bugfix]`);
+    });
+
+    it("omits the tags suffix when tags is missing or empty", async () => {
+      stubApi(200, {
+        snaps: [{ id: ID, content_preview: "note", created_at: "now", updated_at: "now", shared: false, tags: [] }],
+        next_cursor: null,
+      });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await listSnaps([]);
+
+      expect(logSpy).toHaveBeenCalledWith(`${ID} - note (now)`);
     });
 
     it("prints a friendly message when there are no snaps", async () => {
@@ -432,6 +483,71 @@ describe("snap commands", () => {
 
       expect(calls[0].url).toBe(`${API_URL}/api/v1/snaps/${ID}/share`);
       expect(calls[0].init.method).toBe("DELETE");
+    });
+  });
+
+  describe("tagsSnap", () => {
+    it("rejects with a usage error when no id is given", async () => {
+      await expect(tagsSnap([])).rejects.toThrow(/Usage: ahood snap tags/);
+    });
+
+    it("PATCHes the tags route with a trimmed, comma-split tags array, without a confirm prompt", async () => {
+      const calls = stubApi(200, { id: ID, tags: ["deploy", "bugfix"] });
+
+      await tagsSnap([ID, "deploy, bugfix"]);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toBe(`${API_URL}/api/v1/snaps/${ID}`);
+      expect(calls[0].init.method).toBe("PATCH");
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ tags: ["deploy", "bugfix"] });
+    });
+
+    it("clears all tags when no tag list is given", async () => {
+      const calls = stubApi(200, { id: ID, tags: [] });
+
+      await tagsSnap([ID]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ tags: [] });
+    });
+
+    it("clears all tags when an empty string is given", async () => {
+      const calls = stubApi(200, { id: ID, tags: [] });
+
+      await tagsSnap([ID, ""]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ tags: [] });
+    });
+
+    it("prints the updated tag list in plain mode", async () => {
+      stubApi(200, { id: ID, tags: ["deploy", "bugfix"] });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await tagsSnap([ID, "deploy,bugfix"]);
+
+      expect(logSpy).toHaveBeenCalledWith(`Tags for ${ID}: deploy, bugfix`);
+    });
+
+    it("prints a cleared message in plain mode when the result has no tags", async () => {
+      stubApi(200, { id: ID, tags: [] });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await tagsSnap([ID]);
+
+      expect(logSpy).toHaveBeenCalledWith(`Cleared tags for ${ID}.`);
+    });
+
+    it("--json emits {id, tags}", async () => {
+      stubApi(200, { id: ID, tags: ["deploy"] });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await tagsSnap([ID, "deploy", "--json"]);
+
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ id: ID, tags: ["deploy"] }));
+    });
+
+    it("propagates a fetch/API error (e.g. 404 for a nonexistent/non-owned snap)", async () => {
+      stubApi(404, { error: "not found" });
+      await expect(tagsSnap([ID, "deploy"])).rejects.toThrow(/not found/);
     });
   });
 });

@@ -39,6 +39,7 @@ import {
   removeSnap,
   shareSnap,
   unshareSnap,
+  tagsSnap,
 } from "./commands/snap.js";
 import { formatHelp, formatSkillHelp, formatGroupHelp, formatSnapHelp, formatCommandHelp, findCommandHelp } from "./help.js";
 import { ApiError } from "./http.js";
@@ -100,6 +101,7 @@ const SNAP_VERBS: Record<string, (args: string[]) => Promise<void>> = {
   remove: removeSnap,
   share: shareSnap,
   unshare: unshareSnap,
+  tags: tagsSnap,
 };
 
 // Top level is now just account/auth-scoped commands (not entity-specific --
