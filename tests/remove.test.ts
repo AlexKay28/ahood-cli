@@ -3,9 +3,20 @@ import { Readable, Writable } from "node:stream";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// withLock wrapped in vi.fn (default pass-through to the real implementation
+// via `...actual`) so a single test can override it with a synchronous
+// throw to simulate a lock-acquisition/write failure, without the 5s real
+// lock-timeout wait a genuine contention test would need. Every other test
+// in this file gets the real, unmodified withLock behavior.
+vi.mock("../src/lockfile.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lockfile.js")>();
+  return { ...actual, withLock: vi.fn(actual.withLock) };
+});
 import { remove } from "../src/commands/remove.js";
-import { writeLockfileEntry, readLockfile } from "../src/lockfile.js";
+import { writeLockfileEntry, readLockfile, withLock } from "../src/lockfile.js";
 import { agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
+import { hashMcpServerConfig } from "../src/commands/add.js";
 
 // remove() reads a confirmation line from stdin via node:readline/promises --
 // feed it one directly instead of touching the real terminal, matching
@@ -171,6 +182,78 @@ describe("remove", () => {
     // secret) must be left exactly as it was, only warned about.
     const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
     expect(mcpConfig.mcpServers.weather.env).toEqual({ API_KEY: "secret-val" });
+  });
+
+  it("actually deletes the .mcp.json entry when its recorded fingerprint still matches what's on disk (ahood-cli#169)", async () => {
+    const entry = { command: "npx", args: ["-y", "@x/weather@1.0.0"], env: { API_KEY: "secret-val" } };
+    writeFileSync(
+      join(dir, MCP_CONFIG_PATH),
+      JSON.stringify({ mcpServers: { weather: entry, other: { url: "https://x" } } }, null, 2),
+    );
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+      mcp_config_hash: hashMcpServerConfig(entry),
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await remove(["alice/weather", "--yes"]);
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers.weather).toBeUndefined();
+    expect(mcpConfig.mcpServers.other).toEqual({ url: "https://x" }); // sibling entry untouched
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Removed alice/weather"));
+    expect(readLockfile(join(dir, ".claude", "skills.lock.json"))).toEqual({});
+  });
+
+  it("does NOT delete, and warns with 'modified' wording, when the on-disk entry no longer matches the recorded fingerprint", async () => {
+    const installedEntry = { command: "npx", args: ["-y", "@x/weather@1.0.0"], env: { API_KEY: "secret-val" } };
+    const handEditedEntry = { command: "npx", args: ["-y", "@x/weather@1.0.0", "--extra-flag"], env: { API_KEY: "secret-val" } };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: { weather: handEditedEntry } }, null, 2));
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+      mcp_config_hash: hashMcpServerConfig(installedEntry),
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await remove(["alice/weather", "--yes"]);
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers.weather).toEqual(handEditedEntry);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/modified since install/));
+  });
+
+  it("falls through to the warning, not a false 'Removed (including its .mcp.json entry)', when the .mcp.json write itself fails", async () => {
+    const entry = { command: "npx", args: ["-y", "@x/weather@1.0.0"], env: { API_KEY: "secret-val" } };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: { weather: entry } }, null, 2));
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+      mcp_config_hash: hashMcpServerConfig(entry),
+    });
+
+    // Simulates a lock-acquisition timeout or a write failure (EACCES/
+    // ENOSPC/etc) -- without the fix, this exact scenario silently
+    // swallowed the failure and printed a bare "Removed" with the entry
+    // (and its secret) still live.
+    vi.mocked(withLock).mockImplementationOnce(() => {
+      throw new Error("simulated lock/write failure");
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await remove(["alice/weather", "--yes"]);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/still has an entry in .*\.mcp\.json/));
+    expect(logSpy).toHaveBeenCalledWith("Removed alice/weather"); // no "(including its .mcp.json entry)"
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers.weather).toEqual(entry); // untouched -- the write never happened
   });
 
   it("does not warn about .mcp.json when removing a skill with no matching entry there", async () => {

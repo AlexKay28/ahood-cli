@@ -129,7 +129,10 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
   {
     usage: "ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]",
     summary: "Move the lockfile pin(s) forward to the latest version, for one skill or all installed skills at once.",
-    desc: "Move the lockfile pin(s) forward to the latest version. With no argument, updates every installed skill; one failure doesn't stop the rest.",
+    desc:
+      "Move the lockfile pin(s) forward to the latest version. With no argument, updates every installed skill; one failure doesn't stop the rest. " +
+      "An mcp-kind entry is updated in place (re-resolving any secret environment variables) as long as its .mcp.json entry still matches what " +
+      "ahood last installed there -- a hand-edited or unverifiable entry is refused rather than silently overwritten.",
     flags: [
       "--dry-run   Preview current vs. latest version (and the changelog for anything behind) without installing anything.",
       "--json      With --dry-run, emit structured preview objects instead of a formatted table.",
@@ -149,7 +152,10 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
   {
     usage: "ahood skill remove <owner>/<skill> [--yes]",
     summary: "Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed).",
-    desc: "Uninstall and unpin (local only). Prompts for confirmation unless --yes is passed.",
+    desc:
+      "Uninstall and unpin (local only). Prompts for confirmation unless --yes is passed. For an mcp-kind install, " +
+      "also deletes its .mcp.json entry as long as it still matches what ahood last installed there -- a hand-edited " +
+      "or unverifiable entry is left in place and warned about instead of being silently touched.",
   },
   {
     usage: "ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",

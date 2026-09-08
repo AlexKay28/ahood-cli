@@ -382,7 +382,9 @@ function summarizeConflictingEntry(entry: unknown): string {
 // raw TypeError, and would let `"mcpServers": []` pass the collision check
 // silently (an array's numeric-index write is then dropped entirely by
 // JSON.stringify), reporting a successful install that wrote nothing.
-function readMcpConfig(): Record<string, unknown> {
+// Exported so remove.ts/update.ts can read the same validated shape when
+// deciding whether it's safe to touch an mcp entry (ahood-cli#169).
+export function readMcpConfig(): Record<string, unknown> {
   if (!existsSync(MCP_CONFIG_PATH)) return { mcpServers: {} };
   let parsed: unknown;
   try {
@@ -423,19 +425,27 @@ function assertNoCollision(fileContents: Record<string, unknown>, owner: string,
   }
 }
 
-async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, buffer: Buffer): Promise<void> {
+// Extracts server.json, validates its shape, and resolves every secret
+// environment variable it declares (prompting only for ones not already
+// set in the shell) -- the part of installing an mcp entry that's identical
+// whether this is a fresh `add` or an `update` moving an existing pin
+// forward. Exported so update.ts's real mcp-update path (ahood-cli#169)
+// re-resolves secrets the same way a fresh install does, instead of
+// duplicating this parsing/prompting logic.
+export async function resolveMcpServerConfig(
+  buffer: Buffer,
+): Promise<{ manifest: ServerManifest; serverConfig: Record<string, unknown> }> {
   const content = await extractSingleFileContent(buffer, "server.json");
   const manifest = JSON.parse(content.toString("utf-8")) as ServerManifest;
 
   // Validate the manifest's shape (unsupported registry_type/runtime_hint,
-  // or neither a single 'packages' nor a single 'remotes' entry) and check
-  // for an existing .mcp.json collision BEFORE prompting for any secret --
-  // an install that's going to be refused anyway must not first cost the
-  // user a masked secret prompt. buildMcpServerConfig is called here with an
-  // empty env purely to run its validation/throw; the result is discarded
-  // and rebuilt below once secretEnv is known.
+  // or neither a single 'packages' nor a single 'remotes' entry) BEFORE
+  // prompting for any secret -- an install/update that's going to be
+  // refused anyway must not first cost the user a masked secret prompt.
+  // buildMcpServerConfig is called here with an empty env purely to run its
+  // validation/throw; the result is discarded and rebuilt below once
+  // secretEnv is known.
   buildMcpServerConfig(manifest, {});
-  assertNoCollision(readMcpConfig(), owner, skill);
 
   const envVars = manifest.packages?.[0]?.environment_variables ?? [];
   const secretEnv: Record<string, string> = {};
@@ -453,6 +463,31 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
   }
 
   const serverConfig = buildMcpServerConfig(manifest, secretEnv);
+  return { manifest, serverConfig };
+}
+
+// Fingerprint of exactly what ahood wrote into .mcp.json's mcpServers.<skill>
+// entry, stored in the lockfile alongside the version/checksum pin. Lets
+// remove/update (ahood-cli#169) tell "the on-disk entry is still exactly
+// what I last installed" from "something (the user, another tool) has since
+// hand-edited it" -- without this, a real (not just warned-about) removal
+// or update risks silently discarding an intentional local edit, the same
+// class of risk assertNoCollision below exists to prevent on a *fresh*
+// install. JSON.stringify's key order matches insertion order for a plain
+// object, and JSON.parse's key order matches source-text order -- so this
+// is stable between the object this process just built and the same object
+// read back from disk later, as long as nothing reorders keys in between.
+export function hashMcpServerConfig(config: unknown): string {
+  return createHash("sha256").update(JSON.stringify(config)).digest("hex");
+}
+
+async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, buffer: Buffer): Promise<void> {
+  // Check for an existing .mcp.json collision BEFORE resolving secrets --
+  // matches resolveMcpServerConfig's own "don't cost the user a prompt for
+  // something that's going to be refused anyway" reasoning, just for the
+  // collision check specifically rather than the manifest-shape check.
+  assertNoCollision(readMcpConfig(), owner, skill);
+  const { serverConfig } = await resolveMcpServerConfig(buffer);
 
   // Read-modify-write under an advisory lock, mirroring lockfile.ts's own
   // writeLockfileEntry: .mcp.json sits right next to the lockfile and can
@@ -472,7 +507,11 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
 
   const mcpKey = `${owner}/${skill}`;
   try {
-    writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, mcpKey, { version: meta.version, checksum_sha256: meta.checksum_sha256 });
+    writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, mcpKey, {
+      version: meta.version,
+      checksum_sha256: meta.checksum_sha256,
+      mcp_config_hash: hashMcpServerConfig(serverConfig),
+    });
   } catch (error) {
     if (!(error instanceof LockfileChecksumConflictError)) throw error;
     // Roll back the .mcp.json merge above under the same lock pattern --
@@ -485,7 +524,109 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
     throw new Error(checksumConflictMessage(mcpKey, meta, error.existing));
   }
   console.log(`Installed ${owner}/${skill}@${meta.version} into ${MCP_CONFIG_PATH} as "${skill}"`);
-  if (Object.keys(secretEnv).length > 0) {
+  // Only the npm+npx package path ever carries secrets into `env` (headers
+  // on a remote entry are static per v1's scope, per buildMcpServerConfig) --
+  // checking the final serverConfig's own `env` key (rather than threading
+  // secretEnv out of resolveMcpServerConfig separately) means this warning
+  // can never drift from what was actually written to disk.
+  if (serverConfig.env && Object.keys(serverConfig.env as Record<string, string>).length > 0) {
+    console.warn(`WARNING: ${MCP_CONFIG_PATH} now contains one or more secret values in plaintext -- do not commit it to version control.`);
+  }
+}
+
+// Re-runs the mcp install flow for an already-installed entry, moving its
+// lockfile pin forward -- update.ts's real mcp-update path (ahood-cli#169).
+// Unlike installMcpEntry, "the entry already exists" is expected here (it's
+// the very entry being updated), so the safety check is inverted: rather
+// than refusing because something's already there, this refuses UNLESS the
+// on-disk entry's fingerprint still matches what was recorded at the last
+// install/update -- same posture as assertNoCollision, applied to "is this
+// still mine to touch" instead of "is this mine to create". If the entry is
+// missing entirely, there's nothing to protect -- write fresh (self-heals a
+// lockfile pin whose .mcp.json entry was deleted by hand without going
+// through `ahood skill remove`). If it's present but doesn't match (or no
+// fingerprint was ever recorded, e.g. an entry installed before this field
+// existed), refuse rather than silently overwrite a possibly-intentional
+// local edit.
+export async function updateMcpEntry(owner: string, skill: string, meta: VersionMeta, currentEntry: LockEntry | undefined): Promise<void> {
+  const key = `${owner}/${skill}`;
+  const recordedHash = currentEntry?.mcp_config_hash;
+
+  const fileContents = readMcpConfig();
+  const mcpServers = fileContents.mcpServers as Record<string, unknown>;
+  const existingOnDisk = Object.prototype.hasOwnProperty.call(mcpServers, skill) ? mcpServers[skill] : undefined;
+
+  // Both refusal messages below point at manually editing .mcp.json, not
+  // `ahood skill remove` -- remove refuses to delete an entry under
+  // exactly these same two conditions (no recorded fingerprint, or a
+  // fingerprint mismatch), so telling the user to "remove then add" would
+  // send them into a sequence where remove leaves the entry in place *and*
+  // clears the lockfile pin, and the follow-up add then fails on the very
+  // same entry as a collision -- pin gone, credential still live, no CLI
+  // path forward. Editing .mcp.json by hand and then running `add` is the
+  // only sequence that actually resolves the state.
+  if (existingOnDisk !== undefined) {
+    if (recordedHash === undefined) {
+      throw new Error(
+        `Cannot verify ${key}'s .mcp.json entry matches what ahood last installed (no recorded fingerprint) -- delete the "${skill}" entry from mcpServers in .mcp.json by hand, then run \`ahood skill add ${key}\` to reinstall and enable automatic updates going forward.`,
+      );
+    }
+    if (hashMcpServerConfig(existingOnDisk) !== recordedHash) {
+      throw new Error(
+        `${key}'s .mcp.json entry appears to have been modified since install -- refusing to overwrite it. Delete the "${skill}" entry from mcpServers in .mcp.json by hand, then run \`ahood skill add ${key}\` to reinstall.`,
+      );
+    }
+  }
+
+  const buffer = await downloadVerifiedArchive(owner, skill, meta);
+  const { serverConfig } = await resolveMcpServerConfig(buffer);
+
+  // Read-modify-write under an advisory lock, mirroring installMcpEntry's
+  // own pattern. Re-checks the fingerprint here too (not just above) since
+  // arbitrary time may have passed since the pre-check -- the download, and
+  // any secret prompt inside resolveMcpServerConfig -- during which another
+  // process could have changed the entry.
+  let previousOnDisk: unknown;
+  withLock(MCP_CONFIG_PATH, () => {
+    const fresh = readMcpConfig();
+    const freshServers = fresh.mcpServers as Record<string, unknown>;
+    const freshExisting = Object.prototype.hasOwnProperty.call(freshServers, skill) ? freshServers[skill] : undefined;
+    if (freshExisting !== undefined && (recordedHash === undefined || hashMcpServerConfig(freshExisting) !== recordedHash)) {
+      throw new Error(`${key}'s .mcp.json entry changed while updating -- refusing to overwrite it. Re-run \`ahood skill update ${key}\` if this was unexpected.`);
+    }
+    previousOnDisk = freshExisting;
+    freshServers[skill] = serverConfig;
+    writeJsonFileAtomic(MCP_CONFIG_PATH, fresh);
+  });
+
+  try {
+    writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
+      version: meta.version,
+      checksum_sha256: meta.checksum_sha256,
+      mcp_config_hash: hashMcpServerConfig(serverConfig),
+    });
+  } catch (error) {
+    if (!(error instanceof LockfileChecksumConflictError)) throw error;
+    // Roll back the .mcp.json overwrite above under the same lock pattern,
+    // restoring the entry to what it was before this update touched it --
+    // not deleting it, unlike installMcpEntry's rollback: unless this was
+    // the self-heal-a-missing-entry case (previousOnDisk undefined), there
+    // WAS a working entry here before this update began.
+    withLock(MCP_CONFIG_PATH, () => {
+      const fileContents = readMcpConfig();
+      const mcpServers = fileContents.mcpServers as Record<string, unknown>;
+      if (previousOnDisk === undefined) {
+        delete mcpServers[skill];
+      } else {
+        mcpServers[skill] = previousOnDisk;
+      }
+      writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
+    });
+    throw new Error(checksumConflictMessage(key, meta, error.existing));
+  }
+
+  console.log(`Updated ${key} to ${meta.version}`);
+  if (serverConfig.env && Object.keys(serverConfig.env as Record<string, string>).length > 0) {
     console.warn(`WARNING: ${MCP_CONFIG_PATH} now contains one or more secret values in plaintext -- do not commit it to version control.`);
   }
 }
