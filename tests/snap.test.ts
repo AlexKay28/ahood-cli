@@ -518,6 +518,23 @@ describe("snap commands", () => {
       expect(JSON.parse(calls[0].init.body as string)).toEqual({ tags: [] });
     });
 
+    it("joins multiple unquoted positional words instead of silently dropping everything after the first", async () => {
+      const calls = stubApi(200, { id: ID, tags: ["deploy", "bugfix"] });
+
+      await tagsSnap([ID, "deploy,", "bugfix"]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ tags: ["deploy", "bugfix"] });
+    });
+
+    it("degrades to the cleared message instead of crashing when the server returns tags: null", async () => {
+      stubApi(200, { id: ID, tags: null });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await tagsSnap([ID]);
+
+      expect(logSpy).toHaveBeenCalledWith(`Cleared tags for ${ID}.`);
+    });
+
     it("prints the updated tag list in plain mode", async () => {
       stubApi(200, { id: ID, tags: ["deploy", "bugfix"] });
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});

@@ -266,8 +266,12 @@ export async function tagsSnap(args: string[]): Promise<void> {
 
   // PATCH replaces the full tag set (not a merge) -- omitting the tags
   // argument, or passing an empty string, both clear every tag, matching
-  // the "pass [] to clear" contract of the endpoint itself.
-  const tagsArg = positionals[1];
+  // the "pass [] to clear" contract of the endpoint itself. Joined, not
+  // just positionals[1] -- an unquoted "tag1, tag2" arrives as multiple
+  // positional tokens, and taking only the first one silently dropped the
+  // rest with no error, the same bug createSnap's own content-joining
+  // above already fixed.
+  const tagsArg = positionals.slice(1).join(" ");
   const tags = tagsArg
     ? tagsArg
         .split(",")
@@ -278,7 +282,7 @@ export async function tagsSnap(args: string[]): Promise<void> {
   // No confirm() gate, unlike remove/unshare -- this only replaces metadata
   // (tags), never the snap's content or its shareability, and re-running
   // `tags` with the old set restores it exactly. Per ahood-cli#114's spec.
-  const updated = await apiJson<{ id: string; tags: string[] }>(`/api/v1/snaps/${encodeURIComponent(id)}`, {
+  const updated = await apiJson<{ id: string; tags: string[] | null }>(`/api/v1/snaps/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tags }),
@@ -288,7 +292,10 @@ export async function tagsSnap(args: string[]): Promise<void> {
     console.log(JSON.stringify(updated));
     return;
   }
+  // ?? [] -- see printSnaps' identical degrade-on-null guard above
+  // (ahood-cli#106): a degraded response shouldn't crash on undefined.length.
+  const updatedTags = updated.tags ?? [];
   console.log(
-    updated.tags.length > 0 ? `Tags for ${updated.id}: ${updated.tags.join(", ")}` : `Cleared tags for ${updated.id}.`,
+    updatedTags.length > 0 ? `Tags for ${updated.id}: ${updatedTags.join(", ")}` : `Cleared tags for ${updated.id}.`,
   );
 }
