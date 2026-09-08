@@ -482,6 +482,26 @@ describe("add", () => {
     });
   });
 
+  it("stores a fingerprint of the written .mcp.json entry in the lockfile (ahood-cli#169)", async () => {
+    const manifest = {
+      name: "weather",
+      description: "x",
+      remotes: [{ url: "https://mcp.example.com/sse" }],
+    };
+    const archive = await tarGz({ "server.json": JSON.stringify(manifest) });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    const lockfile = JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"));
+    expect(lockfile[`${OWNER}/${SKILL}`].mcp_config_hash).toMatch(/^[0-9a-f]{64}$/);
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    const { createHash } = await import("node:crypto");
+    const expectedHash = createHash("sha256").update(JSON.stringify(mcpConfig.mcpServers[SKILL])).digest("hex");
+    expect(lockfile[`${OWNER}/${SKILL}`].mcp_config_hash).toBe(expectedHash);
+  });
+
   it("uses an already-set environment variable for a secret without prompting", async () => {
     const serverJson = JSON.stringify({
       name: "weather-server",

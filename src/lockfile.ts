@@ -1,7 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-export type LockEntry = { version: string; checksum_sha256: string };
+// mcp_config_hash is only ever set for a kind='mcp' entry (add.ts's
+// installMcpEntry) -- a fingerprint of exactly what was written into
+// .mcp.json's mcpServers.<skill> entry at install/update time, letting
+// remove/update (ahood-cli#169) tell an untouched entry from a hand-edited
+// one before deleting or overwriting it. Absent for skill/agent entries,
+// and absent for any mcp entry installed before this field existed.
+export type LockEntry = { version: string; checksum_sha256: string; mcp_config_hash?: string };
 export type Lockfile = Record<string, LockEntry>;
 
 export function readLockfile(path: string): Lockfile {
