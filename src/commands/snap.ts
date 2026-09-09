@@ -261,6 +261,13 @@ export async function unshareSnap(args: string[]): Promise<void> {
 export async function tagsSnap(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const positionals = args.filter((a) => a !== "--json");
+  // Reject stray "--" flags rather than folding them into the tag list
+  // (parseSearchQuery in flags.ts does the same). Without this, the natural
+  // mistake `snap tags <id> --tags a,b` -- natural because `snap create`
+  // really does spell it `--tags a,b` -- silently PATCHed the tag set to
+  // ["--tags a", "b"], and `snap tags --yes <id>` used "--yes" as the id.
+  const unknownFlag = positionals.find((a) => a.startsWith("--"));
+  if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${TAGS_USAGE}`);
   const id = positionals[0];
   if (!id) throw new UsageError(TAGS_USAGE);
 

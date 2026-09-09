@@ -491,6 +491,23 @@ describe("snap commands", () => {
       await expect(tagsSnap([])).rejects.toThrow(/Usage: ahood snap tags/);
     });
 
+    // ahood-cli#114 review: `snap create` spells this `--tags a,b`, so the
+    // same spelling here folded the flag into the tag list and silently
+    // replaced the whole set with ["--tags deploy", "bugfix"].
+    it("rejects an unknown flag instead of folding it into the tag list", async () => {
+      const calls = stubApi(200, { id: ID, tags: [] });
+
+      await expect(tagsSnap([ID, "--tags", "deploy,bugfix"])).rejects.toThrow(/Unknown flag: --tags/);
+      expect(calls).toHaveLength(0);
+    });
+
+    it("rejects an unknown flag rather than using it as the snap id", async () => {
+      const calls = stubApi(200, { id: ID, tags: [] });
+
+      await expect(tagsSnap(["--yes", ID])).rejects.toThrow(/Unknown flag: --yes/);
+      expect(calls).toHaveLength(0);
+    });
+
     it("PATCHes the tags route with a trimmed, comma-split tags array, without a confirm prompt", async () => {
       const calls = stubApi(200, { id: ID, tags: ["deploy", "bugfix"] });
 
