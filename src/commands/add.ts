@@ -432,9 +432,26 @@ function assertNoCollision(fileContents: Record<string, unknown>, owner: string,
 // forward. Exported so update.ts's real mcp-update path (ahood-cli#169)
 // re-resolves secrets the same way a fresh install does, instead of
 // duplicating this parsing/prompting logic.
+// `existingEnv` carries forward the secret values already sitting in the
+// entry being updated, so a routine `ahood skill update` doesn't re-prompt
+// for a credential the user has already supplied. Only ever passed by
+// updateMcpEntry, and only from an entry whose fingerprint it has just
+// verified -- i.e. proven to be ahood's own unmodified entry, not something
+// hand-edited or written by another tool.
+//
+// `allowNonTtyPrompt` (default true, preserving `echo secret | ahood skill
+// add ...` for a fresh install the user explicitly asked for) is false on
+// the update path: `ahood skill update` with no arguments walks EVERY locked
+// entry, so a prompt there is never something the caller aimed at. Left
+// interactive, an unattended update would hang on an idle pipe with no
+// timeout -- against this CLI's "must never hang" rule -- or, worse, silently
+// bank the first line of unrelated piped input (`echo y | ahood skill
+// update`) as the credential and fingerprint over it.
 export async function resolveMcpServerConfig(
   buffer: Buffer,
+  options: { existingEnv?: Record<string, string>; allowNonTtyPrompt?: boolean } = {},
 ): Promise<{ manifest: ServerManifest; serverConfig: Record<string, unknown> }> {
+  const { existingEnv, allowNonTtyPrompt = true } = options;
   const content = await extractSingleFileContent(buffer, "server.json");
   const manifest = JSON.parse(content.toString("utf-8")) as ServerManifest;
 
@@ -457,9 +474,26 @@ export async function resolveMcpServerConfig(
     // (per the design spec), which uses `if (process.env.AHOOD_TOKEN)`
     // specifically so an empty-string env var falls through to the real
     // source instead of silently installing an empty secret.
-    secretEnv[variable.name] = fromEnv
-      ? fromEnv
-      : await promptSecret(`${sanitizeForTerminal(variable.name)} (${sanitizeForTerminal(variable.description)}): `);
+    if (fromEnv) {
+      secretEnv[variable.name] = fromEnv;
+      continue;
+    }
+    // Ordered after the env var deliberately: exporting the variable stays
+    // the way to rotate a credential during an update, rather than being
+    // shadowed by the stale value already on disk.
+    const carriedForward = existingEnv?.[variable.name];
+    if (carriedForward) {
+      secretEnv[variable.name] = carriedForward;
+      continue;
+    }
+    if (!allowNonTtyPrompt && !process.stdin.isTTY) {
+      throw new Error(
+        `${sanitizeForTerminal(variable.name)} is required by ${sanitizeForTerminal(manifest.name)} but is not set, and there is no terminal to prompt on -- export ${sanitizeForTerminal(variable.name)} and re-run.`,
+      );
+    }
+    secretEnv[variable.name] = await promptSecret(
+      `${sanitizeForTerminal(variable.name)} (${sanitizeForTerminal(variable.description)}): `,
+    );
   }
 
   const serverConfig = buildMcpServerConfig(manifest, secretEnv);
@@ -479,6 +513,23 @@ export async function resolveMcpServerConfig(
 // read back from disk later, as long as nothing reorders keys in between.
 export function hashMcpServerConfig(config: unknown): string {
   return createHash("sha256").update(JSON.stringify(config)).digest("hex");
+}
+
+// Pulls the `env` map out of an .mcp.json entry read off disk, so an update
+// can carry its secrets forward (see resolveMcpServerConfig's `existingEnv`).
+// Written defensively -- the entry is `unknown` here, and only a string value
+// is usable as a credential -- even though the caller has already fingerprint-
+// verified it, so that a shape this function can't read degrades into a
+// prompt rather than a crash.
+function readMcpEntryEnv(entry: unknown): Record<string, string> | undefined {
+  if (typeof entry !== "object" || entry === null) return undefined;
+  const env = (entry as Record<string, unknown>).env;
+  if (typeof env !== "object" || env === null) return undefined;
+  const result: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env as Record<string, unknown>)) {
+    if (typeof value === "string") result[name] = value;
+  }
+  return result;
 }
 
 async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, buffer: Buffer): Promise<void> {
@@ -579,7 +630,13 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
   }
 
   const buffer = await downloadVerifiedArchive(owner, skill, meta);
-  const { serverConfig } = await resolveMcpServerConfig(buffer);
+  // Reuse the secrets already in the entry rather than re-prompting for
+  // them. Safe to trust specifically because the fingerprint check above has
+  // just proven this is ahood's own unmodified entry; in the self-heal case
+  // (no entry on disk at all) there's nothing to carry forward and a genuine
+  // prompt is correct.
+  const existingEnv = readMcpEntryEnv(existingOnDisk);
+  const { serverConfig } = await resolveMcpServerConfig(buffer, { existingEnv, allowNonTtyPrompt: false });
 
   // Read-modify-write under an advisory lock, mirroring installMcpEntry's
   // own pattern. Re-checks the fingerprint here too (not just above) since
@@ -606,23 +663,43 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
       mcp_config_hash: hashMcpServerConfig(serverConfig),
     });
   } catch (error) {
-    if (!(error instanceof LockfileChecksumConflictError)) throw error;
     // Roll back the .mcp.json overwrite above under the same lock pattern,
     // restoring the entry to what it was before this update touched it --
     // not deleting it, unlike installMcpEntry's rollback: unless this was
     // the self-heal-a-missing-entry case (previousOnDisk undefined), there
     // WAS a working entry here before this update began.
-    withLock(MCP_CONFIG_PATH, () => {
-      const fileContents = readMcpConfig();
-      const mcpServers = fileContents.mcpServers as Record<string, unknown>;
-      if (previousOnDisk === undefined) {
-        delete mcpServers[skill];
-      } else {
-        mcpServers[skill] = previousOnDisk;
-      }
-      writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
-    });
-    throw new Error(checksumConflictMessage(key, meta, error.existing));
+    //
+    // Runs for EVERY lockfile failure, not just a checksum conflict. A
+    // rethrow-before-rollback here left .mcp.json holding the new config
+    // while the lockfile kept the old version and old mcp_config_hash, after
+    // which the fingerprint never matches again and both `update` and
+    // `remove` permanently refuse -- the exact dead end the comments above
+    // exist to prevent, reachable from nothing worse than withLock's 5s
+    // timeout against a concurrent ahood, or an EACCES/ENOSPC on the write.
+    try {
+      withLock(MCP_CONFIG_PATH, () => {
+        const fileContents = readMcpConfig();
+        const mcpServers = fileContents.mcpServers as Record<string, unknown>;
+        if (previousOnDisk === undefined) {
+          delete mcpServers[skill];
+        } else {
+          mcpServers[skill] = previousOnDisk;
+        }
+        writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
+      });
+    } catch {
+      // The rollback can fail for the same reason the write did (lock still
+      // contended, disk still full). Warn rather than throw: the original
+      // error below is the more actionable one, and masking it with this
+      // one would hide why the update failed in the first place.
+      console.warn(
+        `WARNING: could not roll back ${MCP_CONFIG_PATH} after ${key}'s update failed -- its mcpServers."${skill}" entry may be on the new version while ${LOCKFILE_PATH} still pins the old one. Delete that entry by hand and run \`ahood skill add ${key}\` to reinstall.`,
+      );
+    }
+    if (error instanceof LockfileChecksumConflictError) {
+      throw new Error(checksumConflictMessage(key, meta, error.existing));
+    }
+    throw error;
   }
 
   console.log(`Updated ${key} to ${meta.version}`);

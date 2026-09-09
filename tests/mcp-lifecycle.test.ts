@@ -162,7 +162,13 @@ describe("mcp lifecycle: add -> update -> remove", () => {
 
     await update([]);
 
-    expect(promptSecret).toHaveBeenCalledTimes(2); // re-resolved, not reused from the install
+    // Still 1 (from the install), not 2: the update carries the already-
+    // verified secret forward instead of re-prompting. `ahood skill update`
+    // with no args walks every locked entry, so prompting here broke
+    // unattended use outright -- and with stdin a pipe carrying unrelated
+    // data it banked the first line as the credential. The env assertion
+    // just below is what proves the secret still made it through.
+    expect(promptSecret).toHaveBeenCalledTimes(1);
     mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
     expect(mcpConfig.mcpServers[SKILL]).toEqual({
       command: "npx",
@@ -185,5 +191,102 @@ describe("mcp lifecycle: add -> update -> remove", () => {
 
     // The secret must never appear in any console output across the whole lifecycle.
     expect(consoleOutput.join("\n")).not.toContain("sk-live-lifecycle-secret");
+  });
+
+  // Shared setup for the update-path regression tests below: installs v1
+  // (one secret env var, supplied by the mocked prompt) and leaves the
+  // fetch stub serving whatever v2 manifest the caller passes.
+  async function installV1ThenServeV2(v2EnvVars: unknown[]): Promise<string[]> {
+    const basePkg = { registry_type: "npm", identifier: "@example/weather-mcp", runtime_hint: "npx" };
+    const manifestV1 = {
+      name: "weather",
+      description: "x",
+      packages: [
+        {
+          ...basePkg,
+          version: "1.0.0",
+          environment_variables: [{ name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true }],
+        },
+      ],
+    };
+    const manifestV2 = { ...manifestV1, packages: [{ ...basePkg, version: "2.0.0", environment_variables: v2EnvVars }] };
+    const archiveV1 = await tarGz({ "server.json": JSON.stringify(manifestV1) });
+    const archiveV2 = await tarGz({ "server.json": JSON.stringify(manifestV2) });
+
+    const output: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((msg) => void output.push(String(msg)));
+    vi.spyOn(console, "warn").mockImplementation((msg) => void output.push(String(msg)));
+    vi.spyOn(console, "error").mockImplementation((msg) => void output.push(String(msg)));
+
+    let serving: { version: string; archive: Buffer; checksum: string } = {
+      version: "1.0.0",
+      archive: archiveV1,
+      checksum: sha256(archiveV1),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}`) {
+          return new Response(
+            JSON.stringify({
+              skill_versions: { version: serving.version, manifest: [{ path: "server.json" }], checksum_sha256: serving.checksum },
+              kind: "mcp",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}/download?version=${serving.version}`) {
+          return new Response(new Uint8Array(serving.archive), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+
+    await add([`${OWNER}/${SKILL}`]);
+    expect(promptSecret).toHaveBeenCalledTimes(1);
+    serving = { version: "2.0.0", archive: archiveV2, checksum: sha256(archiveV2) };
+    return output;
+  }
+
+  // ahood-cli#169 review: a bare `ahood skill update` walks EVERY locked
+  // entry, so a prompt on that path is never something the caller aimed at.
+  // A secret that's genuinely new in the incoming version has nothing to
+  // carry forward, so it has to fail loudly rather than hang on an idle pipe
+  // or bank the first line of unrelated piped input as the credential.
+  // process.stdin.isTTY is already falsy under vitest, i.e. this is exactly
+  // the unattended shape.
+  it("fails an unattended update with an actionable error instead of prompting for a newly-introduced secret", async () => {
+    const output = await installV1ThenServeV2([
+      { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      { name: "WEATHER_ORG_TOKEN", description: "Org token", is_required: true, is_secret: true },
+    ]);
+
+    await update([]);
+
+    expect(promptSecret).toHaveBeenCalledTimes(1); // still just the install's
+    expect(output.join("\n")).toContain("WEATHER_ORG_TOKEN");
+    expect(output.join("\n")).toMatch(/no terminal to prompt on/);
+    expect(process.exitCode).toBe(1);
+
+    // ...and the failed update rolled .mcp.json back to the v1 entry rather
+    // than leaving it half-written.
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].args).toEqual(["-y", "@example/weather-mcp@1.0.0"]);
+  });
+
+  // The env var stays ahead of the carried-forward value, so exporting it is
+  // still the way to rotate a credential during an update.
+  it("prefers an exported env var over the secret already on disk", async () => {
+    await installV1ThenServeV2([
+      { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+    ]);
+    process.env.WEATHER_API_KEY = "sk-live-rotated";
+
+    await update([]);
+
+    expect(promptSecret).toHaveBeenCalledTimes(1); // still just the install's
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_API_KEY: "sk-live-rotated" });
   });
 });
