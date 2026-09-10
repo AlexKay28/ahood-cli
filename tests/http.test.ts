@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { apiJson, ApiError } from "../src/http.js";
+import { apiJson, ApiError, sanitizeErrorMessage } from "../src/http.js";
 
 const API_URL = "http://ahood.test";
 
@@ -72,5 +72,57 @@ describe("apiJson error sanitization", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("not json", { status: 200 })));
 
     await expect(apiJson("/x")).rejects.toThrow(/Malformed response/);
+  });
+
+  it("neutralizes ANSI escapes in a short error body before it reaches the terminal (ahood-cli#127)", async () => {
+    const escapes = "Not found\x1b[2K\x1b[1GEnter your token:";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: escapes }), { status: 404 })));
+
+    let caught: unknown;
+    try {
+      await apiJson("/x");
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).message).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+  });
+});
+
+describe("sanitizeErrorMessage control characters (ahood-cli#127)", () => {
+  it("replaces ANSI escape sequences with spaces instead of returning them verbatim", () => {
+    expect(sanitizeErrorMessage("Not found\x1b[2K\x1b[1Ggotcha")).toBe("Not found [2K [1Ggotcha");
+  });
+
+  it("replaces rather than deletes, so stripped characters can't glue two tokens together", () => {
+    expect(sanitizeErrorMessage("alice\x07bob")).toBe("alice bob");
+  });
+
+  it("strips C1 controls and DEL as well as C0", () => {
+    expect(sanitizeErrorMessage("a\x7fb\x9fc")).toBe("a b c");
+  });
+
+  it("flattens newlines and carriage returns, which a forged prompt line needs (see comment at the fix)", () => {
+    expect(sanitizeErrorMessage("Upload rejected.\nRetry with --force.\r\n")).toBe("Upload rejected. Retry with --force.  ");
+  });
+
+  it("leaves an ordinary short message untouched", () => {
+    const message = "This token's scopes do not include 'publish'";
+    expect(sanitizeErrorMessage(message)).toBe(message);
+  });
+
+  it("still replaces an HTML-shaped body with the generic summary, escapes or not", () => {
+    const html = "<!DOCTYPE html>\x1b[2K<html><head><title>Cloudflare</title></head></html>";
+    const result = sanitizeErrorMessage(html);
+    expect(result).toMatch(/^Request failed with an unexpected, oversized, or HTML-shaped error response/);
+    expect(result).not.toContain("Cloudflare");
+  });
+
+  it("still replaces an oversized body with the generic summary, escapes or not", () => {
+    const huge = "\x1b[2K" + "x".repeat(2000);
+    const result = sanitizeErrorMessage(huge);
+    expect(result).toMatch(/^Request failed with an unexpected, oversized, or HTML-shaped error response/);
+    expect(result).toContain(`(${huge.length} bytes)`);
   });
 });
