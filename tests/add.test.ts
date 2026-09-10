@@ -483,10 +483,16 @@ describe("add", () => {
   });
 
   it("stores a fingerprint of the written .mcp.json entry in the lockfile (ahood-cli#169)", async () => {
+    // Two keys, in deliberately UNSORTED order (url before headers, and
+    // X-Region before Accept inside them), so the canonical serialization
+    // genuinely differs from raw JSON.stringify. With the single-key
+    // {url} shape this used to use, the two coincide -- so the hash
+    // assertion below passed whether or not canonicalization existed, and
+    // pinned nothing (ahood-cli#116).
     const manifest = {
       name: "weather",
       description: "x",
-      remotes: [{ url: "https://mcp.example.com/sse" }],
+      remotes: [{ url: "https://mcp.example.com/sse", headers: { "X-Region": "eu", Accept: "text/event-stream" } }],
     };
     const archive = await tarGz({ "server.json": JSON.stringify(manifest) });
     stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
@@ -497,9 +503,18 @@ describe("add", () => {
     expect(lockfile[`${OWNER}/${SKILL}`].mcp_config_hash).toMatch(/^[0-9a-f]{64}$/);
 
     const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
-    const { createHash } = await import("node:crypto");
-    const expectedHash = createHash("sha256").update(JSON.stringify(mcpConfig.mcpServers[SKILL])).digest("hex");
-    expect(lockfile[`${OWNER}/${SKILL}`].mcp_config_hash).toBe(expectedHash);
+    const entry = mcpConfig.mcpServers[SKILL];
+    expect(Object.keys(entry)).toEqual(["url", "headers"]); // the fixture's premise
+
+    // The pin is a hash of exactly what landed on disk...
+    expect(lockfile[`${OWNER}/${SKILL}`].mcp_config_hash).toBe(hashMcpServerConfig(entry));
+
+    // ...in the canonical format specifically, not the legacy raw-stringify
+    // one. The first assertion is the fixture guard: if these two ever
+    // coincide again, this test has stopped pinning the format.
+    const legacyHash = createHash("sha256").update(JSON.stringify(entry)).digest("hex");
+    expect(legacyHash).not.toBe(hashMcpServerConfig(entry));
+    expect(lockfile[`${OWNER}/${SKILL}`].mcp_config_hash).not.toBe(legacyHash);
   });
 
   it("uses an already-set environment variable for a secret without prompting", async () => {
