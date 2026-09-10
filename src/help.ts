@@ -343,25 +343,31 @@ export const SNAP_COMMANDS_HELP: CommandHelp[] = [
     ],
   },
   {
-    usage: "ahood snap list [--json] [--limit <n>]",
+    usage: "ahood snap list [--json] [--limit <n>] [--tags tag1,tag2]",
     summary: "List your own snaps, most recent first.",
     desc:
       "List your own snaps: id, a truncated content preview, created_at, a (shared) marker if shared, and " +
-      "any tags in brackets.",
+      "any tags in brackets. --tags narrows the list to snaps carrying every tag given (not any of them), " +
+      "matched case-insensitively.",
     flags: [
-      "--json        Emit the raw snap objects instead of formatted lines.",
-      "--limit <n>   Cap the number of results.",
+      "--json               Emit the raw snap objects instead of formatted lines.",
+      "--limit <n>          Cap the number of results.",
+      "--tags tag1,tag2     Only snaps carrying ALL of these tags. Case-insensitive; at most 8.",
     ],
+    examples: ["ahood snap list --tags deploy", "ahood snap list --tags deploy,bugfix --limit 5"],
   },
   {
-    usage: "ahood snap search <query> [--json] [--limit <n>]",
+    usage: "ahood snap search <query> [--json] [--limit <n>] [--tags tag1,tag2]",
     summary: "Search your own snaps by content.",
-    desc: "Search your own snaps by content. Same output shape as `ahood snap list`.",
+    desc:
+      "Search your own snaps by content. Same output shape as `ahood snap list`. The query matches snap " +
+      "CONTENT only and never a tag -- use --tags to filter by tag, which narrows the text results further.",
     flags: [
-      "--json        Emit the raw snap objects instead of formatted lines.",
-      "--limit <n>   Cap the number of results.",
+      "--json               Emit the raw snap objects instead of formatted lines.",
+      "--limit <n>          Cap the number of results.",
+      "--tags tag1,tag2     Only snaps carrying ALL of these tags. Case-insensitive; at most 8.",
     ],
-    examples: ["ahood snap search flaky-ci"],
+    examples: ["ahood snap search flaky-ci", "ahood snap search deploy --tags ci"],
   },
   {
     usage: "ahood snap show <id> [--json]",

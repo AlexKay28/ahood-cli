@@ -25,6 +25,14 @@ describe("search", () => {
     await expect(search(["foo", "--bogus"])).rejects.toThrow(/Unknown flag: --bogus/);
   });
 
+  // parseSearchQuery takes its extra value-flags per caller, so --tags being
+  // added to `snap search` (ahood-cli#118) must not quietly become an ignored
+  // no-op here -- silently dropping it would return unfiltered results while
+  // looking like it filtered.
+  it("still errors on --tags, which this command does not implement", async () => {
+    await expect(search(["foo", "--tags", "ci"])).rejects.toThrow(/Unknown flag: --tags/);
+  });
+
   it("--json prints the raw skills array instead of formatted prose", async () => {
     const skills = [{ slug: "demo", name: "Demo", tagline: null, downloads_count: 3, profiles: { username: "alice" } }];
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ skills }), { status: 200 })));

@@ -38,9 +38,20 @@ export function flagValue(args: string[], flag: string): string | undefined {
 // --limit (both "--limit N" and "--limit=N" forms) from the positional
 // args, rejects any other unrecognized "--" flag, and joins what's left
 // into a single query string.
-export function parseSearchQuery(args: string[], usage: string): string {
+// `valueFlags` names ADDITIONAL "--flag value" flags this particular command
+// accepts (snap search's --tags, ahood-cli#118), on top of --limit, which
+// every caller takes. Passed per-caller rather than stripping a shared union
+// of every search-ish flag, so `ahood skill search --tags x` still errors on
+// a flag that command doesn't implement instead of silently ignoring it and
+// returning unfiltered results.
+export function parseSearchQuery(args: string[], usage: string, valueFlags: string[] = []): string {
+  const stripped = ["--limit", ...valueFlags];
   const queryParts = args.filter(
-    (a, i) => a !== "--json" && a !== "--limit" && !a.startsWith("--limit=") && args[i - 1] !== "--limit",
+    (a, i) =>
+      a !== "--json" &&
+      !stripped.includes(a) &&
+      !stripped.some((f) => a.startsWith(`${f}=`)) &&
+      !stripped.includes(args[i - 1]),
   );
   const unknownFlag = queryParts.find((a) => a.startsWith("--"));
   if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${usage}`);

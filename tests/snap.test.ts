@@ -187,6 +187,38 @@ describe("snap commands", () => {
       expect(logSpy).toHaveBeenCalledWith(`${ID} - Debugged the flaky CI step. (2026-09-07T00:00:00.000Z)`);
     });
 
+    // ahood-cli#118. Sent verbatim: the server owns the tag-filter contract
+    // (ANDed, case-insensitive, 400 past 8 terms, unstorable terms kept so a
+    // filter never silently broadens), so the CLI must not re-parse it.
+    it("passes --tags through to the query string verbatim", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await listSnaps(["--tags", "Deploy, bug fix,,x"]);
+
+      expect(new URL(calls[0].url).searchParams.get("tags")).toBe("Deploy, bug fix,,x");
+    });
+
+    it("accepts the --tags=value form and combines it with --limit", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await listSnaps(["--tags=deploy,ci", "--limit", "5"]);
+
+      const params = new URL(calls[0].url).searchParams;
+      expect(params.get("tags")).toBe("deploy,ci");
+      expect(params.get("limit")).toBe("5");
+    });
+
+    it("sends no tags param at all when --tags is omitted", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await listSnaps([]);
+
+      expect(calls[0].url).toBe(`${API_URL}/api/v1/snaps`);
+    });
+
     it("marks a shared snap with a (shared) suffix", async () => {
       stubApi(200, {
         snaps: [{ id: ID, content_preview: "note", created_at: "now", updated_at: "now", shared: true }],
@@ -283,6 +315,35 @@ describe("snap commands", () => {
 
     it("errors on an unrecognized flag instead of folding it into the query", async () => {
       await expect(searchSnaps(["foo", "--bogus"])).rejects.toThrow(/Unknown flag: --bogus/);
+    });
+
+    // The whole trap of ahood-cli#118: --tags must be declared to
+    // parseSearchQuery, or its VALUE gets folded into the joined query and
+    // the search silently becomes a text search for "deploy ci".
+    it("keeps the --tags value out of the joined query string", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await searchSnaps(["deploy", "--tags", "ci,green"]);
+
+      const params = new URL(calls[0].url).searchParams;
+      expect(params.get("q")).toBe("deploy");
+      expect(params.get("tags")).toBe("ci,green");
+    });
+
+    it("keeps the --tags=value form out of the joined query string too", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await searchSnaps(["flaky", "test", "--tags=ci"]);
+
+      const params = new URL(calls[0].url).searchParams;
+      expect(params.get("q")).toBe("flaky test");
+      expect(params.get("tags")).toBe("ci");
+    });
+
+    it("still requires a query when only --tags is given", async () => {
+      await expect(searchSnaps(["--tags", "ci"])).rejects.toThrow(/Usage: ahood snap search/);
     });
 
     it("sends ?q=<query> and prints results in the default format", async () => {

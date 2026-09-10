@@ -244,8 +244,8 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | Command | What it does |
 | --- | --- |
 | `ahood snap create <content> [--tags tag1,tag2] [--json]` | Capture a new private snap, from an argument or piped stdin. |
-| `ahood snap list [--json] [--limit <n>]` | List your own snaps, most recent first. |
-| `ahood snap search <query> [--json] [--limit <n>]` | Search your own snaps by content. |
+| `ahood snap list [--json] [--limit <n>] [--tags tag1,tag2]` | List your own snaps, most recent first. |
+| `ahood snap search <query> [--json] [--limit <n>] [--tags tag1,tag2]` | Search your own snaps by content. |
 | `ahood snap show <id> [--json]` | Print a single snap's full content. |
 | `ahood snap remove <id> [--yes]` | Permanently delete a snap (prompts for confirmation unless --yes is passed). |
 | `ahood snap share <id> [--json]` | Mint (or return the existing) shareable link for a snap. |

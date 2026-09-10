@@ -28,8 +28,8 @@ type SnapDetail = {
 };
 
 const CREATE_USAGE = "Usage: ahood snap create <content> [--tags tag1,tag2] (or pipe content on stdin)";
-const LIST_USAGE = "Usage: ahood snap list [--json] [--limit <n>]";
-const SEARCH_USAGE = "Usage: ahood snap search <query> [--json] [--limit <n>]";
+const LIST_USAGE = "Usage: ahood snap list [--json] [--limit <n>] [--tags tag1,tag2]";
+const SEARCH_USAGE = "Usage: ahood snap search <query> [--json] [--limit <n>] [--tags tag1,tag2]";
 const SHOW_USAGE = "Usage: ahood snap show <id> [--json]";
 const REMOVE_USAGE = "Usage: ahood snap remove <id> [--yes]";
 const SHARE_USAGE = "Usage: ahood snap share <id> [--json]";
@@ -147,10 +147,18 @@ export async function createSnap(args: string[]): Promise<void> {
 export async function listSnaps(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const limitStr = flagValue(args, "--limit");
+  const tagsStr = flagValue(args, "--tags");
   validateLimit(limitStr, LIST_USAGE);
 
   const qs = new URLSearchParams();
   if (limitStr !== undefined) qs.set("limit", limitStr);
+  // Passed through verbatim rather than split/trimmed the way createSnap's
+  // own --tags is: the server owns what a tag filter means (comma-separated,
+  // ANDed, case-insensitive, 400 past 8 terms) and deliberately keeps an
+  // unstorable term instead of dropping it, since dropping one would silently
+  // broaden the result set. Re-parsing here would be a second implementation
+  // of that contract, free to drift from it (ahood-cli#118).
+  if (tagsStr !== undefined) qs.set("tags", tagsStr);
   const query = qs.toString();
   const { snaps } = await apiJson<{ snaps: SnapSummary[] | null; next_cursor: string | null }>(
     `/api/v1/snaps${query ? `?${query}` : ""}`,
@@ -165,11 +173,18 @@ export async function listSnaps(args: string[]): Promise<void> {
 export async function searchSnaps(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const limitStr = flagValue(args, "--limit");
-  const query = parseSearchQuery(args, SEARCH_USAGE);
+  const tagsStr = flagValue(args, "--tags");
+  // --tags declared here so its VALUE isn't swallowed into the joined query
+  // string -- `snap search deploy --tags ci` must search for "deploy" filtered
+  // to tag "ci", not for "deploy ci" (ahood-cli#118).
+  const query = parseSearchQuery(args, SEARCH_USAGE, ["--tags"]);
   validateLimit(limitStr, SEARCH_USAGE);
 
   const qs = new URLSearchParams({ q: query });
   if (limitStr !== undefined) qs.set("limit", limitStr);
+  // Verbatim -- see listSnaps' identical pass-through above (ahood-cli#118).
+  // The server ANDs a tag filter with `q`, so this narrows the text results.
+  if (tagsStr !== undefined) qs.set("tags", tagsStr);
   const { snaps } = await apiJson<{ snaps: SnapSummary[] | null; next_cursor: string | null }>(`/api/v1/snaps?${qs}`);
 
   // ?? [] -- see listSnaps' identical guard above (ahood-cli#106).
