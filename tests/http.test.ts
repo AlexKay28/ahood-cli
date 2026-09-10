@@ -1,9 +1,12 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { apiJson, ApiError, sanitizeErrorMessage } from "../src/http.js";
+import { apiFetch, apiJson, ApiError, NetworkError, sanitizeErrorMessage } from "../src/http.js";
 
 const API_URL = "http://ahood.test";
 
-describe("apiJson error sanitization", () => {
+// vitest's restoreMocks/clearMocks (ahood-cli#124) don't cover stubGlobal or the
+// env var, so both describes below need this same harness -- shared rather than
+// copied so the two can't drift apart.
+function useStubbedApi(): void {
   const originalApiUrl = process.env.AHOOD_API_URL;
 
   beforeEach(() => {
@@ -15,6 +18,10 @@ describe("apiJson error sanitization", () => {
     if (originalApiUrl === undefined) delete process.env.AHOOD_API_URL;
     else process.env.AHOOD_API_URL = originalApiUrl;
   });
+}
+
+describe("apiJson error sanitization", () => {
+  useStubbedApi();
 
   it("passes short, normal server error messages through unchanged", async () => {
     vi.stubGlobal(
@@ -124,5 +131,70 @@ describe("sanitizeErrorMessage control characters (ahood-cli#127)", () => {
     const result = sanitizeErrorMessage(huge);
     expect(result).toMatch(/^Request failed with an unexpected, oversized, or HTML-shaped error response/);
     expect(result).toContain(`(${huge.length} bytes)`);
+  });
+});
+
+describe("NetworkError message sanitization (ahood-cli#129)", () => {
+  useStubbedApi();
+
+  async function networkErrorFrom(rejection: unknown): Promise<NetworkError> {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw rejection;
+      }),
+    );
+    const caught: unknown = await apiFetch("/x").catch((e: unknown) => e);
+    expect(caught).toBeInstanceOf(NetworkError);
+    return caught as NetworkError;
+  }
+
+  // The point of this message is diagnosing a broken network, so the bar isn't
+  // "contains no escapes" -- it's that verbatim.
+  it("still names the host and the underlying reason readably", async () => {
+    const error = await networkErrorFrom(new Error("fetch failed", { cause: new Error("connect ECONNREFUSED 127.0.0.1:3000") }));
+    expect(error.message).toBe("Request to http://ahood.test/x failed (fetch failed: connect ECONNREFUSED 127.0.0.1:3000)");
+  });
+
+  it("neutralizes an ANSI escape carried by the rejection's own message", async () => {
+    const error = await networkErrorFrom(new Error("fetch failed\x1b[2K\x1b[1GEnter your token:"));
+    expect(error.message).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+    expect(error.message).toContain("fetch failed");
+  });
+
+  it("neutralizes an ANSI escape carried by the rejection's cause", async () => {
+    const error = await networkErrorFrom(new Error("fetch failed", { cause: new Error("getaddrinfo ENOTFOUND\x1b[2K\x1b[1GEnter your token:") }));
+    expect(error.message).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+    expect(error.message).toContain("getaddrinfo ENOTFOUND");
+  });
+
+  it("neutralizes an ANSI escape when the rejection isn't an Error at all", async () => {
+    const error = await networkErrorFrom("socket hang up\x1b[2K\x1b[1GEnter your token:");
+    expect(error.message).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+    expect(error.message).toContain("socket hang up");
+  });
+
+  it("omits a non-Error cause rather than rendering a bare 'undefined' as the reason", async () => {
+    const error = new Error("fetch failed");
+    (error as { cause?: unknown }).cause = { code: "ECONNRESET" };
+    expect((await networkErrorFrom(error)).message).toBe("Request to http://ahood.test/x failed (fetch failed)");
+  });
+
+  // Justifies sanitizeForTerminal's 200-char default here: Node/undici reasons
+  // are short and structured, and the longest realistic one (an OpenSSL string)
+  // still fits with room to spare -- per part, so a verbose first half can't
+  // crowd out the cause, which is the half that says what actually broke.
+  it("does not truncate a realistically long transport reason", async () => {
+    const openssl =
+      "write EPROTO 4039A5D9D77F0000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:../deps/openssl/openssl/ssl/record/ssl3_record.c:354:";
+    expect(openssl.length).toBeGreaterThan(140);
+    const error = await networkErrorFrom(new Error("fetch failed", { cause: new Error(openssl) }));
+    expect(error.message).toContain(openssl);
+  });
+
+  it("still bounds a pathologically long one", async () => {
+    const error = await networkErrorFrom(new Error("fetch failed", { cause: new Error("x".repeat(5000)) }));
+    expect(error.message).toContain("Request to http://ahood.test/x failed (fetch failed: xxx");
+    expect(error.message.length).toBeLessThan(500);
   });
 });
