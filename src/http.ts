@@ -31,8 +31,12 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
       headers,
     });
   } catch (error) {
-    const cause = error instanceof Error && error.cause instanceof Error ? `: ${error.cause.message}` : "";
-    const message = error instanceof Error ? error.message : String(error);
+    // The `instanceof Error` guard on the cause is load-bearing, not defensive
+    // noise: `cause` is `unknown`, and optional-chaining into `.message`
+    // instead would print a bare "undefined" as the reason a request failed
+    // (ahood-cli#129). Dropping the reason entirely is the better failure mode.
+    const cause = error instanceof Error && error.cause instanceof Error ? `: ${sanitizeForTerminal(error.cause.message)}` : "";
+    const message = sanitizeForTerminal(error instanceof Error ? error.message : error);
     throw new NetworkError(`Request to ${getApiUrl()}${path} failed (${message}${cause})`);
   }
 }
