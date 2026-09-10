@@ -1,10 +1,11 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   readLockfile,
+  withLock,
   writeLockfileEntry,
   removeLockfileEntry,
   writeLockfileEntryVerifyingChecksum,
@@ -95,6 +96,50 @@ describe("lockfile", () => {
     // the wait/retry loop for close to the full 5s timeout.
     expect(elapsed).toBeLessThan(2000);
     expect(existsSync(lockDir)).toBe(false);
+  });
+
+  describe("withLock timeout message", () => {
+    // Holds the lock with THIS process's pid so isLockStale can't reclaim it,
+    // then jumps Date.now past withLock's deadline on the first in-loop read,
+    // so the timeout branch is reached without spending its real 5s.
+    function timeoutMessageFor(path: string): string {
+      const lockDir = `${path}.lock`;
+      mkdirSync(lockDir, { recursive: true });
+      writeFileSync(join(lockDir, "pid"), String(process.pid));
+      const start = Date.now();
+      vi.spyOn(Date, "now").mockReturnValueOnce(start).mockReturnValue(start + 10_000);
+
+      let caught: unknown;
+      try {
+        withLock(path, () => {
+          throw new Error("the critical section must not run while the lock is held");
+        });
+      } catch (error) {
+        caught = error;
+      }
+      return (caught as Error).message;
+    }
+
+    it("names the guarded file when the lock being waited on guards .mcp.json (#123)", () => {
+      const mcpPath = join(dir, ".mcp.json");
+
+      const message = timeoutMessageFor(mcpPath);
+
+      expect(message).toBe(
+        `Timed out waiting for the lock on ${mcpPath} at ${mcpPath}.lock. If no other ahood process is running, delete that directory manually.`,
+      );
+      // The whole point of #123: a .mcp.json timeout must not send the user
+      // looking at "the lockfile".
+      expect(message).not.toMatch(/lockfile/i);
+    });
+
+    it("still reads correctly for a timeout on the real lockfile", () => {
+      const message = timeoutMessageFor(lockPath);
+
+      expect(message).toBe(
+        `Timed out waiting for the lock on ${lockPath} at ${lockPath}.lock. If no other ahood process is running, delete that directory manually.`,
+      );
+    });
   });
 
   describe("writeLockfileEntryVerifyingChecksum", () => {

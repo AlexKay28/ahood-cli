@@ -155,7 +155,7 @@ export function withLock<T>(path: string, fn: () => T): T {
       }
       if (Date.now() > deadline) {
         throw new Error(
-          `Timed out waiting for the lockfile lock at ${lockDir}. If no other ahood process is running, delete that directory manually.`,
+          `Timed out waiting for the lock on ${path} at ${lockDir}. If no other ahood process is running, delete that directory manually.`,
         );
       }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
