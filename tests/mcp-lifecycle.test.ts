@@ -273,6 +273,58 @@ describe("mcp lifecycle: add -> update -> remove", () => {
     expect(mcpConfig.mcpServers[SKILL].args).toEqual(["-y", "@example/weather-mcp@1.0.0"]);
   });
 
+  // ahood-cli#126: the same shape as the test above with one field flipped.
+  // The guard it exercises ignored `is_required`, so a newly-introduced
+  // OPTIONAL secret -- a token for a server that works unauthenticated and
+  // does more when given one -- failed the update outright, and `ahood skill
+  // update` with no arguments walks every locked entry, so that one artifact
+  // failed the whole batch.
+  it("updates without a newly-introduced OPTIONAL secret instead of failing the unattended run", async () => {
+    const output = await installV1ThenServeV2([
+      { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      { name: "WEATHER_ORG_TOKEN", description: "Org token", is_required: false, is_secret: true },
+    ]);
+    delete process.env.WEATHER_ORG_TOKEN;
+
+    await update([]);
+
+    expect(promptSecret).toHaveBeenCalledTimes(1); // still just the install's
+    expect(process.exitCode).toBe(0);
+
+    // v2 landed, with the required secret carried forward from disk and the
+    // optional one simply absent rather than written as an empty value.
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].args).toEqual(["-y", "@example/weather-mcp@2.0.0"]);
+    expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_API_KEY: "sk-live-lifecycle-secret" });
+    // ...and the lockfile pin moved with it, rather than being left behind.
+    expect(readLockfile(join(dir, ".claude", "skills.lock.json"))[`${OWNER}/${SKILL}`].version).toBe("2.0.0");
+
+    // One line naming what was skipped, so this is distinguishable from a
+    // token that was carried forward -- and the credential that WAS carried
+    // forward still never reaches the terminal.
+    expect(output.join("\n")).toContain("WEATHER_ORG_TOKEN is optional and is not set");
+    expect(output.join("\n")).not.toContain("sk-live-lifecycle-secret");
+  });
+
+  // ahood-cli#126: the carry-forward runs before the optional-skip, so a
+  // value already on disk must win over the skip -- an update that quietly
+  // dropped a credential the user had supplied would be a worse bug than the
+  // one being fixed, and the entry would no longer start the server.
+  it("still carries an optional secret forward from disk rather than skipping it", async () => {
+    await installV1ThenServeV2([
+      { name: "WEATHER_API_KEY", description: "API key", is_required: false, is_secret: true },
+    ]);
+    delete process.env.WEATHER_API_KEY;
+
+    await update([]);
+
+    expect(promptSecret).toHaveBeenCalledTimes(1); // still just the install's
+    expect(process.exitCode).toBe(0);
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].args).toEqual(["-y", "@example/weather-mcp@2.0.0"]);
+    expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_API_KEY: "sk-live-lifecycle-secret" });
+  });
+
   // ahood-cli#120 on the unattended path: a non-secret variable is resolved
   // from the shell only -- there is no prompt to fall back on and (unlike a
   // secret) nothing is carried forward from .mcp.json -- so a REQUIRED one

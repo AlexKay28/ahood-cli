@@ -552,10 +552,10 @@ export async function resolveMcpServerConfig(
     }
   }
 
-  // Required-ness needs no separate check on the secret path: every branch
-  // below either resolves a value or throws, so a required secret with
-  // nothing to fall back on already fails loudly (the non-TTY guard) or is
-  // supplied at the prompt (ahood-cli#120).
+  // Required-ness is consulted on the secret path only in the one branch
+  // where a secret can still end up unresolved: the unattended update guard
+  // below. Every other branch either resolves a value or prompts for one, so
+  // an `is_required` check there would change nothing (ahood-cli#120).
   const secretNames: string[] = [];
   for (const variable of envVars) {
     if (!variable.is_secret) continue;
@@ -582,6 +582,23 @@ export async function resolveMcpServerConfig(
       continue;
     }
     if (!allowNonTtyPrompt && !process.stdin.isTTY) {
+      // Optional means optional here too, exactly as it does on the
+      // non-secret pass above (ahood-cli#126). This guard used to fire for
+      // ANY unresolved secret, so a single artifact declaring an optional
+      // token that nothing had exported aborted the whole `ahood skill
+      // update` walk -- and said the variable "is required" while the
+      // manifest that declared it said otherwise. Announced rather than
+      // silent because skipping and carrying forward leave different entries
+      // in .mcp.json and nothing else distinguishes them; the notice is
+      // confined to this branch, so an interactive `add` (which still prompts
+      // for optional secrets) and a routine update whose credential carries
+      // forward both stay quiet.
+      if (!variable.is_required) {
+        console.warn(
+          `${sanitizeForTerminal(variable.name)} is optional and is not set -- updating ${sanitizeForTerminal(manifest.name)} without it.`,
+        );
+        continue;
+      }
       throw new Error(
         `${sanitizeForTerminal(variable.name)} is required by ${sanitizeForTerminal(manifest.name)} but is not set, and there is no terminal to prompt on -- export ${sanitizeForTerminal(variable.name)} and re-run.`,
       );

@@ -1116,6 +1116,65 @@ describe("add", () => {
     expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_API_KEY: "prompted-secret-value" });
   });
 
+  // ahood-cli#126: the guard above ignored `is_required`, so an OPTIONAL
+  // secret with nothing to resolve it from aborted an unattended update the
+  // same way a required one does. The two tests below are deliberately kept
+  // adjacent: they differ in exactly one field, so a change that starts
+  // skipping optional secrets cannot quietly start skipping required ones.
+  it("updates without an optional secret that has no value and no terminal to prompt on (ahood-cli#126)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_ORG_TOKEN", description: "Org token", is_required: false, is_secret: true },
+      ]),
+    });
+    delete process.env.WEATHER_ORG_TOKEN;
+
+    const { serverConfig } = await resolveMcpServerConfig(archive, { allowNonTtyPrompt: false });
+
+    // Optional means optional: the config is built without the key at all,
+    // rather than with an empty value -- and never via the masked prompt,
+    // which is what the non-TTY branch exists to keep unreachable.
+    expect(promptSecret).not.toHaveBeenCalled();
+    expect(serverConfig).toEqual({ command: "npx", args: ["-y", "@example/weather-mcp-server@1.4.0"] });
+    // The operator gets one line saying so, since a skipped optional secret
+    // and one carried forward from disk are otherwise indistinguishable.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("WEATHER_ORG_TOKEN is optional and is not set"));
+  });
+
+  it("still refuses, naming the variable, when the same unresolvable secret is required (ahood-cli#126 guard on ahood-cli#169)", async () => {
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_ORG_TOKEN", description: "Org token", is_required: true, is_secret: true },
+      ]),
+    });
+    delete process.env.WEATHER_ORG_TOKEN;
+
+    await expect(resolveMcpServerConfig(archive, { allowNonTtyPrompt: false })).rejects.toThrow(
+      /WEATHER_ORG_TOKEN is required by weather-server but is not set, and there is no terminal to prompt on/,
+    );
+    expect(promptSecret).not.toHaveBeenCalled();
+  });
+
+  it("still prompts for an optional secret when a human is present (ahood-cli#126 must not touch the add path)", async () => {
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_ORG_TOKEN", description: "Org token", is_required: false, is_secret: true },
+      ]),
+    });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    delete process.env.WEATHER_ORG_TOKEN;
+
+    // `add` leaves allowNonTtyPrompt at its default, so the non-TTY branch is
+    // never entered and optional-ness never suppresses the prompt.
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect(promptSecret).toHaveBeenCalledTimes(1);
+    expect(promptSecret).toHaveBeenCalledWith(expect.stringContaining("WEATHER_ORG_TOKEN"));
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_ORG_TOKEN: "prompted-secret-value" });
+  });
+
   it("refuses to install when .mcp.json's mcpServers is not a JSON object (e.g. an array)", async () => {
     const serverJson = JSON.stringify({
       name: "hosted-search",
