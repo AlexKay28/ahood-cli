@@ -386,9 +386,24 @@ function summarizeConflictingEntry(entry: unknown): string {
 // deciding whether it's safe to touch an mcp entry (ahood-cli#169).
 export function readMcpConfig(): Record<string, unknown> {
   if (!existsSync(MCP_CONFIG_PATH)) return { mcpServers: {} };
+  // Read and parse are separate try blocks so an I/O failure isn't reported
+  // as a syntax error: EACCES/EISDIR/EMFILE used to surface as "is not valid
+  // JSON" about a file that often parses fine, sending the user hunting for a
+  // syntax error when the fix is chmod or removing a stray directory
+  // (ahood-cli#117). No "-- fix or remove it" advice on this branch: the
+  // remedy depends on the errno, Node's own message already names the code
+  // and the path, and remove.ts deliberately quotes only the text before
+  // " -- " (ahood-cli#115).
+  let raw: string;
+  try {
+    raw = readFileSync(MCP_CONFIG_PATH, "utf-8");
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`${MCP_CONFIG_PATH} exists but could not be read: ${reason}`);
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8"));
+    parsed = JSON.parse(raw);
   } catch {
     throw new Error(`${MCP_CONFIG_PATH} exists but is not valid JSON -- fix or remove it before running this command.`);
   }

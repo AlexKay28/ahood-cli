@@ -230,7 +230,7 @@ describe("remove", () => {
     // Exactly one warning, and the readable-file wording -- a readable
     // .mcp.json must never reach the unreadable branch (ahood-cli#115).
     expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("could not be read"));
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("ahood could not check"));
     expect(logSpy).toHaveBeenCalledWith("Removed alice/weather");
   });
 
@@ -286,7 +286,7 @@ describe("remove", () => {
       await remove(["alice/weather", "--yes"]);
 
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/alice\/weather may still have an entry in .*\.mcp\.json.*could not be read/s),
+        expect.stringMatching(/alice\/weather may still have an entry in .*\.mcp\.json.*ahood could not check/s),
       );
       // Actionable for THIS case: "remove it manually" isn't possible until
       // the file parses again.

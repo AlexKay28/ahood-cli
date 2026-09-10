@@ -1,11 +1,11 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
-import { add, extractTarGz, downloadVerifiedArchive, hashMcpServerConfig, matchesMcpConfigHash } from "../src/commands/add.js";
+import { add, extractTarGz, downloadVerifiedArchive, hashMcpServerConfig, matchesMcpConfigHash, readMcpConfig } from "../src/commands/add.js";
 import { agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { ApiError } from "../src/http.js";
 import { writeLockfileEntry } from "../src/lockfile.js";
@@ -988,5 +988,67 @@ describe("matchesMcpConfigHash", () => {
     const tampered = { ...entry, env: { API_KEY: "sk-attacker" } };
     expect(matchesMcpConfigHash(tampered, hashMcpServerConfig(entry))).toBe(false);
     expect(matchesMcpConfigHash(tampered, legacyHash(entry))).toBe(false);
+  });
+});
+
+describe("readMcpConfig", () => {
+  let dir: string;
+  let originalCwd: string;
+
+  beforeEach(() => {
+    originalCwd = process.cwd();
+    dir = mkdtempSync(join(tmpdir(), "ahood-read-mcp-"));
+    process.chdir(dir);
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  // An I/O failure must not be reported as a syntax error: the file often
+  // parses fine, and "fix or remove it" sends the user hunting for a bad
+  // comma when the remedy is chmod or removing a stray directory
+  // (ahood-cli#117).
+  it("reports a permission failure as unreadable, not as invalid JSON", () => {
+    writeFileSync(join(dir, MCP_CONFIG_PATH), '{"mcpServers":{}}');
+    chmodSync(join(dir, MCP_CONFIG_PATH), 0o000);
+    // Root ignores the mode bits, so this case can't be provoked there.
+    if (process.getuid?.() === 0) return;
+
+    expect(() => readMcpConfig()).toThrow(/could not be read/);
+    expect(() => readMcpConfig()).not.toThrow(/is not valid JSON/);
+    expect(() => readMcpConfig()).toThrow(/EACCES/);
+  });
+
+  it("reports a directory in place of the file as unreadable, not as invalid JSON", () => {
+    mkdirSync(join(dir, MCP_CONFIG_PATH));
+
+    expect(() => readMcpConfig()).toThrow(/could not be read/);
+    expect(() => readMcpConfig()).not.toThrow(/is not valid JSON/);
+    expect(() => readMcpConfig()).toThrow(/EISDIR/);
+  });
+
+  // The I/O branch carries no "-- fix or remove it" advice, both because the
+  // remedy is errno-specific and because remove.ts quotes only the text
+  // before " -- " when it surfaces this message (ahood-cli#115).
+  it("attaches no generic fix-or-remove advice to the unreadable case", () => {
+    mkdirSync(join(dir, MCP_CONFIG_PATH));
+
+    expect(() => readMcpConfig()).not.toThrow(/fix or remove it/);
+  });
+
+  it("still reports genuinely malformed JSON as invalid JSON", () => {
+    writeFileSync(join(dir, MCP_CONFIG_PATH), '{"mcpServers": {},}');
+
+    expect(() => readMcpConfig()).toThrow(/is not valid JSON/);
+  });
+
+  it("still reports the two shape errors unchanged", () => {
+    writeFileSync(join(dir, MCP_CONFIG_PATH), "[]");
+    expect(() => readMcpConfig()).toThrow(/top level is not a JSON object/);
+
+    writeFileSync(join(dir, MCP_CONFIG_PATH), '{"mcpServers": []}');
+    expect(() => readMcpConfig()).toThrow(/"mcpServers" key exists but is not a JSON object/);
   });
 });

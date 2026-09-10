@@ -135,7 +135,7 @@ export async function remove(args: string[]): Promise<void> {
     const reason = diagnosis.endsWith(".") ? diagnosis : `${diagnosis}.`;
     console.warn(
       `WARNING: ${key} may still have an entry in ${MCP_CONFIG_PATH} (which may contain secrets you entered), ` +
-        `but that file could not be read: ${reason}` +
+        `but ahood could not check: ${reason}` +
         ` Fix the file, then delete the "${skill}" entry from mcpServers by hand.`,
     );
   } else if (mcpEntryPresent && !removedMcpEntry) {
