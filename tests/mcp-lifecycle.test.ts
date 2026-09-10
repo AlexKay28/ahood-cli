@@ -273,6 +273,50 @@ describe("mcp lifecycle: add -> update -> remove", () => {
     expect(mcpConfig.mcpServers[SKILL].args).toEqual(["-y", "@example/weather-mcp@1.0.0"]);
   });
 
+  // ahood-cli#120 on the unattended path: a non-secret variable is resolved
+  // from the shell only -- there is no prompt to fall back on and (unlike a
+  // secret) nothing is carried forward from .mcp.json -- so a REQUIRED one
+  // that the update environment doesn't export has to fail loudly rather
+  // than write an entry the server cannot start from.
+  it("fails an unattended update, naming the variable, when the new version requires a non-secret env var that is unset", async () => {
+    const output = await installV1ThenServeV2([
+      { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      { name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false },
+    ]);
+    delete process.env.WEATHER_REGION;
+
+    await update([]);
+
+    expect(promptSecret).toHaveBeenCalledTimes(1); // still just the install's
+    expect(output.join("\n")).toContain("WEATHER_REGION");
+    expect(process.exitCode).toBe(1);
+
+    // ...and .mcp.json still holds the working v1 entry.
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].args).toEqual(["-y", "@example/weather-mcp@1.0.0"]);
+  });
+
+  it("carries a non-secret env var from the shell into the updated entry, alongside the secret carried forward from disk (ahood-cli#120)", async () => {
+    await installV1ThenServeV2([
+      { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      { name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false },
+    ]);
+    process.env.WEATHER_REGION = "eu-west-1";
+
+    try {
+      await update([]);
+    } finally {
+      delete process.env.WEATHER_REGION;
+    }
+
+    expect(promptSecret).toHaveBeenCalledTimes(1); // still just the install's
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].env).toEqual({
+      WEATHER_API_KEY: "sk-live-lifecycle-secret",
+      WEATHER_REGION: "eu-west-1",
+    });
+  });
+
   // The env var stays ahead of the carried-forward value, so exporting it is
   // still the way to rotate a credential during an update.
   it("prefers an exported env var over the secret already on disk", async () => {

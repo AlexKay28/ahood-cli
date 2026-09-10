@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
-import { add, extractTarGz, downloadVerifiedArchive, hashMcpServerConfig, matchesMcpConfigHash, readMcpConfig } from "../src/commands/add.js";
+import { add, extractTarGz, downloadVerifiedArchive, hashMcpServerConfig, matchesMcpConfigHash, readMcpConfig, resolveMcpServerConfig } from "../src/commands/add.js";
 import { agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { ApiError } from "../src/http.js";
 import { writeLockfileEntry } from "../src/lockfile.js";
@@ -797,6 +797,193 @@ describe("add", () => {
     }
 
     expect(promptSecret).toHaveBeenCalledWith(expect.stringContaining("WEATHER_API_KEY"));
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_API_KEY: "prompted-secret-value" });
+  });
+
+  // ahood-cli#120: every `is_secret: false` variable used to be skipped
+  // outright, so a server declaring one installed into a config that could
+  // not start it -- with no diagnostic anywhere.
+  function mcpManifestWithEnvVars(envVars: Array<Record<string, unknown>>): string {
+    return JSON.stringify({
+      name: "weather-server",
+      description: "d",
+      packages: [
+        {
+          registry_type: "npm",
+          identifier: "@example/weather-mcp-server",
+          version: "1.4.0",
+          runtime_hint: "npx",
+          environment_variables: envVars,
+        },
+      ],
+    });
+  }
+
+  it("carries a non-secret env var set in the shell into the installed config, without prompting (ahood-cli#120)", async () => {
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false },
+      ]),
+    });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    process.env.WEATHER_REGION = "eu-west-1";
+
+    try {
+      await add([`${OWNER}/${SKILL}`]);
+    } finally {
+      delete process.env.WEATHER_REGION;
+    }
+
+    // A non-secret is configuration, not a credential -- it belongs in `env`,
+    // but it must never reach the masked prompt.
+    expect(promptSecret).not.toHaveBeenCalled();
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_REGION: "eu-west-1" });
+  });
+
+  it("installs cleanly when an optional non-secret env var is unset (ahood-cli#120)", async () => {
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_REGION", description: "Region", is_required: false, is_secret: false },
+      ]),
+    });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    delete process.env.WEATHER_REGION;
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect(promptSecret).not.toHaveBeenCalled();
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    // Optional means optional: no entry for it, and -- since nothing else
+    // resolved either -- no `env` key at all rather than an empty object.
+    expect(mcpConfig.mcpServers[SKILL]).toEqual({
+      command: "npx",
+      args: ["-y", "@example/weather-mcp-server@1.4.0"],
+    });
+  });
+
+  it("refuses to install, naming the variable, when a required non-secret env var is unset (ahood-cli#120)", async () => {
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+        { name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false },
+      ]),
+    });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    delete process.env.WEATHER_REGION;
+    delete process.env.WEATHER_API_KEY;
+
+    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/WEATHER_REGION is required by weather-server but is not set/);
+
+    // Refused BEFORE the masked prompt, matching assertNoCollision's own
+    // "don't cost the user a secret for an install that's refused anyway".
+    expect(promptSecret).not.toHaveBeenCalled();
+    expect(existsSync(join(dir, MCP_CONFIG_PATH))).toBe(false);
+  });
+
+  it("resolves two secrets and a non-secret with exactly one prompt (ahood-cli#120, the N>1 case ahood#169 left untested)", async () => {
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+        { name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false },
+        { name: "WEATHER_ORG_TOKEN", description: "Org token", is_required: true, is_secret: true },
+      ]),
+    });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    process.env.WEATHER_API_KEY = "already-set-key";
+    process.env.WEATHER_REGION = "eu-west-1";
+    delete process.env.WEATHER_ORG_TOKEN;
+
+    try {
+      await add([`${OWNER}/${SKILL}`]);
+    } finally {
+      delete process.env.WEATHER_API_KEY;
+      delete process.env.WEATHER_REGION;
+    }
+
+    // Only the one secret with no value anywhere is prompted for: not the
+    // secret already exported, and never the non-secret.
+    expect(promptSecret).toHaveBeenCalledTimes(1);
+    expect(promptSecret).toHaveBeenCalledWith(expect.stringContaining("WEATHER_ORG_TOKEN"));
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].env).toEqual({
+      WEATHER_API_KEY: "already-set-key",
+      WEATHER_REGION: "eu-west-1",
+      WEATHER_ORG_TOKEN: "prompted-secret-value",
+    });
+  });
+
+  it("does not claim .mcp.json holds secrets when the config's env is entirely non-secret (ahood-cli#120)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false },
+      ]),
+    });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    process.env.WEATHER_REGION = "eu-west-1";
+
+    try {
+      await add([`${OWNER}/${SKILL}`]);
+    } finally {
+      delete process.env.WEATHER_REGION;
+    }
+
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("secret values in plaintext"));
+  });
+
+  it("still warns about plaintext secrets when the config's env does hold one (unchanged)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false },
+        { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      ]),
+    });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    process.env.WEATHER_REGION = "eu-west-1";
+    delete process.env.WEATHER_API_KEY;
+
+    try {
+      await add([`${OWNER}/${SKILL}`]);
+    } finally {
+      delete process.env.WEATHER_REGION;
+    }
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("secret values in plaintext"));
+  });
+
+  it("refuses, naming the variable, when a required secret is unset and there is no terminal to prompt on (ahood-cli#120 composes with the #169 guard)", async () => {
+    // The secret half of "required and unresolvable fails loudly". It is the
+    // existing non-TTY guard that fires here, not a second required-ness
+    // check -- process.stdin.isTTY is already falsy under vitest, i.e. this
+    // is the unattended shape `ahood skill update` runs in.
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      ]),
+    });
+    delete process.env.WEATHER_API_KEY;
+
+    await expect(resolveMcpServerConfig(archive, { allowNonTtyPrompt: false })).rejects.toThrow(
+      /WEATHER_API_KEY is required by weather-server but is not set/,
+    );
+    expect(promptSecret).not.toHaveBeenCalled();
+  });
+
+  it("still supplies a required secret from the prompt when there is a terminal (ahood-cli#120)", async () => {
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      ]),
+    });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    delete process.env.WEATHER_API_KEY;
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect(promptSecret).toHaveBeenCalledTimes(1);
     const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
     expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_API_KEY: "prompted-secret-value" });
   });

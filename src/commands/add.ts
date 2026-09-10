@@ -440,8 +440,8 @@ function assertNoCollision(fileContents: Record<string, unknown>, owner: string,
   }
 }
 
-// Extracts server.json, validates its shape, and resolves every secret
-// environment variable it declares (prompting only for ones not already
+// Extracts server.json, validates its shape, and resolves every
+// environment variable it declares (prompting only for secrets not already
 // set in the shell) -- the part of installing an mcp entry that's identical
 // whether this is a fresh `add` or an `update` moving an existing pin
 // forward. Exported so update.ts's real mcp-update path (ahood-cli#169)
@@ -462,10 +462,15 @@ function assertNoCollision(fileContents: Record<string, unknown>, owner: string,
 // timeout -- against this CLI's "must never hang" rule -- or, worse, silently
 // bank the first line of unrelated piped input (`echo y | ahood skill
 // update`) as the credential and fingerprint over it.
+//
+// `secretNames` comes back alongside the config because `env` also carries
+// non-secret configuration now (ahood-cli#120): callers that need to know
+// whether what they just wrote to disk is actually a credential can no longer
+// infer it from `env` being non-empty.
 export async function resolveMcpServerConfig(
   buffer: Buffer,
   options: { existingEnv?: Record<string, string>; allowNonTtyPrompt?: boolean } = {},
-): Promise<{ manifest: ServerManifest; serverConfig: Record<string, unknown> }> {
+): Promise<{ manifest: ServerManifest; serverConfig: Record<string, unknown>; secretNames: string[] }> {
   const { existingEnv, allowNonTtyPrompt = true } = options;
   const content = await extractSingleFileContent(buffer, "server.json");
   const manifest = JSON.parse(content.toString("utf-8")) as ServerManifest;
@@ -480,9 +485,48 @@ export async function resolveMcpServerConfig(
   buildMcpServerConfig(manifest, {});
 
   const envVars = manifest.packages?.[0]?.environment_variables ?? [];
-  const secretEnv: Record<string, string> = {};
+  const env: Record<string, string> = {};
+
+  // Non-secret variables used to be skipped outright, so a server declaring
+  // one installed into a config that could not start it, with no diagnostic
+  // (ahood-cli#120). They're configuration, not credentials: read them from
+  // the shell, but never prompt -- a prompt here would reintroduce exactly
+  // the unattended-use hazard ahood-cli#169/0.8.2 removed from the update
+  // path, and there is nothing to mask anyway.
+  //
+  // Resolved in a first pass, ahead of any masked prompt below, for the same
+  // reason buildMcpServerConfig is dry-run above and assertNoCollision runs
+  // before installMcpEntry's resolve: an install that's going to be refused
+  // for a missing required variable must not first cost the user a secret
+  // prompt.
+  for (const variable of envVars) {
+    if (variable.is_secret) continue;
+    // Same truthiness rule as the secret branch below: an empty-string env
+    // var reads as "not set" rather than installing an empty value.
+    const fromEnv = process.env[variable.name];
+    if (fromEnv) {
+      env[variable.name] = fromEnv;
+      continue;
+    }
+    // `is_required` was parsed and validated but never consulted at install
+    // time (ahood-cli#120). Optional means optional -- install without it.
+    // Required means the server cannot start without it, so refusing beats
+    // writing a config that is broken in a way nothing reports.
+    if (variable.is_required) {
+      throw new Error(
+        `${sanitizeForTerminal(variable.name)} is required by ${sanitizeForTerminal(manifest.name)} but is not set -- export ${sanitizeForTerminal(variable.name)} and re-run.`,
+      );
+    }
+  }
+
+  // Required-ness needs no separate check on the secret path: every branch
+  // below either resolves a value or throws, so a required secret with
+  // nothing to fall back on already fails loudly (the non-TTY guard) or is
+  // supplied at the prompt (ahood-cli#120).
+  const secretNames: string[] = [];
   for (const variable of envVars) {
     if (!variable.is_secret) continue;
+    secretNames.push(variable.name);
     const fromEnv = process.env[variable.name];
     // Truthiness, not `!== undefined` -- matches credentials.ts's
     // resolveToken(), the precedent this feature was explicitly modeled on
@@ -490,15 +534,18 @@ export async function resolveMcpServerConfig(
     // specifically so an empty-string env var falls through to the real
     // source instead of silently installing an empty secret.
     if (fromEnv) {
-      secretEnv[variable.name] = fromEnv;
+      env[variable.name] = fromEnv;
       continue;
     }
     // Ordered after the env var deliberately: exporting the variable stays
     // the way to rotate a credential during an update, rather than being
-    // shadowed by the stale value already on disk.
+    // shadowed by the stale value already on disk. Deliberately not extended
+    // to non-secret variables (ahood-cli#120): carrying a value forward from
+    // .mcp.json is credential-preservation machinery, and a non-secret is
+    // plain configuration that the shell should stay authoritative for.
     const carriedForward = existingEnv?.[variable.name];
     if (carriedForward) {
-      secretEnv[variable.name] = carriedForward;
+      env[variable.name] = carriedForward;
       continue;
     }
     if (!allowNonTtyPrompt && !process.stdin.isTTY) {
@@ -506,13 +553,26 @@ export async function resolveMcpServerConfig(
         `${sanitizeForTerminal(variable.name)} is required by ${sanitizeForTerminal(manifest.name)} but is not set, and there is no terminal to prompt on -- export ${sanitizeForTerminal(variable.name)} and re-run.`,
       );
     }
-    secretEnv[variable.name] = await promptSecret(
+    env[variable.name] = await promptSecret(
       `${sanitizeForTerminal(variable.name)} (${sanitizeForTerminal(variable.description)}): `,
     );
   }
 
-  const serverConfig = buildMcpServerConfig(manifest, secretEnv);
-  return { manifest, serverConfig };
+  const serverConfig = buildMcpServerConfig(manifest, env);
+  return { manifest, serverConfig, secretNames };
+}
+
+// The plaintext-secret warning printed after a successful mcp install/update.
+// Still derived from the config that actually landed on disk -- the property
+// the old bare `serverConfig.env` check was chosen for -- but intersected with
+// the manifest's declared secrets, because `env` now also holds non-secret
+// configuration (ahood-cli#120) and would otherwise warn about credentials
+// for a server that declares none.
+function warnIfSecretsWereWritten(serverConfig: Record<string, unknown>, secretNames: string[]): void {
+  const env = serverConfig.env as Record<string, string> | undefined;
+  if (!env) return;
+  if (!secretNames.some((name) => Object.prototype.hasOwnProperty.call(env, name))) return;
+  console.warn(`WARNING: ${MCP_CONFIG_PATH} now contains one or more secret values in plaintext -- do not commit it to version control.`);
 }
 
 // Fingerprint of exactly what ahood wrote into .mcp.json's mcpServers.<skill>
@@ -591,7 +651,7 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
   // something that's going to be refused anyway" reasoning, just for the
   // collision check specifically rather than the manifest-shape check.
   assertNoCollision(readMcpConfig(), owner, skill);
-  const { serverConfig } = await resolveMcpServerConfig(buffer);
+  const { serverConfig, secretNames } = await resolveMcpServerConfig(buffer);
 
   // Read-modify-write under an advisory lock, mirroring lockfile.ts's own
   // writeLockfileEntry: .mcp.json sits right next to the lockfile and can
@@ -629,13 +689,8 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
   }
   console.log(`Installed ${owner}/${skill}@${meta.version} into ${MCP_CONFIG_PATH} as "${skill}"`);
   // Only the npm+npx package path ever carries secrets into `env` (headers
-  // on a remote entry are static per v1's scope, per buildMcpServerConfig) --
-  // checking the final serverConfig's own `env` key (rather than threading
-  // secretEnv out of resolveMcpServerConfig separately) means this warning
-  // can never drift from what was actually written to disk.
-  if (serverConfig.env && Object.keys(serverConfig.env as Record<string, string>).length > 0) {
-    console.warn(`WARNING: ${MCP_CONFIG_PATH} now contains one or more secret values in plaintext -- do not commit it to version control.`);
-  }
+  // on a remote entry are static per v1's scope, per buildMcpServerConfig).
+  warnIfSecretsWereWritten(serverConfig, secretNames);
 }
 
 // Re-runs the mcp install flow for an already-installed entry, moving its
@@ -689,7 +744,7 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
   // (no entry on disk at all) there's nothing to carry forward and a genuine
   // prompt is correct.
   const existingEnv = readMcpEntryEnv(existingOnDisk);
-  const { serverConfig } = await resolveMcpServerConfig(buffer, { existingEnv, allowNonTtyPrompt: false });
+  const { serverConfig, secretNames } = await resolveMcpServerConfig(buffer, { existingEnv, allowNonTtyPrompt: false });
 
   // Read-modify-write under an advisory lock, mirroring installMcpEntry's
   // own pattern. Re-checks the fingerprint here too (not just above) since
@@ -756,9 +811,7 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
   }
 
   console.log(`Updated ${key} to ${meta.version}`);
-  if (serverConfig.env && Object.keys(serverConfig.env as Record<string, string>).length > 0) {
-    console.warn(`WARNING: ${MCP_CONFIG_PATH} now contains one or more secret values in plaintext -- do not commit it to version control.`);
-  }
+  warnIfSecretsWereWritten(serverConfig, secretNames);
 }
 
 // Downloads a specific version's archive and verifies it against the
