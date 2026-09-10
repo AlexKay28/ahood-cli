@@ -826,6 +826,78 @@ describe("add", () => {
     expect(error!.message).not.toContain("\x1b");
   });
 
+  // ahood-cli#122: manifest.name above was sanitized on this very line, but
+  // the two pkg.* values quoted alongside it were not.
+  function unsupportedPackageManifest(pkg: Record<string, unknown>): string {
+    return JSON.stringify({
+      name: "weather-server",
+      description: "d",
+      packages: [{ identifier: "x", version: "1.0.0", ...pkg }],
+    });
+  }
+
+  it.each([
+    ["registry_type", { registry_type: "pypi\x1b[2K\x1b[1Gsudo password: ", runtime_hint: "uvx" }, "pypi", "uvx"],
+    ["runtime_hint", { registry_type: "pypi", runtime_hint: "uvx\x1b[2K\x1b[1Gsudo password: " }, "pypi", "uvx"],
+  ])(
+    "strips control characters from an unsupported %s before it reaches an error message (ahood-cli#122)",
+    async (_label, pkg, expectedRegistry, expectedHint) => {
+      const archive = await tarGz({ "server.json": unsupportedPackageManifest(pkg) });
+
+      const error = (await resolveMcpServerConfig(archive).then(
+        () => null,
+        (e) => e,
+      )) as Error | null;
+
+      expect(error).toBeInstanceOf(Error);
+      expect(error!.message).not.toContain("\x1b");
+      // Regression: sanitizing must not cost the message the diagnosis --
+      // the user still has to be able to read WHICH pair was unsupported.
+      expect(error!.message).toContain(`registry_type "${expectedRegistry}`);
+      expect(error!.message).toContain(`runtime_hint "${expectedHint}`);
+      expect(error!.message).toContain("only npm+npx is supported");
+    },
+  );
+
+  it("reports a non-string registry_type instead of a raw TypeError (ahood-cli#122)", async () => {
+    const archive = await tarGz({ "server.json": unsupportedPackageManifest({ registry_type: 3, runtime_hint: "npx" }) });
+
+    const error = (await resolveMcpServerConfig(archive).then(
+      () => null,
+      (e) => e,
+    )) as Error | null;
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error!.message).toContain("only npm+npx is supported");
+    expect(error!.message).not.toMatch(/is not a function/);
+  });
+
+  it("leaves the supported npm+npx package path unaffected (ahood-cli#122)", async () => {
+    const archive = await tarGz({
+      "server.json": unsupportedPackageManifest({ registry_type: "npm", runtime_hint: "npx" }),
+    });
+
+    const { serverConfig } = await resolveMcpServerConfig(archive);
+
+    expect(serverConfig).toEqual({ command: "npx", args: ["-y", "x@1.0.0"] });
+  });
+
+  it("strips control characters from a rejected tar entry name before it reaches an error message (ahood-cli#122)", async () => {
+    // Same third-party-archive trust level as server.json's fields, and this
+    // message quotes the entry name back verbatim.
+    const archive = await tarGz({ "../\x1b[2K\x1b[1Gescaped.txt": "pwned\n" });
+
+    const error = (await extractTarGz(archive, join(dir, "dest")).then(
+      () => null,
+      (e) => e,
+    )) as Error | null;
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error!.message).toMatch(/unsafe archive entry/);
+    expect(error!.message).not.toContain("\x1b");
+    expect(error!.message).toContain("escaped.txt");
+  });
+
   it("prompts for a secret when the env var is set to an empty string, matching resolveToken's precedent (finding #6)", async () => {
     const serverJson = JSON.stringify({
       name: "weather-server",

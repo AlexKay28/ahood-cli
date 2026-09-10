@@ -153,7 +153,7 @@ export async function extractTarGz(buffer: Buffer, destDir: string): Promise<voi
       const fullPath = resolve(destDir, entryPath);
       if (fullPath !== resolvedDest && !fullPath.startsWith(resolvedDest + sep)) {
         stream.resume();
-        reject(new Error(`Refusing to extract unsafe archive entry: ${header.name}`));
+        reject(new Error(`Refusing to extract unsafe archive entry: ${sanitizeForTerminal(header.name)}`));
         // next() is deliberately NOT called -- nothing further in this archive
         // should be processed. destroy() tears the paused extractor down
         // rather than leaving it stalled mid-entry.
@@ -277,17 +277,24 @@ export async function extractSingleFileContent(buffer: Buffer, entryName: string
   return found;
 }
 
-// Every manifest field used below reaches the terminal (an error message, or
+// Every manifest field used below -- and every tar entry name extractTarGz
+// quotes back in an error above -- reaches the terminal (an error message, or
 // -- worse -- the text printed immediately before a masked secret prompt)
-// but comes verbatim from a third-party-published server.json: server-side
+// but comes verbatim from a third-party-published archive: server-side
 // validation only checks these are strings, not that they're free of
 // control/escape characters. A malicious description could otherwise smuggle
 // a terminal control sequence (cursor movement, line-clear) that repaints
 // what the user sees at the exact moment they're about to type a credential.
 // Strips C0/C1 control characters (including ESC, \x1b) and caps length so a
 // single field can't also flood the terminal.
-function sanitizeForTerminal(text: string): string {
-  return text.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").slice(0, 200);
+//
+// Takes `unknown` rather than `string` because every caller's "string" is a
+// declared type over an unchecked `as ServerManifest` cast of downloaded JSON,
+// not a guarantee: calling .replace() directly on a `registry_type: 123` would
+// turn a diagnosable message into the raw TypeError ahood-cli#121 removed from
+// this same path (ahood-cli#122).
+function sanitizeForTerminal(text: unknown): string {
+  return String(text).replace(/[\x00-\x1f\x7f-\x9f]/g, " ").slice(0, 200);
 }
 
 type ServerManifestEnvVar = { name: string; description: string; is_required: boolean; is_secret: boolean };
@@ -318,7 +325,7 @@ function buildMcpServerConfig(manifest: ServerManifest, env: Record<string, stri
     const pkg = manifest.packages[0];
     if (pkg.registry_type !== "npm" || pkg.runtime_hint !== "npx") {
       throw new Error(
-        `${manifestName}'s server.json uses registry_type "${pkg.registry_type}"/runtime_hint "${pkg.runtime_hint}", which this version of ahood does not know how to install (only npm+npx is supported).`,
+        `${manifestName}'s server.json uses registry_type "${sanitizeForTerminal(pkg.registry_type)}"/runtime_hint "${sanitizeForTerminal(pkg.runtime_hint)}", which this version of ahood does not know how to install (only npm+npx is supported).`,
       );
     }
     const config: Record<string, unknown> = { command: "npx", args: ["-y", `${pkg.identifier}@${pkg.version}`] };
