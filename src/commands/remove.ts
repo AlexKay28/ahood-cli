@@ -2,7 +2,7 @@ import { existsSync, rmSync, unlinkSync } from "node:fs";
 import { confirm } from "../confirm.js";
 import { readLockfile, removeLockfileEntry, withLock, writeJsonFileAtomic } from "../lockfile.js";
 import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, MCP_CONFIG_PATH } from "../spec.js";
-import { readMcpConfig, hashMcpServerConfig } from "./add.js";
+import { readMcpConfig, matchesMcpConfigHash } from "./add.js";
 import { UsageError } from "../usage-error.js";
 
 const USAGE = "Usage: ahood skill remove <owner>/<skill> [--yes]";
@@ -70,9 +70,8 @@ export async function remove(args: string[]): Promise<void> {
     mcpEntryPresent = Object.prototype.hasOwnProperty.call(mcpServers, skill);
     if (mcpEntryPresent) {
       recordedHash = lockEntry?.mcp_config_hash;
-      const currentHash = hashMcpServerConfig(mcpServers[skill]);
       if (recordedHash !== undefined) {
-        mcpEntryModified = recordedHash !== currentHash;
+        mcpEntryModified = !matchesMcpConfigHash(mcpServers[skill], recordedHash);
       }
     }
   } catch (error) {
@@ -89,6 +88,10 @@ export async function remove(args: string[]): Promise<void> {
   }
 
   if (mcpEntryPresent && recordedHash !== undefined && !mcpEntryModified) {
+    // Rebound to a const so the `!== undefined` narrowing above survives into
+    // the closure below -- `recordedHash` is a `let`, which TypeScript widens
+    // back to `string | undefined` inside a callback.
+    const verifiedHash = recordedHash;
     try {
       // Re-check under lock rather than trusting the read above -- another
       // process could have changed or removed the entry in between,
@@ -105,7 +108,7 @@ export async function remove(args: string[]): Promise<void> {
         const freshServers = fresh.mcpServers as Record<string, unknown>;
         if (
           Object.prototype.hasOwnProperty.call(freshServers, skill) &&
-          hashMcpServerConfig(freshServers[skill]) === recordedHash
+          matchesMcpConfigHash(freshServers[skill], verifiedHash)
         ) {
           delete freshServers[skill];
           writeJsonFileAtomic(MCP_CONFIG_PATH, fresh);

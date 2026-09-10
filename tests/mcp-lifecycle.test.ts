@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -288,5 +288,119 @@ describe("mcp lifecycle: add -> update -> remove", () => {
     expect(promptSecret).toHaveBeenCalledTimes(1); // still just the install's
     const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
     expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_API_KEY: "sk-live-rotated" });
+  });
+
+  const SAME_SECRET_V2 = [{ name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true }];
+  const LOCKFILE = () => join(dir, ".claude", "skills.lock.json");
+  const legacyHash = (config: unknown) => createHash("sha256").update(JSON.stringify(config)).digest("hex");
+
+  function readMcpEntry(): Record<string, unknown> {
+    return JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).mcpServers[SKILL];
+  }
+
+  // Rewrites .mcp.json exactly the way `jq -S . .mcp.json | sponge` would:
+  // same values, keys sorted recursively. Nothing about the entry's meaning
+  // changes, so neither update nor remove has any business refusing after it.
+  function sortKeysOnDisk(): void {
+    const path = join(dir, MCP_CONFIG_PATH);
+    const sortDeep = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(sortDeep);
+      if (typeof value !== "object" || value === null) return value;
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+        out[key] = sortDeep((value as Record<string, unknown>)[key]);
+      }
+      return out;
+    };
+    writeFileSync(path, JSON.stringify(sortDeep(JSON.parse(readFileSync(path, "utf-8"))), null, 2));
+  }
+
+  function restampLockfileHash(hash: string): void {
+    const lockfile = JSON.parse(readFileSync(LOCKFILE(), "utf-8"));
+    lockfile[`${OWNER}/${SKILL}`].mcp_config_hash = hash;
+    writeFileSync(LOCKFILE(), JSON.stringify(lockfile, null, 2));
+  }
+
+  // ahood-cli#116: .mcp.json is shared with other MCP clients by design, so
+  // an external key-sorting reformat is routine and carries no semantic
+  // change -- it used to leave both commands permanently refusing, with the
+  // only documented recovery costing the user their secret.
+  it("updates normally after .mcp.json has been reformatted with sorted keys", async () => {
+    await installV1ThenServeV2(SAME_SECRET_V2);
+    const beforeReformat = readMcpEntry();
+    sortKeysOnDisk();
+    expect(Object.keys(readMcpEntry())).not.toEqual(Object.keys(beforeReformat)); // the reformat really did reorder
+    expect(readMcpEntry()).toEqual(beforeReformat); // ...without changing any value
+
+    await update([]);
+
+    expect(readMcpEntry()).toEqual({
+      command: "npx",
+      args: ["-y", "@example/weather-mcp@2.0.0"],
+      env: { WEATHER_API_KEY: "sk-live-lifecycle-secret" },
+    });
+    expect(readLockfile(LOCKFILE())[`${OWNER}/${SKILL}`].version).toBe("2.0.0");
+  });
+
+  it("removes the .mcp.json entry after it has been reformatted with sorted keys", async () => {
+    await installV1ThenServeV2(SAME_SECRET_V2);
+    sortKeysOnDisk();
+
+    await remove([`${OWNER}/${SKILL}`, "--yes"]);
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL]).toBeUndefined();
+  });
+
+  // Migration (ahood-cli#116): every mcp entry pinned by a pre-canonical CLI
+  // carries a raw JSON.stringify fingerprint, and the install shape's key
+  // order (command, args, env) is not sorted -- so its legacy hash genuinely
+  // differs from its canonical one. Such a pin must keep verifying, and the
+  // update's own lockfile write silently re-stamps it canonically.
+  it("accepts a legacy fingerprint on update and re-stamps the lockfile canonically", async () => {
+    await installV1ThenServeV2(SAME_SECRET_V2);
+    const installed = readMcpEntry();
+    expect(legacyHash(installed)).not.toBe(hashMcpServerConfig(installed));
+    restampLockfileHash(legacyHash(installed));
+
+    await update([]);
+
+    const updated = readMcpEntry();
+    expect(updated.args).toEqual(["-y", "@example/weather-mcp@2.0.0"]);
+    const pinnedHash = readLockfile(LOCKFILE())[`${OWNER}/${SKILL}`].mcp_config_hash;
+    expect(pinnedHash).toBe(hashMcpServerConfig(updated));
+    expect(pinnedHash).not.toBe(legacyHash(updated)); // canonical now, not the legacy format
+  });
+
+  it("accepts a legacy fingerprint on remove and deletes the entry", async () => {
+    await installV1ThenServeV2(SAME_SECRET_V2);
+    restampLockfileHash(legacyHash(readMcpEntry()));
+
+    await remove([`${OWNER}/${SKILL}`, "--yes"]);
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL]).toBeUndefined();
+  });
+
+  // The refusal itself is worth keeping: canonicalization must not weaken it
+  // into uselessness, so a changed VALUE (not just key order) still stops both
+  // commands dead under either fingerprint format.
+  it("still refuses to update or remove an entry whose value was actually changed", async () => {
+    const output = await installV1ThenServeV2(SAME_SECRET_V2);
+    const path = join(dir, MCP_CONFIG_PATH);
+    const fileContents = JSON.parse(readFileSync(path, "utf-8"));
+    fileContents.mcpServers[SKILL].args = ["-y", "@attacker/weather-mcp@1.0.0"];
+    writeFileSync(path, JSON.stringify(fileContents, null, 2));
+
+    await update([]);
+
+    expect(output.join("\n")).toMatch(/appears to have been modified since install/);
+    expect(process.exitCode).toBe(1);
+    expect(readMcpEntry().args).toEqual(["-y", "@attacker/weather-mcp@1.0.0"]); // untouched
+
+    await remove([`${OWNER}/${SKILL}`, "--yes"]);
+
+    expect(output.join("\n")).toMatch(/still has an entry in .* -- it appears to have been modified since install/);
+    expect(readMcpEntry().args).toEqual(["-y", "@attacker/weather-mcp@1.0.0"]); // still untouched
   });
 });

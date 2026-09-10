@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
-import { add, extractTarGz, downloadVerifiedArchive } from "../src/commands/add.js";
+import { add, extractTarGz, downloadVerifiedArchive, hashMcpServerConfig, matchesMcpConfigHash } from "../src/commands/add.js";
 import { agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { ApiError } from "../src/http.js";
 import { writeLockfileEntry } from "../src/lockfile.js";
@@ -926,4 +926,67 @@ describe("add", () => {
     expect(message).not.toContain("nginx");
   });
 
+});
+
+// .mcp.json is shared with other MCP clients by design, so an external
+// reformat (jq -S, a format-on-save plugin, another client's serializer) can
+// reorder keys without changing what the entry means -- and used to brick
+// both `update` and `remove` for that entry permanently (ahood-cli#116).
+describe("hashMcpServerConfig", () => {
+  it("is insensitive to top-level key order", () => {
+    const a = { command: "npx", args: ["-y", "@example/mcp@1.0.0"], env: { API_KEY: "sk-live" } };
+    const b = { env: { API_KEY: "sk-live" }, command: "npx", args: ["-y", "@example/mcp@1.0.0"] };
+
+    expect(hashMcpServerConfig(a)).toBe(hashMcpServerConfig(b));
+  });
+
+  it("is insensitive to key order inside a nested object", () => {
+    const a = { url: "https://mcp.example.com/sse", headers: { Authorization: "Bearer t", "X-Trace": "1" } };
+    const b = { headers: { "X-Trace": "1", Authorization: "Bearer t" }, url: "https://mcp.example.com/sse" };
+
+    expect(hashMcpServerConfig(a)).toBe(hashMcpServerConfig(b));
+  });
+
+  it("keeps arrays order-sensitive -- args is order-significant", () => {
+    expect(hashMcpServerConfig({ args: ["-y", "@example/mcp"] })).not.toBe(
+      hashMcpServerConfig({ args: ["@example/mcp", "-y"] }),
+    );
+  });
+
+  it("still distinguishes differing values, including inside nested objects and arrays", () => {
+    const base = { command: "npx", args: ["-y", "@example/mcp@1.0.0"], env: { API_KEY: "sk-live" } };
+
+    expect(hashMcpServerConfig(base)).not.toBe(hashMcpServerConfig({ ...base, command: "node" }));
+    expect(hashMcpServerConfig(base)).not.toBe(hashMcpServerConfig({ ...base, args: ["-y", "@example/mcp@2.0.0"] }));
+    expect(hashMcpServerConfig(base)).not.toBe(hashMcpServerConfig({ ...base, env: { API_KEY: "sk-other" } }));
+    expect(hashMcpServerConfig(base)).not.toBe(hashMcpServerConfig({ ...base, env: { OTHER_KEY: "sk-live" } }));
+  });
+});
+
+describe("matchesMcpConfigHash", () => {
+  const legacyHash = (config: unknown) => createHash("sha256").update(JSON.stringify(config)).digest("hex");
+  const entry = { command: "npx", args: ["-y", "@example/mcp@1.0.0"], env: { API_KEY: "sk-live" } };
+
+  it("accepts the canonical fingerprint", () => {
+    expect(matchesMcpConfigHash(entry, hashMcpServerConfig(entry))).toBe(true);
+  });
+
+  it("accepts a legacy JSON.stringify fingerprint written by an older CLI (ahood-cli#116 migration)", () => {
+    // Guards the migration itself: this entry's key order is NOT sorted, so
+    // its legacy hash genuinely differs from its canonical one -- a pin from
+    // before the switch must keep verifying rather than reading as tampering.
+    expect(legacyHash(entry)).not.toBe(hashMcpServerConfig(entry));
+    expect(matchesMcpConfigHash(entry, legacyHash(entry))).toBe(true);
+  });
+
+  it("accepts a legacy fingerprint against a reordered-on-disk entry only when the reorder is the canonical one", () => {
+    const reordered = { args: entry.args, command: entry.command, env: entry.env };
+    expect(matchesMcpConfigHash(reordered, hashMcpServerConfig(entry))).toBe(true);
+  });
+
+  it("still rejects a genuinely changed value under either fingerprint format", () => {
+    const tampered = { ...entry, env: { API_KEY: "sk-attacker" } };
+    expect(matchesMcpConfigHash(tampered, hashMcpServerConfig(entry))).toBe(false);
+    expect(matchesMcpConfigHash(tampered, legacyHash(entry))).toBe(false);
+  });
 });

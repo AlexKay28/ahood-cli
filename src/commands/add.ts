@@ -507,12 +507,50 @@ export async function resolveMcpServerConfig(
 // hand-edited it" -- without this, a real (not just warned-about) removal
 // or update risks silently discarding an intentional local edit, the same
 // class of risk assertNoCollision below exists to prevent on a *fresh*
-// install. JSON.stringify's key order matches insertion order for a plain
-// object, and JSON.parse's key order matches source-text order -- so this
-// is stable between the object this process just built and the same object
-// read back from disk later, as long as nothing reorders keys in between.
+// install. Hashes a canonical (recursively key-sorted) serialization rather
+// than raw JSON.stringify output, because .mcp.json is shared with other MCP
+// clients by design (see CLAUDE.md) and so gets rewritten by things that are
+// not ahood -- `jq -S`, a format-on-save plugin, another client's serializer,
+// a user retyping the block -- any of which can reorder keys without changing
+// what the entry means. Fingerprinting insertion order turned every such
+// reformat into a permanent refusal from both `update` and `remove`,
+// recoverable only by hand-deleting the entry and re-entering its secret
+// (ahood-cli#116). Arrays keep their order: `args` is order-significant.
 export function hashMcpServerConfig(config: unknown): string {
+  return createHash("sha256").update(JSON.stringify(canonicalizeForHash(config))).digest("hex");
+}
+
+function canonicalizeForHash(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeForHash);
+  if (typeof value !== "object" || value === null) return value;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    sorted[key] = canonicalizeForHash((value as Record<string, unknown>)[key]);
+  }
+  return sorted;
+}
+
+// LEGACY (ahood-cli#116): the pre-canonicalization fingerprint format. Every
+// mcp entry pinned by an older CLI carries one of these, so changing the
+// algorithm without a fallback would invalidate all of them at once --
+// inflicting the exact permanent-refusal failure #116 is about on every
+// existing user, on upgrade. Only ever consulted as a second chance after the
+// canonical hash misses; drop this function and matchesMcpConfigHash's
+// fallback branch a few releases on.
+function hashMcpServerConfigLegacy(config: unknown): string {
   return createHash("sha256").update(JSON.stringify(config)).digest("hex");
+}
+
+// The single "is this on-disk entry still what we recorded?" decision, shared
+// by every comparison site (updateMcpEntry's pre-check and its re-check under
+// lock, remove's read and its re-check under lock). Centralized deliberately:
+// a legacy fallback open-coded at four call sites is a fallback that ends up
+// at three of them. A legacy match needs no separate signal to callers --
+// update rewrites the pin with a canonical hash as part of its normal
+// lockfile write, so such an entry self-heals silently on the next version
+// bump, and remove is deleting the entry anyway.
+export function matchesMcpConfigHash(entry: unknown, recordedHash: string): boolean {
+  return hashMcpServerConfig(entry) === recordedHash || hashMcpServerConfigLegacy(entry) === recordedHash;
 }
 
 // Pulls the `env` map out of an .mcp.json entry read off disk, so an update
@@ -622,7 +660,7 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
         `Cannot verify ${key}'s .mcp.json entry matches what ahood last installed (no recorded fingerprint) -- delete the "${skill}" entry from mcpServers in .mcp.json by hand, then run \`ahood skill add ${key}\` to reinstall and enable automatic updates going forward.`,
       );
     }
-    if (hashMcpServerConfig(existingOnDisk) !== recordedHash) {
+    if (!matchesMcpConfigHash(existingOnDisk, recordedHash)) {
       throw new Error(
         `${key}'s .mcp.json entry appears to have been modified since install -- refusing to overwrite it. Delete the "${skill}" entry from mcpServers in .mcp.json by hand, then run \`ahood skill add ${key}\` to reinstall.`,
       );
@@ -648,7 +686,7 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
     const fresh = readMcpConfig();
     const freshServers = fresh.mcpServers as Record<string, unknown>;
     const freshExisting = Object.prototype.hasOwnProperty.call(freshServers, skill) ? freshServers[skill] : undefined;
-    if (freshExisting !== undefined && (recordedHash === undefined || hashMcpServerConfig(freshExisting) !== recordedHash)) {
+    if (freshExisting !== undefined && (recordedHash === undefined || !matchesMcpConfigHash(freshExisting, recordedHash))) {
       throw new Error(`${key}'s .mcp.json entry changed while updating -- refusing to overwrite it. Re-run \`ahood skill update ${key}\` if this was unexpected.`);
     }
     previousOnDisk = freshExisting;
