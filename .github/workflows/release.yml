@@ -13,7 +13,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Refuses to publish a tag that doesn't match package.json -- a tag
       # pushed against the wrong commit, or a manual mistake, must not
