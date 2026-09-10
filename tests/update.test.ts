@@ -48,11 +48,6 @@ describe("update", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    // Without this, console.log/console.error spies from an earlier test in
-    // this file are never un-wrapped -- vi.spyOn() on an already-spied method
-    // just stacks another layer, so a later test's mock.calls silently
-    // includes output from tests that ran before it.
-    vi.restoreAllMocks();
     process.chdir(originalCwd);
     rmSync(dir, { recursive: true, force: true });
     process.env.HOME = originalHome;

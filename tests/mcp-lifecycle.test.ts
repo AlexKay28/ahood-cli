@@ -60,12 +60,10 @@ describe("mcp lifecycle: add -> update -> remove", () => {
     delete process.env.AHOOD_TOKEN;
     delete process.env.WEATHER_API_KEY;
     process.exitCode = 0;
-    vi.mocked(promptSecret).mockClear();
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    vi.restoreAllMocks();
     process.chdir(originalCwd);
     rmSync(dir, { recursive: true, force: true });
     process.env.HOME = originalHome;

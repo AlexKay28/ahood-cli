@@ -661,7 +661,6 @@ describe("publish", () => {
       stubApi(capture);
       vi.spyOn(console, "log").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
 
       await publish([`alice/demo@1.0.0`, "--path", dir]);
 
@@ -674,13 +673,20 @@ describe("publish", () => {
       stubApi(capture);
       vi.spyOn(console, "log").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       await publish([`alice/demo@1.0.0`, "--path", dir]);
 
       expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/no \(or an empty\) description/));
-      expect(errorSpy).not.toHaveBeenCalled();
+      // Asserts this warning didn't ALSO go to console.error -- not that
+      // console.error was silent, which it only is when something earlier in
+      // the process already burned getApiUrl's warn-once flag for the
+      // AHOOD_API_URL override notice (config.ts's `warnedAboutOverride`).
+      // That made this test pass on run order alone: it fails under
+      // `--sequence.shuffle --sequence.seed=1`, where it runs first and
+      // absorbs the notice itself. Same trap mcp-lifecycle.test.ts already
+      // documents for its own console capture (ahood-cli#124).
+      expect(errorSpy).not.toHaveBeenCalledWith(expect.stringMatching(/description/i));
     });
 
     it("warns when the description key is present but empty", async () => {
@@ -689,7 +695,6 @@ describe("publish", () => {
       stubApi(capture);
       vi.spyOn(console, "log").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
 
       await publish([`alice/demo@1.0.0`, "--path", dir]);
 
@@ -702,7 +707,6 @@ describe("publish", () => {
       stubApi(capture);
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
 
       await publish([`alice/demo@1.0.0`, "--path", dir]);
 
@@ -717,7 +721,6 @@ describe("publish", () => {
       stubApi(capture);
       vi.spyOn(console, "log").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
 
       await publish([`alice/demo@1.0.0`, "--path", dir]);
 
@@ -731,7 +734,6 @@ describe("publish", () => {
       stubApi(capture);
       vi.spyOn(console, "log").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
 
       await publish([`alice/demo@1.0.0`, "--path", dir]);
 
@@ -744,7 +746,6 @@ describe("publish", () => {
       stubApi(capture);
       vi.spyOn(console, "log").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
 
       await publish([`alice/demo@1.0.0`, "--path", dir]);
 
@@ -757,7 +758,6 @@ describe("publish", () => {
       stubApi(capture);
       vi.spyOn(console, "log").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
 
       await publish([`alice/demo@1.0.0`, "--path", dir]);
 
@@ -773,7 +773,6 @@ describe("publish", () => {
       stubApi(capture);
       vi.spyOn(console, "log").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
 
       await publish([`alice/demo@1.0.0`, "--path", dir]);
 
@@ -789,7 +788,6 @@ describe("publish", () => {
       stubApi(capture);
       vi.spyOn(console, "log").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
 
       await publish([`alice/demo@1.0.0`, "--path", dir]);
 
@@ -803,7 +801,6 @@ describe("publish", () => {
       stubApiFirstPublish(captures);
       vi.spyOn(console, "log").mockImplementation(() => {});
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
 
       await publish(["alice/demo@1.0.0", "--path", dir, "--kind", "agent", "--name", "N"]);
 
@@ -829,9 +826,7 @@ describe("publish", () => {
       const capture: { body?: Uint8Array } = {};
       stubApi(capture);
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      logSpy.mockClear();
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      warnSpy.mockClear(); // spyOn on an already-spied console.warn reuses the same mock across tests in this file (mirrors logSpy.mockClear() above)
 
       await publish([`alice/demo@1.0.0`, "--path", dir, "--json"]);
 
@@ -852,7 +847,6 @@ describe("publish", () => {
       const capture: { body?: Uint8Array } = {};
       stubApi(capture);
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      logSpy.mockClear(); // spyOn on an already-spied console.log reuses the same mock (no restore between tests in this file), so clear any calls accumulated by earlier tests.
 
       await publish([`alice/demo@1.0.0`, "--path", dir, "--json"]);
 
@@ -870,7 +864,6 @@ describe("publish", () => {
       const captures: { uploadBody?: Uint8Array; createBody?: unknown } = {};
       stubApiFirstPublish(captures);
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      logSpy.mockClear();
 
       await publish(["alice/demo@1.0.0", "--path", dir, "--name", "Demo Skill", "--json"]);
 
@@ -910,7 +903,6 @@ describe("publish", () => {
         }),
       );
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      logSpy.mockClear();
 
       await expect(publish([`alice/demo@1.0.0`, "--path", dir, "--json"])).rejects.toThrow(
         /Publish failed: Archive could not be extracted/,
@@ -927,7 +919,6 @@ describe("publish", () => {
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      logSpy.mockClear();
 
       await expect(
         publish([dir, "--owner", "alice", "--slug", "demo", "--version", "not-semver", "--json"]),

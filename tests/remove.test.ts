@@ -50,7 +50,6 @@ describe("remove", () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
     process.chdir(originalCwd);
     rmSync(dir, { recursive: true, force: true });
   });

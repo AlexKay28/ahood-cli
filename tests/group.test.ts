@@ -77,7 +77,6 @@ describe("group commands", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    vi.restoreAllMocks();
     if (originalApiUrl === undefined) delete process.env.AHOOD_API_URL;
     else process.env.AHOOD_API_URL = originalApiUrl;
     if (originalToken === undefined) delete process.env.AHOOD_TOKEN;

@@ -123,12 +123,6 @@ describe("add", () => {
     process.env.HOME = dir;
     process.env.AHOOD_API_URL = API_URL;
     delete process.env.AHOOD_TOKEN;
-    // Cleared here (not just per-test) so a `.not.toHaveBeenCalled()`
-    // assertion in one test can't spuriously fail because an EARLIER test
-    // already called the same module-level mock -- vi.mock's factory
-    // creates promptSecret's vi.fn() once for the whole file, and nothing
-    // else resets its call history between tests.
-    vi.mocked(promptSecret).mockClear();
   });
 
   afterEach(() => {
