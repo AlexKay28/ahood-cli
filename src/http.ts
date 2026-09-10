@@ -1,5 +1,6 @@
 import { getApiUrl } from "./config.js";
 import { resolveToken } from "./credentials.js";
+import { sanitizeForTerminal } from "./terminal-safe.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
 
 export class ApiError extends Error {
@@ -45,24 +46,8 @@ const MAX_ERROR_MESSAGE_LENGTH = 500;
 // sits on every apiJson call in the CLI -- including `add`, which prints
 // server-sourced text immediately before a masked secret prompt, the exact
 // moment a cursor-movement/line-clear sequence can repaint what the user sees.
+// See src/terminal-safe.ts for what that substitution does and why.
 //
-// Control characters are replaced with a space rather than deleted so that
-// stripping can't silently glue two tokens into one misleading word.
-//
-// Newlines (\x0a) and carriage returns (\x0d) are inside this range and are
-// deliberately flattened too: a forged prompt line ("...\n\nEnter your token:")
-// needs no escape sequence at all, just a newline, so preserving them would
-// leave the spoofing half of the threat model open while closing the escape
-// half. The readability cost is small because anything reaching this branch is
-// already capped at MAX_ERROR_MESSAGE_LENGTH -- a few lines' worth of text, not
-// a stack trace.
-//
-// Known duplication: this is the same substitution as `sanitizeForTerminal` in
-// src/commands/add.ts (ahood-cli#122). It is copied rather than shared on
-// purpose -- promoting a shared helper means editing add.ts's call sites, which
-// is follow-up refactor work kept out of this security fix; see ahood-cli#127.
-const CONTROL_CHARACTERS = /[\x00-\x1f\x7f-\x9f]/g;
-
 // Defense in depth (ahood-cli#31): the API is expected to never forward a raw
 // upstream error body (an HTML block page from a proxy/WAF, a giant stack
 // trace, etc.) into `error`, but this CLI shouldn't trust that unconditionally
@@ -71,7 +56,10 @@ const CONTROL_CHARACTERS = /[\x00-\x1f\x7f-\x9f]/g;
 // a normal error string is replaced with a short, safe summary instead.
 export function sanitizeErrorMessage(message: string): string {
   const looksLikeHtml = /<!DOCTYPE|<html[\s>]/i.test(message);
-  if (!looksLikeHtml && message.length <= MAX_ERROR_MESSAGE_LENGTH) return message.replace(CONTROL_CHARACTERS, " ");
+  // The length argument is belt-and-braces, not behavior: this branch already
+  // guarantees `message.length <= MAX_ERROR_MESSAGE_LENGTH`, and an oversized
+  // body takes the generic-summary path below instead.
+  if (!looksLikeHtml && message.length <= MAX_ERROR_MESSAGE_LENGTH) return sanitizeForTerminal(message, MAX_ERROR_MESSAGE_LENGTH);
   // No preview of the raw content: an HTML-shaped body's first bytes are
   // exactly where infra details (e.g. a Cloudflare block page's title, Ray
   // ID) live, so a "helpful" excerpt would leak the same details this
