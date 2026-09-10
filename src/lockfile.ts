@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 // mcp_config_hash is only ever set for a kind='mcp' entry (add.ts's
@@ -36,8 +36,46 @@ export function writeJsonFileAtomic(path: string, data: unknown): void {
   // truncated file on disk -- a reader always sees either the old or the new
   // complete content, never a partial one.
   const tmpPath = `${path}.tmp-${process.pid}-${process.hrtime.bigint()}`;
-  writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n");
-  renameSync(tmpPath, path);
+  // The mode the destination must end up with. Preserving an existing file's
+  // permissions matters because .mcp.json is a project-shared config other MCP
+  // clients read: whether it should be 0644 or tighter is its own decision
+  // (ahood#169), not something this write path gets to change as a side effect
+  // of the 0600 temp file below (ahood-cli#119). With no destination yet there
+  // is nothing to preserve, so fall back to what a plain writeFileSync would
+  // have produced -- 0666 masked by the process umask.
+  let finalMode: number;
+  try {
+    finalMode = statSync(path).mode & 0o777;
+  } catch {
+    finalMode = 0o666 & ~process.umask();
+  }
+  try {
+    // 0600 from the moment of creation: for .mcp.json this temp file holds
+    // resolved MCP server secrets, and it must never be world-readable, not
+    // even for the instant before the rename (ahood-cli#119).
+    writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+    renameSync(tmpPath, path);
+    try {
+      chmodSync(path, finalMode);
+    } catch {
+      // Best-effort, and deliberately after the rename rather than on the temp
+      // file: widening the temp file first would reopen the world-readable
+      // window this fix closes. A failure here leaves the file MORE restrictive
+      // than intended, never less, so it isn't worth failing a write that has
+      // already landed -- the caller would roll back a successful install.
+    }
+  } finally {
+    // The rename consumes the temp file on success; this only bites when the
+    // write or the rename threw, where an orphaned *.tmp-* copy of .mcp.json
+    // would strand plaintext secrets under a name no .gitignore rule matches
+    // (ahood-cli#119). Swallowed because it must never mask the real reason
+    // the write failed -- that error is what the caller has to report.
+    try {
+      rmSync(tmpPath, { force: true });
+    } catch {
+      // best effort, see comment above
+    }
+  }
 }
 
 function writeLockfile(path: string, lockfile: Lockfile): void {
