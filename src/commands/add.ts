@@ -14,6 +14,7 @@ import {
   type LockEntry,
 } from "../lockfile.js";
 import { promptSecret } from "../secret-prompt.js";
+import { sanitizeForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
 
 const USAGE = "Usage: ahood skill add <owner>/<skill>[@version]";
@@ -282,21 +283,9 @@ export async function extractSingleFileContent(buffer: Buffer, entryName: string
 // -- worse -- the text printed immediately before a masked secret prompt)
 // but comes verbatim from a third-party-published archive: server-side
 // validation only checks these are strings, not that they're free of
-// control/escape characters. A malicious description could otherwise smuggle
-// a terminal control sequence (cursor movement, line-clear) that repaints
-// what the user sees at the exact moment they're about to type a credential.
-// Strips C0/C1 control characters (including ESC, \x1b) and caps length so a
-// single field can't also flood the terminal.
-//
-// Takes `unknown` rather than `string` because every caller's "string" is a
-// declared type over an unchecked `as ServerManifest` cast of downloaded JSON,
-// not a guarantee: calling .replace() directly on a `registry_type: 123` would
-// turn a diagnosable message into the raw TypeError ahood-cli#121 removed from
-// this same path (ahood-cli#122).
-function sanitizeForTerminal(text: unknown): string {
-  return String(text).replace(/[\x00-\x1f\x7f-\x9f]/g, " ").slice(0, 200);
-}
-
+// control/escape characters, and the `as ServerManifest` cast below doesn't
+// even guarantee they're strings. Hence sanitizeForTerminal on every one of
+// them; see src/terminal-safe.ts (ahood-cli#122).
 type ServerManifestEnvVar = { name: string; description: string; is_required: boolean; is_secret: boolean };
 type ServerManifestPackage = {
   registry_type: string;
