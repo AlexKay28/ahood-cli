@@ -1,5 +1,15 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 // mcp_config_hash is only ever set for a kind='mcp' entry (add.ts's
 // installMcpEntry) -- a fingerprint of exactly what was written into
@@ -23,6 +33,59 @@ export function readLockfile(path: string): Lockfile {
     throw new Error(
       `Lockfile at ${path} is corrupted and could not be parsed as JSON. Fix or delete it before continuing.`,
     );
+  }
+}
+
+// Signal 0 doesn't deliver anything, it just probes whether the process could
+// be signaled. ESRCH means it's gone; EPERM means it's alive but owned by
+// someone else, which is conservatively treated as still alive since that
+// can't be disproven. Shared by the stale-lock reclaim (ahood-cli#100) and the
+// stale-temp sweep (ahood-cli#125) so both answer "is the process that left
+// this behind still around?" the same way, rather than growing two divergent
+// staleness rules.
+function isPidDead(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+// Exactly what the temp name below produces: a decimal pid and a decimal
+// hrtime, nothing else. Anything the user merely happened to name
+// `<basename>.tmp-something` fails this and is left alone -- deleting a file
+// that was never ours is far worse than leaving a stale temp file behind
+// (ahood-cli#125).
+const TEMP_SUFFIX_RE = /^([1-9][0-9]{0,9})-[0-9]{1,25}$/;
+
+// The finally in writeJsonFileAtomic can't run on SIGKILL, an OOM kill or
+// power loss, so a temp file can still be orphaned in the window between the
+// write and the rename -- and for .mcp.json that orphan holds resolved MCP
+// server secrets under a name nothing else ever removes (ahood-cli#125). The
+// next successful write to the same destination collects them.
+//
+// withLock serializes the writers this CLI itself starts, but a temp file is
+// only provably collectable once the process that created it is gone, so the
+// pid embedded in the name is checked rather than trusting the lock alone. A
+// pid recycled since the last boot can only make a dead writer look alive,
+// which just defers the cleanup; it can never make a live writer look dead, so
+// this never deletes a file still being written.
+function sweepStaleTempFiles(path: string, ownTempName: string): void {
+  const dir = dirname(path);
+  const prefix = `${basename(path)}.tmp-`;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    if (entry.name === ownTempName) continue;
+    if (!entry.name.startsWith(prefix)) continue;
+    const match = TEMP_SUFFIX_RE.exec(entry.name.slice(prefix.length));
+    if (!match) continue;
+    if (!isPidDead(Number(match[1]))) continue;
+    try {
+      rmSync(join(dir, entry.name), { force: true });
+    } catch {
+      // One unremovable orphan must not stop the rest of the sweep.
+    }
   }
 }
 
@@ -64,6 +127,14 @@ export function writeJsonFileAtomic(path: string, data: unknown): void {
       // than intended, never less, so it isn't worth failing a write that has
       // already landed -- the caller would roll back a successful install.
     }
+    try {
+      sweepStaleTempFiles(path, basename(tmpPath));
+    } catch {
+      // Swallowed for the same reason as the chmod above and #119's unlink:
+      // the rename has already landed, so failing to tidy up somebody else's
+      // abandoned temp file must never turn a successful write into an error
+      // the caller rolls back (ahood-cli#125).
+    }
   } finally {
     // The rename consumes the temp file on success; this only bites when the
     // write or the rename threw, where an orphaned *.tmp-* copy of .mcp.json
@@ -83,15 +154,12 @@ function writeLockfile(path: string, lockfile: Lockfile): void {
 }
 
 // A lock directory is stale if the PID recorded inside it (written by the
-// acquirer below) belongs to a process that's no longer running -- signal 0
-// doesn't actually deliver a signal, just probes whether the process could
-// be signaled. ESRCH means it's dead; EPERM means it's alive but owned by
-// someone else, which is conservatively treated as still alive since that
-// can't be disproven. A missing/unparseable pid file is also treated as
-// "not stale" -- either a lock from before this file existed, or another
-// process is still mid-way through acquiring (mkdirSync succeeded, the pid
-// write hasn't landed yet) -- safer to wait it out than to reclaim a lock
-// that's actually still being set up.
+// acquirer below) belongs to a process that's no longer running, per
+// isPidDead above. A missing/unparseable pid file is treated as "not stale"
+// -- either a lock from before this file existed, or another process is
+// still mid-way through acquiring (mkdirSync succeeded, the pid write hasn't
+// landed yet) -- safer to wait it out than to reclaim a lock that's actually
+// still being set up.
 function isLockStale(pidFile: string): boolean {
   let pidText: string;
   try {
@@ -101,12 +169,7 @@ function isLockStale(pidFile: string): boolean {
   }
   const pid = Number(pidText);
   if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ESRCH";
-  }
+  return isPidDead(pid);
 }
 
 // Simple advisory lock via mkdir's atomicity (EEXIST on a second caller),

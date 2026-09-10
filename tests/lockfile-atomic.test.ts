@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeJsonFileAtomic } from "../src/lockfile.js";
@@ -13,6 +14,7 @@ import { writeJsonFileAtomic } from "../src/lockfile.js";
 // a hook.
 const hooks = vi.hoisted(() => ({
   onRename: null as null | ((oldPath: string, newPath: string) => void),
+  onReaddir: null as null | ((path: unknown) => void),
 }));
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -24,6 +26,12 @@ vi.mock("node:fs", async (importOriginal) => {
       hooks.onRename?.(oldPath, newPath);
       return actual.renameSync(oldPath, newPath);
     },
+    // Same pass-through shape as renameSync above, so the #125 sweep's own
+    // directory listing can be made to fail on demand.
+    readdirSync: ((path: unknown, options: unknown) => {
+      hooks.onReaddir?.(path);
+      return (actual.readdirSync as (...args: unknown[]) => unknown)(path, options);
+    }) as unknown as typeof actual.readdirSync,
   };
 });
 
@@ -39,12 +47,14 @@ describe("writeJsonFileAtomic", () => {
 
   beforeEach(() => {
     hooks.onRename = null;
+    hooks.onReaddir = null;
     dir = mkdtempSync(join(tmpdir(), "ahood-atomic-test-"));
     target = join(dir, ".mcp.json");
   });
 
   afterEach(() => {
     hooks.onRename = null;
+    hooks.onReaddir = null;
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -116,5 +126,81 @@ describe("writeJsonFileAtomic", () => {
     writeJsonFileAtomic(target, { mcpServers: {} });
 
     expect(statSync(target).mode & 0o777).toBe(statSync(reference).mode & 0o777);
+  });
+
+  describe("stale temp file sweep (#125)", () => {
+    // A process that has already exited by the time spawnSync returns -- its
+    // pid is dead (barring immediate pid reuse), standing in for an ahood run
+    // hard-killed (SIGKILL/OOM/power loss) between the write and the rename,
+    // where the `finally` cleanup from #119 never got to run.
+    function deadPid(): number {
+      const child = spawnSync(process.execPath, ["-e", ""]);
+      if (!child.pid) throw new Error("could not spawn a throwaway process");
+      return child.pid;
+    }
+
+    function seed(name: string, contents = '{"mcpServers":{"demo":{"env":{"API_KEY":"s3cret"}}}}\n'): string {
+      const path = join(dir, name);
+      writeFileSync(path, contents, { mode: 0o600 });
+      return path;
+    }
+
+    it("removes an orphan whose writer is gone", () => {
+      const orphan = seed(`.mcp.json.tmp-${deadPid()}-424242424242424242`);
+
+      writeJsonFileAtomic(target, { mcpServers: {} });
+
+      expect(existsSync(orphan)).toBe(false);
+      expect(tempFiles(dir)).toEqual([]);
+    });
+
+    it("leaves a temp file alone while its writer is still alive", () => {
+      // This process's own pid: an ahood run that is mid-write right now, whose
+      // temp file must survive somebody else's concurrent successful write.
+      const live = seed(`.mcp.json.tmp-${process.pid}-131313131313131313`);
+
+      writeJsonFileAtomic(target, { mcpServers: {} });
+
+      expect(existsSync(live)).toBe(true);
+    });
+
+    it("leaves files that only look like temp names alone, whatever the pid would be", () => {
+      const impostors = [
+        ".mcp.json.tmp-notapid-1",
+        ".mcp.json.tmp-1",
+        `.mcp.json.tmp-${deadPid()}`,
+        `.mcp.json.tmp-${deadPid()}-1-2`,
+        `.mcp.json.tmp-${deadPid()}-`,
+        `.mcp.json.tmp-${deadPid()}-1x`,
+        ".mcp.json.tmp-0-1",
+        ".mcp.json.tmp--1-1",
+      ].map((name) => seed(name, "not ours\n"));
+
+      writeJsonFileAtomic(target, { mcpServers: {} });
+
+      for (const path of impostors) expect(existsSync(path)).toBe(true);
+    });
+
+    it("does not reach across to another destination's temp files", () => {
+      const other = seed(`skills.lock.json.tmp-${deadPid()}-555555555555555555`);
+
+      writeJsonFileAtomic(target, { mcpServers: {} });
+
+      expect(existsSync(other)).toBe(true);
+    });
+
+    it("does not fail the write when the sweep itself fails", () => {
+      seed(`.mcp.json.tmp-${deadPid()}-777777777777777777`);
+      hooks.onReaddir = () => {
+        throw Object.assign(new Error("EACCES: permission denied, scandir"), { code: "EACCES" });
+      };
+
+      expect(() => writeJsonFileAtomic(target, { mcpServers: { demo: { command: "node" } } })).not.toThrow();
+
+      // Unhook before asserting -- this test file's own helpers read the
+      // directory through the same mocked readdirSync.
+      hooks.onReaddir = null;
+      expect(JSON.parse(readFileSync(target, "utf-8"))).toEqual({ mcpServers: { demo: { command: "node" } } });
+    });
   });
 });

@@ -81,13 +81,15 @@ Requires Node.js 18 or later.
 | `AHOOD_API_URL` | Overrides the registry endpoint (default: `https://ahood.vercel.app`). Must be `https://`, except for `localhost`/`127.0.0.1` or a `.test`/`.invalid`/`.example`/`.localhost` host, which may use plain `http://` for local development. |
 | `XDG_CONFIG_HOME` | If set, browser-login credentials are stored under `$XDG_CONFIG_HOME/ahood/credentials.json` instead of the default `~/.config/ahood/credentials.json`. |
 
-Paths `ahood` reads and writes in your project, none of which need to be gitignored (the lockfile is meant to be committed, same as `package-lock.json`):
+Paths `ahood` reads and writes in your project. The lockfile is meant to be committed, same as `package-lock.json`:
 
 | Path | What's in it |
 | --- | --- |
 | `.claude/skills/<owner>@<skill>/` | Installed skill files. |
 | `.claude/agents/<owner>@<skill>.md` | An installed agent, as a single file (`@` owner/skill separator, since Claude Code's own subagent loader scans `.claude/agents/*.md` flat, non-recursively). |
 | `.claude/skills.lock.json` | Exact installed version + checksum per skill or agent, written by `add`/`update`, read by every install to verify integrity. |
+| `.mcp.json` | MCP server entries, for `mcp`-kind artifacts only. Merged into rather than owned — other MCP clients share this file. **May contain secrets in plaintext**, since a server manifest can declare credentials that `add` prompts for; `add` warns when it writes one. |
+| `*.json.tmp-<pid>-<hrtime>` | Never, in normal operation. Writes to the two `.json` files above go through a temp file that is renamed into place, and only a hard kill (SIGKILL, OOM, power loss) mid-write can strand one. A stranded copy of `.mcp.json` carries the same plaintext secrets, so **gitignore this pattern**. The next successful write removes any left by a process that is no longer running. |
 
 ## Usage examples
 

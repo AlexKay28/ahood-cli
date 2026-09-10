@@ -4,3 +4,10 @@ dist/
 CLAUDE.md
 .env*
 .superpowers/
+# writeJsonFileAtomic's temp siblings, `<path>.tmp-<pid>-<hrtime>`. A hard kill
+# between the write and the rename orphans one, and for .mcp.json it holds
+# resolved MCP server secrets -- nothing must ever commit that (ahood-cli#125).
+# Every caller of that helper writes a *.json destination, so scoping the rule
+# to .json keeps it from shadowing unrelated files someone happens to name
+# `foo.tmp-1`; no leading slash, so it also covers .claude/skills.lock.json's.
+*.json.tmp-*
