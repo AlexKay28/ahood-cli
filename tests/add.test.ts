@@ -476,6 +476,62 @@ describe("add", () => {
     });
   });
 
+  it("refuses a server.json that is not valid JSON, without leaking parser output (ahood-cli#121)", async () => {
+    // The archive's bytes are deliberately recognizable: V8's own SyntaxError
+    // message quotes a snippet of the source it choked on, so a message that
+    // passed the parser's text through would contain them.
+    const archive = await tarGz({ "server.json": "{ oops-not-json" });
+
+    const error = (await resolveMcpServerConfig(archive).then(
+      () => null,
+      (e) => e,
+    )) as Error | null;
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error!.message).toMatch(/server\.json is not valid JSON/);
+    expect(error!.message).not.toContain("SyntaxError");
+    expect(error!.message).not.toContain("oops-not-json");
+    expect(error!.message.split("\n")).toHaveLength(1);
+  });
+
+  // Valid JSON that isn't an object used to flow through the unchecked `as
+  // ServerManifest` cast into buildMcpServerConfig, which reads `.name` off it
+  // straight away -- a raw TypeError, not a diagnosis (ahood-cli#121).
+  it.each([
+    ["an array", "[]"],
+    ["a string", '"x"'],
+    ["a number", "3"],
+    ["null", "null"],
+  ])("refuses a server.json whose top level is %s (ahood-cli#121)", async (_label, body) => {
+    const archive = await tarGz({ "server.json": body });
+
+    const error = (await resolveMcpServerConfig(archive).then(
+      () => null,
+      (e) => e,
+    )) as Error | null;
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error!.message).toMatch(/server\.json is valid JSON but its top level is not an object/);
+    expect(error!.message).not.toMatch(/Cannot read propert/);
+    expect(error!.message.split("\n")).toHaveLength(1);
+  });
+
+  it("still resolves a valid server.json unchanged through the ahood-cli#121 guards", async () => {
+    const archive = await tarGz({
+      "server.json": JSON.stringify({
+        name: "hosted-search",
+        description: "d",
+        remotes: [{ url: "https://mcp.example.com/sse" }],
+      }),
+    });
+
+    const { manifest, serverConfig, secretNames } = await resolveMcpServerConfig(archive);
+
+    expect(manifest.name).toBe("hosted-search");
+    expect(serverConfig).toEqual({ url: "https://mcp.example.com/sse" });
+    expect(secretNames).toEqual([]);
+  });
+
   it("stores a fingerprint of the written .mcp.json entry in the lockfile (ahood-cli#169)", async () => {
     // Two keys, in deliberately UNSORTED order (url before headers, and
     // X-Region before Accept inside them), so the canonical serialization

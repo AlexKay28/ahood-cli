@@ -473,7 +473,33 @@ export async function resolveMcpServerConfig(
 ): Promise<{ manifest: ServerManifest; serverConfig: Record<string, unknown>; secretNames: string[] }> {
   const { existingEnv, allowNonTtyPrompt = true } = options;
   const content = await extractSingleFileContent(buffer, "server.json");
-  const manifest = JSON.parse(content.toString("utf-8")) as ServerManifest;
+  // Guarded the same way readMcpConfig guards .mcp.json: an unguarded parse
+  // surfaced a raw V8 SyntaxError with a stack instead of this CLI's usual
+  // single-line error (ahood-cli#121). The parser's own message is dropped
+  // rather than run through sanitizeForTerminal, because V8 quotes a snippet
+  // of the offending source in it -- that source is third-party archive
+  // content, and sanitizing would still paste it into the terminal, just
+  // with its control characters flattened.
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content.toString("utf-8"));
+  } catch {
+    throw new Error(
+      "The downloaded archive's server.json is not valid JSON -- this published version is malformed and cannot be installed.",
+    );
+  }
+  // Checked before the cast because buildMcpServerConfig immediately reads
+  // properties off the result: valid JSON that isn't an object (`[]`, `"x"`,
+  // `3`, `null`) would otherwise reach it and surface as an unactionable raw
+  // TypeError (ahood-cli#121). Deliberately stops at "is it an object" -- the
+  // manifest's actual shape is buildMcpServerConfig's job just below, and a
+  // second implementation of that check here would be free to drift from it.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      "The downloaded archive's server.json is valid JSON but its top level is not an object -- this published version is malformed and cannot be installed.",
+    );
+  }
+  const manifest = parsed as ServerManifest;
 
   // Validate the manifest's shape (unsupported registry_type/runtime_hint,
   // or neither a single 'packages' nor a single 'remotes' entry) BEFORE
