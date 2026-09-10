@@ -62,6 +62,7 @@ export async function remove(args: string[]): Promise<void> {
   let removedMcpEntry = false;
   let mcpEntryModified = false;
   let mcpEntryPresent = false;
+  let mcpConfigUnreadable: string | undefined;
   let recordedHash: string | undefined;
   try {
     const fileContents = readMcpConfig();
@@ -74,12 +75,17 @@ export async function remove(args: string[]): Promise<void> {
         mcpEntryModified = recordedHash !== currentHash;
       }
     }
-  } catch {
-    // A malformed .mcp.json isn't this command's problem to fix or crash
-    // on -- add.ts's readMcpConfig is the strict validator for that path.
-    // mcpEntryPresent stays false, so there's nothing to warn about either:
-    // if we can't even read the file, we can't know whether this skill has
-    // an entry in it.
+  } catch (error) {
+    // A malformed .mcp.json still isn't this command's problem to fix or
+    // crash on -- add.ts's readMcpConfig is the strict validator for that
+    // path. But leaving every flag false here meant the unreadable case
+    // printed a bare "Removed" with the entry (and its secret) still live,
+    // the very false-assurance bug the block above exists to prevent
+    // (ahood-cli#115). The lockfile's mcp_config_hash, read at the top of
+    // this function before the pin was cleared, is direct evidence that
+    // ahood DID install an entry into this file, so record why the read
+    // failed and warn off that instead of off a shape we can't inspect.
+    mcpConfigUnreadable = error instanceof Error ? error.message : String(error);
   }
 
   if (mcpEntryPresent && recordedHash !== undefined && !mcpEntryModified) {
@@ -111,7 +117,25 @@ export async function remove(args: string[]): Promise<void> {
     }
   }
 
-  if (mcpEntryPresent && !removedMcpEntry) {
+  if (mcpConfigUnreadable !== undefined && lockEntry?.mcp_config_hash !== undefined) {
+    // Its own wording rather than the branch below's: "remove it manually"
+    // isn't actionable while the file doesn't parse, and we can't say the
+    // entry is definitely still there -- only that one was installed and
+    // we couldn't check (ahood-cli#115).
+    // Only readMcpConfig's diagnosis, not the "-- fix or remove it before
+    // running this command" advice two of its three messages carry: "remove
+    // it" means deleting .mcp.json, which is shared with other MCP clients
+    // (see CLAUDE.md), so repeating it here would offer to destroy other
+    // servers' config in the same breath as this warning's own, correctly
+    // scoped advice (ahood-cli#115).
+    const diagnosis = mcpConfigUnreadable.split(" -- ")[0];
+    const reason = diagnosis.endsWith(".") ? diagnosis : `${diagnosis}.`;
+    console.warn(
+      `WARNING: ${key} may still have an entry in ${MCP_CONFIG_PATH} (which may contain secrets you entered), ` +
+        `but that file could not be read: ${reason}` +
+        ` Fix the file, then delete the "${skill}" entry from mcpServers by hand.`,
+    );
+  } else if (mcpEntryPresent && !removedMcpEntry) {
     console.warn(
       `WARNING: ${key} still has an entry in ${MCP_CONFIG_PATH} (which may contain secrets you entered)` +
         (mcpEntryModified ? " -- it appears to have been modified since install" : "") +

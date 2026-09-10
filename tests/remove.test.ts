@@ -220,12 +220,18 @@ describe("remove", () => {
     });
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     await remove(["alice/weather", "--yes"]);
 
     const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
     expect(mcpConfig.mcpServers.weather).toEqual(handEditedEntry);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/modified since install/));
+    // Exactly one warning, and the readable-file wording -- a readable
+    // .mcp.json must never reach the unreadable branch (ahood-cli#115).
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("could not be read"));
+    expect(logSpy).toHaveBeenCalledWith("Removed alice/weather");
   });
 
   it("falls through to the warning, not a false 'Removed (including its .mcp.json entry)', when the .mcp.json write itself fails", async () => {
@@ -254,6 +260,66 @@ describe("remove", () => {
     expect(logSpy).toHaveBeenCalledWith("Removed alice/weather"); // no "(including its .mcp.json entry)"
     const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
     expect(mcpConfig.mcpServers.weather).toEqual(entry); // untouched -- the write never happened
+  });
+
+  // readMcpConfig throws from three separate branches (invalid JSON, a
+  // non-object top level, a non-object "mcpServers"), and .mcp.json is
+  // explicitly shared with other MCP clients, so hand-edits that break it
+  // are realistic. Each shape must still warn, since the lockfile's
+  // mcp_config_hash proves ahood installed an entry there (ahood-cli#115).
+  for (const [shape, contents] of [
+    ["invalid JSON", '{"mcpServers": {"weather": {"command": "npx"},}}'],
+    ["a non-object top level", "[]"],
+    ["a non-object mcpServers", '{"mcpServers": []}'],
+  ] as const) {
+    it(`warns that the entry may still be live, naming the read failure, when .mcp.json is ${shape} (ahood-cli#115)`, async () => {
+      writeFileSync(join(dir, MCP_CONFIG_PATH), contents);
+      writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+        version: "1.0.0",
+        checksum_sha256: "abc",
+        mcp_config_hash: hashMcpServerConfig({ command: "npx", env: { API_KEY: "secret-val" } }),
+      });
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await remove(["alice/weather", "--yes"]);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/alice\/weather may still have an entry in .*\.mcp\.json.*could not be read/s),
+      );
+      // Actionable for THIS case: "remove it manually" isn't possible until
+      // the file parses again.
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/Fix the file, then delete the "weather" entry/));
+      // ...and NOT readMcpConfig's own "fix or remove it" advice: removing
+      // .mcp.json would take other MCP clients' servers with it.
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("fix or remove it"));
+      // The success line must not claim the .mcp.json entry went with it.
+      expect(logSpy).toHaveBeenCalledWith("Removed alice/weather");
+      // The file is left byte-for-byte alone -- remove() is not the strict
+      // validator for a file it only merges into.
+      expect(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).toBe(contents);
+    });
+  }
+
+  it("stays silent about an unreadable .mcp.json when the lockfile records no mcp entry of ours (ahood-cli#115)", async () => {
+    // A plain skill install has no mcp_config_hash, so a broken .mcp.json
+    // here is somebody else's file and none of this command's business --
+    // warning would be pure noise.
+    mkdirSync(join(dir, skillDir("alice", "demo")), { recursive: true });
+    writeFileSync(join(dir, MCP_CONFIG_PATH), "{ not json");
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/demo", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await remove(["alice/demo", "--yes"]);
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith("Removed alice/demo");
   });
 
   it("does not warn about .mcp.json when removing a skill with no matching entry there", async () => {
