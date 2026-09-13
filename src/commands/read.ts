@@ -1,5 +1,6 @@
 import { apiJson } from "../http.js";
 import { parseOwnerSkill } from "../spec.js";
+import { sanitizeDocumentForTerminal, sanitizeForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
 
 const USAGE = "Usage: ahood skill read <owner>/<skill> [--json]";
@@ -38,9 +39,17 @@ export async function readSkillMd(
   // be silent about handing back a yanked version's content. Written to
   // stderr, not stdout -- safe for MCP callers too (only stdout is reserved
   // for the JSON-RPC stream).
+  //
+  // yanked_reason is publisher-controlled free text interpolated into a
+  // CLI-authored line, which is exactly sanitizeForTerminal's case (and
+  // exactly what add.ts does with manifest fields) -- not the document case
+  // below, so it keeps the flatten-newlines/200-char defaults rather than
+  // sanitizeDocumentForTerminal. Unconditional, not TTY-gated: nothing
+  // round-trips a warning, so there is no byte-exactness to preserve here
+  // (ahood-cli#133).
   if (detail.skill_versions.yanked_at) {
     console.warn(
-      `WARNING: ${detail.owner}/${detail.slug}@${detail.skill_versions.version} has been yanked${detail.skill_versions.yanked_reason ? `: ${detail.skill_versions.yanked_reason}` : "."}`,
+      `WARNING: ${detail.owner}/${detail.slug}@${detail.skill_versions.version} has been yanked${detail.skill_versions.yanked_reason ? `: ${sanitizeForTerminal(detail.skill_versions.yanked_reason)}` : "."}`,
     );
   }
 
@@ -85,5 +94,23 @@ export async function read(args: string[]): Promise<void> {
   // a real, reported round-trip mismatch between "ahood skill read" and the
   // source file, even though the registry itself stores/serves the content
   // byte-exact (ahood-cli#90).
+  //
+  // That byte-exactness is a promise made to a *pipe*, though, and #90 is the
+  // only reason the raw write exists. A human looking at a terminal gets no
+  // value from it and pays for it with every control sequence the publisher
+  // chose to embed, because skill_md_content is publisher-controlled free text
+  // and `skill read` is the command the CLI advertises for inspecting a skill
+  // *before* installing it -- the cautious path. An embedded OSC 52
+  // ("\x1b]52;c;<base64>\x07") silently overwrites the reader's system
+  // clipboard on xterm/kitty/wezterm/foot; cheaper variants retitle the window
+  // (OSC 0), clear the screen and forge "verified safe" output (ESC[2J ESC[H),
+  // or switch charsets (ESC(0) and corrupt every later line in the session. So
+  // strip on the TTY path only, leaving the redirected path the exact bytes
+  // #90 guaranteed (ahood-cli#133).
+  if (process.stdout.isTTY) {
+    process.stdout.write(sanitizeDocumentForTerminal(content));
+    return;
+  }
+
   process.stdout.write(content);
 }

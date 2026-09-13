@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeForTerminal } from "../src/terminal-safe.js";
+import { sanitizeDocumentForTerminal, sanitizeForTerminal } from "../src/terminal-safe.js";
 
 describe("sanitizeForTerminal (ahood-cli#128)", () => {
   it("replaces ANSI escape sequences with spaces instead of returning them verbatim", () => {
@@ -45,5 +45,40 @@ describe("sanitizeForTerminal (ahood-cli#128)", () => {
 
   it("caps after substitution, so a control character costs a character rather than shifting the cap", () => {
     expect(sanitizeForTerminal("ab\x1bcd", 4)).toBe("ab c");
+  });
+});
+
+describe("sanitizeDocumentForTerminal (ahood-cli#133)", () => {
+  it("replaces the same C0/C1 controls sanitizeForTerminal does", () => {
+    expect(sanitizeDocumentForTerminal("a\x1b]52;c;AAAA\x07b")).toBe("a ]52;c;AAAA b");
+    expect(sanitizeDocumentForTerminal("a\x7fb\x9fc")).toBe("a b c");
+  });
+
+  it("replaces rather than deletes, for the same anti-token-gluing reason", () => {
+    expect(sanitizeDocumentForTerminal("alice\x07bob")).toBe("alice bob");
+  });
+
+  it("preserves the layout characters a document is made of: \\n, \\r and \\t", () => {
+    expect(sanitizeDocumentForTerminal("# Title\r\n\n- one\n-\ttwo\n")).toBe("# Title\r\n\n- one\n-\ttwo\n");
+  });
+
+  it("does not truncate, however long the document is", () => {
+    const long = "x".repeat(100_000);
+    expect(sanitizeDocumentForTerminal(long)).toBe(long);
+  });
+
+  it("leaves ordinary prose untouched", () => {
+    const text = "# Demo Skill\n\nDo the thing.\n";
+    expect(sanitizeDocumentForTerminal(text)).toBe(text);
+  });
+
+  // ahood-cli#122, same rationale as sanitizeForTerminal's: callers pass
+  // fields off an unchecked cast of downloaded JSON.
+  it.each([
+    [3, "3"],
+    [null, "null"],
+    [undefined, "undefined"],
+  ])("coerces a non-string %o instead of throwing", (input, expected) => {
+    expect(sanitizeDocumentForTerminal(input)).toBe(expected);
   });
 });
