@@ -188,6 +188,81 @@ function isLockHeldByLiveProcess(pidFile: string): boolean {
   return pid !== undefined && !isPidDead(pid);
 }
 
+// Name of the reclaim claim directory created inside a lock directory that is
+// about to be reclaimed. A single well-known name, deliberately not a
+// per-process one: its entire job is to be a name exactly one process can
+// create.
+const RECLAIM_CLAIM = "reclaiming";
+
+// Reclaiming a stale lock is a claim-verify-remove, not the bare
+// check-then-delete it used to be: two waiters could both judge the SAME dead
+// holder stale off the same snapshot, and then the second one's rmSync would
+// delete the first one's freshly-taken, live lock -- two processes inside the
+// critical section at once, which is the exact lost update on .mcp.json /
+// skills.lock.json that withLock exists to prevent (ahood-cli#141).
+//
+// The claim is a directory created INSIDE the lock directory, so it rides on
+// the same mkdir atomicity the lock itself is built on: exactly one waiter can
+// create it, and the losers fall through to the ordinary wait. Two
+// alternatives were weighed and rejected:
+//   - Merely re-reading the pid immediately before the rmSync narrows the
+//     window but never closes it; the check and the unlink still aren't atomic.
+//   - renameSync-ing the lock directory itself to a unique name makes the
+//     rename the claim, but a rename succeeds against WHATEVER directory sits
+//     at that path -- a live successor's included -- and it leaves the lock
+//     path briefly absent, so a third process can mkdir it and acquire for
+//     real. That manufactures two live holders rather than preventing them.
+// This claim never removes or rewrites anything a holder owns and never makes
+// the lock path vanish, so mutual exclusion survives even a claim that turns
+// out to have been a mistake.
+//
+// Winning the claim is what makes the staleness verdict trustworthy, which is
+// why the pid is re-read UNDER it: the directory judged stale a moment ago may
+// already have been reclaimed and retaken by someone alive. Once the claim is
+// held and the pid still reads dead, nothing else can remove that directory --
+// a release by its holder is ruled out by that dead pid, and every other
+// reclaimer is blocked by the claim -- so the verdict still holds at the moment
+// of the rmSync below.
+//
+// Returns the error to remember for withLock's deadline branch (see
+// ahood-cli#140), or undefined when there is nothing worth remembering.
+function reclaimStaleLock(lockDir: string, pidFile: string): NodeJS.ErrnoException | undefined {
+  const claim = join(lockDir, RECLAIM_CLAIM);
+  try {
+    mkdirSync(claim);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // EEXIST means another waiter is reclaiming this very directory right now
+    // and ENOENT that it is already gone; both resolve themselves on the next
+    // retry. Anything else (EACCES/EPERM/EROFS on a directory this process
+    // cannot write into) is a reclaim that can never succeed, and is what the
+    // deadline branch reports instead of a misleading "waiting for the lock".
+    if (code === "EEXIST" || code === "ENOENT") return undefined;
+    return existsSync(lockDir) ? (error as NodeJS.ErrnoException) : undefined;
+  }
+  if (!isLockStale(pidFile)) {
+    // Not the directory that was judged stale after all -- it was reclaimed and
+    // retaken while this process looked, or it belongs to a holder that hasn't
+    // written its pid yet. Hand the claim back, leaving the lock exactly as it
+    // was found.
+    try {
+      rmSync(claim, { recursive: true, force: true });
+    } catch {
+      // Best effort: the holder's own release takes this directory, claim and
+      // all, with it. Worst case is a lock nothing reclaims, which times out
+      // with an actionable message rather than corrupting anything -- the same
+      // outcome as a process killed between the two syscalls above.
+    }
+    return undefined;
+  }
+  try {
+    rmSync(lockDir, { recursive: true, force: true });
+  } catch (error) {
+    if (existsSync(lockDir)) return error as NodeJS.ErrnoException;
+  }
+  return undefined;
+}
+
 // Simple advisory lock via mkdir's atomicity (EEXIST on a second caller),
 // so two concurrent `ahood skill add`/`remove` invocations against the same
 // project don't race a read-modify-write and silently drop one another's
@@ -212,6 +287,9 @@ export function withLock<T>(path: string, fn: () => T): T {
   // the lock" sends the user hunting for a process that provably no longer
   // exists (ahood-cli#140).
   let reclaimError: NodeJS.ErrnoException | undefined;
+  // Whether this process's own pid ever made it into the lock directory --
+  // what lets the release below tell its own lock from a successor's.
+  let wrotePid = false;
   for (;;) {
     try {
       mkdirSync(lockDir);
@@ -220,6 +298,7 @@ export function withLock<T>(path: string, fn: () => T): T {
       // just without staleness detection for this particular acquisition.
       try {
         writeFileSync(pidFile, String(process.pid));
+        wrotePid = true;
       } catch {
         // non-fatal, see comment above
       }
@@ -266,21 +345,17 @@ export function withLock<T>(path: string, fn: () => T): T {
         // ENOTEMPTY with the directory still present, and that one does clear
         // itself on the next attempt.
         //
-        // The memory deliberately survives later iterations: a failed
-        // recursive removal can take the `pid` file with it (it deletes the
-        // contents, then fails on the directory itself -- which of the two
-        // happens before the error is an implementation detail that differs
-        // between Node versions), and without a pid file isLockStale reports
-        // "not stale", so this branch never runs again and there is no second
-        // chance to observe the failure. Clearing it per-iteration made the
-        // error message depend on that detail, which is why it read correctly
-        // on one machine and fell back to the generic timeout on another
-        // (ahood-cli#145).
-        try {
-          rmSync(lockDir, { recursive: true, force: true });
-        } catch (removeError) {
-          if (existsSync(lockDir)) reclaimError = removeError as NodeJS.ErrnoException;
-        }
+        // The memory deliberately survives later iterations (hence `??`
+        // rather than a plain assignment): a failed recursive removal can take
+        // the `pid` file with it (it deletes the contents, then fails on the
+        // directory itself -- which of the two happens before the error is an
+        // implementation detail that differs between Node versions), and
+        // without a pid file isLockStale reports "not stale", so this branch
+        // never runs again and there is no second chance to observe the
+        // failure. Clearing it per-iteration made the error message depend on
+        // that detail, which is why it read correctly on one machine and fell
+        // back to the generic timeout on another (ahood-cli#145).
+        reclaimError = reclaimStaleLock(lockDir, pidFile) ?? reclaimError;
       }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
     }
@@ -288,7 +363,30 @@ export function withLock<T>(path: string, fn: () => T): T {
   try {
     return fn();
   } finally {
-    rmSync(lockDir, { recursive: true, force: true });
+    // Releasing used to be an unconditional rmSync, which is only correct for
+    // as long as this process still holds the lock it took -- and it does not
+    // always. A reclaimer that judged this process dead can delete this lock
+    // out from under a running critical section (ahood-cli#141 on one host,
+    // and the host-local pid probe above across a container bind mount or a
+    // network share), and the unconditional removal then took the SUCCESSOR's
+    // lock down with it, turning one lost update into a chain of them.
+    // Removing only a directory that still records THIS process's pid keeps
+    // the damage to the process that was wronged.
+    //
+    // A pid file that is unreadable despite having been written is left alone
+    // for the same reason: the only thing that removes it is a reclaimer
+    // partway through taking this lock, so whatever is at that path is no
+    // longer this process's to delete.
+    //
+    // With no pid of this process's own ever written (the best-effort write
+    // above failed) there is nothing to compare against -- and nothing to
+    // protect either, since a lock directory with no readable pid is never
+    // judged stale and so can never have been reclaimed. Removing it
+    // unconditionally is then both safe and necessary: leaving it behind
+    // strands a lock that nothing is able to reclaim.
+    if (!wrotePid || readLockPid(pidFile) === process.pid) {
+      rmSync(lockDir, { recursive: true, force: true });
+    }
   }
 }
 
