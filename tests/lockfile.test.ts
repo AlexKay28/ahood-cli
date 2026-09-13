@@ -1,8 +1,9 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   readLockfile,
   withLock,
@@ -97,6 +98,61 @@ describe("lockfile", () => {
     expect(elapsed).toBeLessThan(2000);
     expect(existsSync(lockDir)).toBe(false);
   });
+
+  // rmSync of the lock directory needs write permission on its PARENT, so
+  // dropping that is what makes a stale lock unremovable -- root bypasses the
+  // check entirely, and the condition simply cannot be provoked there.
+  it.skipIf(process.getuid?.() === 0)(
+    "gives up within its deadline, instead of spinning forever, when a stale lock cannot be removed (#140)",
+    () => {
+      const lockDir = `${lockPath}.lock`;
+      const guardedDir = dirname(lockPath);
+      mkdirSync(lockDir, { recursive: true });
+      const dead = spawnSync(process.execPath, ["-e", ""]);
+      writeFileSync(join(lockDir, "pid"), String(dead.pid));
+      // Stale (its owner is gone) but unremovable -- the shape a root-owned
+      // lock left behind by an OOM-killed `sudo ahood` has for the next
+      // non-root run.
+      chmodSync(guardedDir, 0o500);
+
+      // Run in a real child process, the way tests/index.test.ts exercises the
+      // built CLI, because the regression is an infinite *synchronous* loop:
+      // it blocks the event loop, so no in-process test timeout could ever
+      // interrupt it, and only a process the OS can kill bounds it.
+      const builtLockfile = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "lockfile.js");
+      expect(existsSync(builtLockfile), "run `npm run build` before the tests -- this case needs dist/").toBe(true);
+      const script = `import(${JSON.stringify(pathToFileURL(builtLockfile).href)}).then(({ withLock }) => {
+        try { withLock(${JSON.stringify(lockPath)}, () => {}); console.log("ACQUIRED"); }
+        catch (error) { console.log("THREW " + error.message); }
+      });`;
+
+      const start = Date.now();
+      let child: ReturnType<typeof spawnSync>;
+      try {
+        child = spawnSync(process.execPath, ["-e", script], { encoding: "utf8", timeout: 30_000 });
+      } finally {
+        // Before any assertion, so a failure still leaves afterEach able to
+        // delete the temp directory.
+        chmodSync(guardedDir, 0o700);
+      }
+      const elapsed = Date.now() - start;
+
+      expect(child.signal, `withLock never returned; it spun past its own deadline (stderr: ${child.stderr})`).toBe(
+        null,
+      );
+      // The message must name the real problem -- a directory this process
+      // cannot remove -- not "waiting for a lock", which would send the user
+      // hunting for an ahood process that provably exited.
+      expect(child.stdout).toContain("Could not reclaim the stale lock");
+      expect(child.stdout).toContain(lockDir);
+      expect(child.stdout).toContain("delete it manually");
+      expect(child.stdout).not.toContain("ACQUIRED");
+      // withLock's own deadline is 5s; anything near the kill above means it
+      // spun instead of giving up.
+      expect(elapsed).toBeLessThan(20_000);
+    },
+    60_000,
+  );
 
   describe("withLock timeout message", () => {
     // Holds the lock with THIS process's pid so isLockStale can't reclaim it,

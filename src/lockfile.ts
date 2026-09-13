@@ -190,6 +190,12 @@ export function withLock<T>(path: string, fn: () => T): T {
   const lockDir = `${path}.lock`;
   const pidFile = join(lockDir, "pid");
   const deadline = Date.now() + 5000;
+  // Set when the lock was judged stale but could not actually be removed and
+  // is still sitting there -- see the reclaim branch below. Reported instead
+  // of the generic timeout, because "another process holds the lock" sends
+  // the user hunting for a process that provably no longer exists
+  // (ahood-cli#140).
+  let reclaimError: NodeJS.ErrnoException | undefined;
   for (;;) {
     try {
       mkdirSync(lockDir);
@@ -204,22 +210,41 @@ export function withLock<T>(path: string, fn: () => T): T {
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (isLockStale(pidFile)) {
-        // Reclaim it. Best-effort removal: if a concurrent process wins the
-        // race and reclaims (or a live holder finishes and releases) first,
-        // this just falls through to the normal wait/retry below instead of
-        // throwing.
-        try {
-          rmSync(lockDir, { recursive: true, force: true });
-        } catch {
-          // lost the race -- fall through to wait/retry
-        }
-        continue;
-      }
+      // The deadline is tested FIRST so that every retry path is bounded by
+      // it. The reclaim branch below used to `continue` straight past both
+      // this check and the sleep, so a stale lock this process could not
+      // actually remove (rmSync's force:true suppresses only ENOENT, never
+      // EACCES/EPERM/EROFS) turned into an unbounded 100%-CPU spin that never
+      // threw and never printed anything -- the one thing a CLI built to run
+      // unattended in CI must never do (ahood-cli#140).
       if (Date.now() > deadline) {
+        if (reclaimError) {
+          throw new Error(
+            `Could not reclaim the stale lock on ${path} at ${lockDir}: ${reclaimError.code ?? reclaimError.message}. The process that held it is gone, but this one cannot remove that directory -- delete it manually (it may belong to another user, e.g. left behind by a sudo/root run, or sit on a read-only filesystem).`,
+          );
+        }
         throw new Error(
           `Timed out waiting for the lock on ${path} at ${lockDir}. If no other ahood process is running, delete that directory manually.`,
         );
+      }
+      reclaimError = undefined;
+      if (isLockStale(pidFile)) {
+        // Reclaim it. Two very different conditions can fail that, and only
+        // one of them is the race the old comment here claimed: if the
+        // directory is GONE afterwards, a concurrent process reclaimed it (or
+        // a live holder released it) first, which is harmless -- the retry
+        // below simply takes the lock. If it is still THERE, this process
+        // cannot remove it at all, and retrying can only fail the same way,
+        // so the failure is remembered for the deadline branch above rather
+        // than swallowed (ahood-cli#140). It is remembered rather than thrown
+        // immediately because a mid-reclaim race can also surface as e.g.
+        // ENOTEMPTY with the directory still present, and that one does clear
+        // itself on the next attempt.
+        try {
+          rmSync(lockDir, { recursive: true, force: true });
+        } catch (removeError) {
+          if (existsSync(lockDir)) reclaimError = removeError as NodeJS.ErrnoException;
+        }
       }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
     }
