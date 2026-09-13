@@ -1,15 +1,16 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 // mcp_config_hash is only ever set for a kind='mcp' entry (add.ts's
 // installMcpEntry) -- a fingerprint of exactly what was written into
@@ -89,16 +90,85 @@ function sweepStaleTempFiles(path: string, ownTempName: string): void {
   }
 }
 
+// How many links deep resolveWriteTarget will follow before declaring a cycle.
+// Same order of magnitude as the kernel's own ceiling (40 on Linux); the exact
+// number doesn't matter, only that a self-referential link terminates with an
+// actionable error instead of spinning.
+const MAX_SYMLINK_HOPS = 32;
+
+// THE CONTRACT: a symlinked destination is written THROUGH, onto the file the
+// link resolves to, and the link itself is left in place.
+//
+// The alternative -- letting renameSync replace the link with a regular file,
+// which is what this used to do -- is indefensible for .mcp.json in
+// particular: symlinking it at a shared or out-of-tree config is how a user
+// keeps MCP server secrets OUT of the project directory, so replacing the link
+// drops those secrets into precisely the directory the arrangement exists to
+// keep them out of, while the real config silently keeps stale content.
+// ahood-cli#119's mode preservation made that harder to notice rather than
+// easier, since the file left behind carried the target's permissions
+// (ahood-cli#144).
+//
+// Refusing outright (lstat, throw "this must be a regular file") was the other
+// candidate, and was rejected: every caller here READS the same path first,
+// through the link -- add.ts merges the existing .mcp.json, the lockfile
+// writers merge the existing pins -- so a read-modify-write that reads the
+// target and writes anywhere else is incoherent no matter which file ends up
+// holding the result. Refusing would also make a crash-safety implementation
+// detail visible as a hard failure: the plain writeFileSync this replaced
+// followed the link, as does every editor and every shell redirection, and the
+// callers have no idea a symlink is involved at all.
+//
+// lstatSync, never statSync, and deliberately so: statSync follows the link and
+// therefore cannot answer the only question asked here ("is this path itself a
+// link?"). Asking it with statSync is the original bug -- the mode came back
+// from the link's target and was then applied to the regular file that had
+// taken the link's place.
+function resolveWriteTarget(path: string): string {
+  let current = path;
+  for (let hop = 0; hop <= MAX_SYMLINK_HOPS; hop++) {
+    let isLink: boolean;
+    try {
+      isLink = lstatSync(current).isSymbolicLink();
+    } catch {
+      // Nothing at this path: either a brand-new destination, or the dangling
+      // end of a chain whose final target doesn't exist yet -- a user who sets
+      // the symlink up before the first install. Write there, so the link
+      // starts resolving to the file the caller's next read will follow it to.
+      return current;
+    }
+    if (!isLink) return current;
+    const link = readlinkSync(current);
+    current = isAbsolute(link) ? link : resolve(dirname(current), link);
+  }
+  throw new Error(
+    `Refusing to write ${path}: it resolves through more than ${MAX_SYMLINK_HOPS} symlinks, so the chain loops back on itself. Repoint or delete that link.`,
+  );
+}
+
 // Generalized so callers other than the lockfile itself (e.g. add.ts's
 // .mcp.json merge, which sits right next to the lockfile and can hold other
 // servers' secrets) get the same crash-safety guarantee instead of a bare
 // writeFileSync that risks truncating the file on interruption.
 export function writeJsonFileAtomic(path: string, data: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
+  // Resolved before the mkdir so the directory that actually gets created is
+  // the resolved target's, not the link's -- a link set up ahead of the first
+  // install can point somewhere that doesn't exist yet -- and so that every
+  // step below (temp file, rename, chmod, sweep) names the same single file.
+  const dest = resolveWriteTarget(path);
+  mkdirSync(dirname(dest), { recursive: true });
   // Write-then-rename so a process interrupted mid-write never leaves a
   // truncated file on disk -- a reader always sees either the old or the new
   // complete content, never a partial one.
-  const tmpPath = `${path}.tmp-${process.pid}-${process.hrtime.bigint()}`;
+  //
+  // The temp file must be a sibling of the RESOLVED destination rather than of
+  // `path`: renameSync cannot cross filesystems (EXDEV), and an out-of-tree
+  // target -- a different mount, a home directory on another volume -- is
+  // exactly the case a symlinked .mcp.json is used for. Deriving the temp name
+  // from `dest` keeps the rename inside one directory and keeps #119's
+  // `finally` unlink and #125's sweep pointed at the directory this code
+  // actually creates temp files in (ahood-cli#144).
+  const tmpPath = `${dest}.tmp-${process.pid}-${process.hrtime.bigint()}`;
   // The mode the destination must end up with. Preserving an existing file's
   // permissions matters because .mcp.json is a project-shared config other MCP
   // clients read: whether it should be 0644 or tighter is its own decision
@@ -106,9 +176,14 @@ export function writeJsonFileAtomic(path: string, data: unknown): void {
   // of the 0600 temp file below (ahood-cli#119). With no destination yet there
   // is nothing to preserve, so fall back to what a plain writeFileSync would
   // have produced -- 0666 masked by the process umask.
+  //
+  // lstatSync rather than statSync even though `dest` is by construction never
+  // a symlink (resolveWriteTarget walked until it wasn't): the two agree here,
+  // and lstat says so at the call site instead of leaving a link-following stat
+  // one refactor away from reintroducing #144.
   let finalMode: number;
   try {
-    finalMode = statSync(path).mode & 0o777;
+    finalMode = lstatSync(dest).mode & 0o777;
   } catch {
     finalMode = 0o666 & ~process.umask();
   }
@@ -117,9 +192,9 @@ export function writeJsonFileAtomic(path: string, data: unknown): void {
     // resolved MCP server secrets, and it must never be world-readable, not
     // even for the instant before the rename (ahood-cli#119).
     writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
-    renameSync(tmpPath, path);
+    renameSync(tmpPath, dest);
     try {
-      chmodSync(path, finalMode);
+      chmodSync(dest, finalMode);
     } catch {
       // Best-effort, and deliberately after the rename rather than on the temp
       // file: widening the temp file first would reopen the world-readable
@@ -128,7 +203,12 @@ export function writeJsonFileAtomic(path: string, data: unknown): void {
       // already landed -- the caller would roll back a successful install.
     }
     try {
-      sweepStaleTempFiles(path, basename(tmpPath));
+      sweepStaleTempFiles(dest, basename(tmpPath));
+      // Every version before ahood-cli#144 put its temp file next to the LINK
+      // instead of next to the target, so a crash under one of those can have
+      // stranded a plaintext-secret orphan there that no later write would ever
+      // look at again. One extra sweep of the link's own directory retires them.
+      if (dest !== path) sweepStaleTempFiles(path, basename(tmpPath));
     } catch {
       // Swallowed for the same reason as the chmod above and #119's unlink:
       // the rename has already landed, so failing to tidy up somebody else's
