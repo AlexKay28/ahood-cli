@@ -1,5 +1,5 @@
 import { apiJson } from "../http.js";
-import { flagValue, parseSearchQuery, unrecognizedArgs } from "../flags.js";
+import { flagValue, parseSearchQuery, unrecognizedArgs, unrecognizedIndices } from "../flags.js";
 import { confirm } from "../confirm.js";
 import { UsageError } from "../usage-error.js";
 
@@ -27,7 +27,8 @@ type SnapDetail = {
   tags: string[];
 };
 
-const CREATE_USAGE = "Usage: ahood snap create <content> [--tags tag1,tag2] (or pipe content on stdin)";
+const CREATE_USAGE =
+  "Usage: ahood snap create <content> [--tags tag1,tag2] (or pipe content on stdin; put -- before content that starts with --)";
 const LIST_USAGE = "Usage: ahood snap list [--json] [--limit <n>] [--tags tag1,tag2]";
 const SEARCH_USAGE = "Usage: ahood snap search <query> [--json] [--limit <n>] [--tags tag1,tag2]";
 const SHOW_USAGE = "Usage: ahood snap show <id> [--json]";
@@ -89,17 +90,67 @@ function printSnaps(jsonOutput: boolean, snaps: SnapSummary[], emptyMessage: str
 }
 
 export async function createSnap(args: string[]): Promise<void> {
-  const jsonOutput = args.includes("--json");
-  const tagsArg = flagValue(args, "--tags");
+  // POSIX end-of-options: everything after a bare "--" is content, verbatim,
+  // never a flag. Snap content is freeform, so a note that legitimately begins
+  // with "--" would otherwise be unexpressible once the unknown-flag check
+  // below lands -- `--tags=value` is exactly that escape hatch for the flag
+  // (flags.ts), and content had none (ahood-cli#134).
+  //
+  // Scoped to `create` rather than made group-wide on purpose: it's the only
+  // snap verb whose argument is freeform text. `show`/`remove`/`share`/
+  // `unshare` take an id, `tags` a tag list and `search` a query -- all
+  // constrained enough that a leading "--" is always a mistake there, so "--"
+  // would buy them nothing -- and `search`'s parsing lives in the shared
+  // parseSearchQuery, which `skill search` also uses.
+  const endOfOptions = args.indexOf("--");
+  const flagArgs = endOfOptions === -1 ? args : args.slice(0, endOfOptions);
+  const literalArgs = endOfOptions === -1 ? [] : args.slice(endOfOptions + 1);
+
+  const jsonOutput = flagArgs.includes("--json");
+  const tagsArg = flagValue(flagArgs, "--tags");
+
+  // Whatever this command doesn't consume. --tags and its value (both
+  // "--tags x" and "--tags=x" forms) are stripped the same way --json is, so
+  // they never leak into the joined content.
+  const leftover = unrecognizedIndices(flagArgs, ["--json"], ["--tags"]);
+
+  // Every leftover used to be kept and folded into the note body, because
+  // content is freeform and a blanket "--" rejection would break a note that
+  // starts with a dash. That made a typo silently rewrite what got stored, at
+  // exit 0: `snap create "my note" --tag deploy` (singular) posted content
+  // "my note --tag deploy" with no tags at all, and `--limit 5` likewise
+  // (ahood-cli#134). With "--" above providing the escape hatch, refuse them
+  // instead -- the same rejection `snap tags` already does below.
+  const unknownFlag = leftover.map((i) => flagArgs[i]).find((a) => a.startsWith("--"));
+  if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${CREATE_USAGE}`);
+
+  // The other half of ahood-cli#134, and the part no "--" check catches:
+  // `snap create "note" --tags deploy bugfix` posted content "note bugfix",
+  // because only the token immediately after --tags is consumed and the second
+  // word fell through into the body. A bare token is indistinguishable from a
+  // note word on its own -- `--tags deploy Debugged the CI` is a legitimate
+  // flags-first invocation -- so the signal isn't the token, it's that content
+  // ends up on BOTH sides of a flag. Nobody writes a note with a flag wedged
+  // mid-sentence; erroring there refuses the typo without outlawing either
+  // ordering. Not silently retagging "bugfix" either: guessing wrong steals a
+  // word out of the note, which is the same corruption in the other direction.
+  const gap = leftover.findIndex((at, n) => n > 0 && at !== leftover[n - 1] + 1);
+  if (gap !== -1) {
+    const stray = flagArgs[leftover[gap]];
+    const consumed = flagArgs[leftover[gap - 1] + 1];
+    throw new UsageError(
+      `Note content is split across ${consumed}: "${stray}" comes after it and would be folded into the note. ` +
+        `Quote the whole note, or move every flag after it` +
+        (consumed === "--tags" ? `; pass multiple tags as one comma-separated value (--tags a,b)` : "") +
+        `.\n${CREATE_USAGE}`,
+    );
+  }
+
   // Joined, not just args[0] -- an unquoted multi-word note (e.g. `ahood
   // snap create Debugged the flaky CI step`) arrives as multiple positional
   // tokens, and taking only the first one silently dropped the rest with no
-  // error. Mirrors searchSnaps' own query-joining below. --tags and its
-  // value (both "--tags x" and "--tags=x" forms) are stripped the same way
-  // --json is, so they never leak into the joined content.
-  const positionals = args.filter(
-    (a, i) => a !== "--json" && a !== "--tags" && !a.startsWith("--tags=") && args[i - 1] !== "--tags",
-  );
+  // error. Mirrors searchSnaps' own query-joining below.
+  const positionals = [...leftover.map((i) => flagArgs[i]), ...literalArgs];
   const positional = positionals.length > 0 ? positionals.join(" ") : undefined;
 
   let content: string;

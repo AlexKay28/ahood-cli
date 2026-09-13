@@ -171,6 +171,90 @@ describe("snap commands", () => {
 
       expect(JSON.parse(calls[0].init.body as string)).toEqual({ content: "hello", tags: ["deploy", "bugfix"] });
     });
+
+    // ahood-cli#134. Every unrecognized token used to be folded into the note
+    // body at exit 0, so a typo silently changed what got stored.
+    it("rejects a mistyped --tag (singular) instead of storing it as note text", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
+
+      await expect(createSnap(["my note", "--tag", "deploy"])).rejects.toThrow(/Unknown flag: --tag/);
+      expect(calls).toHaveLength(0);
+    });
+
+    it("rejects a flag this command doesn't take instead of storing it as note text", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
+
+      await expect(createSnap(["my note", "--limit", "5"])).rejects.toThrow(/Unknown flag: --limit/);
+      expect(calls).toHaveLength(0);
+    });
+
+    // The bare-token half of #134: only the token right after --tags is
+    // consumed, so "bugfix" used to land in the CONTENT ("note bugfix"). A bare
+    // token can't be told from a note word on its own, so the rejected shape is
+    // content sitting on both sides of a consumed flag.
+    it("rejects space-separated tags rather than folding the extra word into the content", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
+
+      await expect(createSnap(["note", "--tags", "deploy", "bugfix"])).rejects.toThrow(
+        /Note content is split across --tags: "bugfix"/,
+      );
+      expect(calls).toHaveLength(0);
+    });
+
+    it("still accepts a flags-first invocation, where all the content follows --tags", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
+
+      await createSnap(["--tags", "deploy", "Debugged", "the", "CI"]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ content: "Debugged the CI", tags: ["deploy"] });
+    });
+
+    // #134's escape hatch: content is freeform, so a note that genuinely starts
+    // with "--" needs a way through the unknown-flag check. `--` previously had
+    // no meaning here and was stored as part of the note ("-- my note").
+    it("treats a bare -- as end-of-options and keeps what follows as verbatim content", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
+
+      await createSnap(["--tags", "ci", "--", "--limit 5 broke the parser"]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({
+        content: "--limit 5 broke the parser",
+        tags: ["ci"],
+      });
+    });
+
+    it("does not treat --json after -- as a flag", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await createSnap(["--", "--json"]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ content: "--json" });
+      expect(logSpy).toHaveBeenCalledWith(ID);
+    });
+
+    it("leaves a note that merely contains -- mid-text untouched", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
+
+      await createSnap(["the flag -- ends options, --json does not"]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({
+        content: "the flag -- ends options, --json does not",
+      });
+    });
+
+    it("leaves the piped-stdin path unaffected by the new flag parsing", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
+      stubPipedStdin("Piped session notes.\n");
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await createSnap(["--tags", "deploy,bugfix", "--json"]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({
+        content: "Piped session notes.\n",
+        tags: ["deploy", "bugfix"],
+      });
+    });
   });
 
   describe("listSnaps", () => {

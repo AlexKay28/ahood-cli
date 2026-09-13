@@ -43,16 +43,34 @@ export function flagValue(args: string[], flag: string): string | undefined {
 // issued an UNFILTERED request and printed every snap as though it were the
 // filtered set (ahood-cli#135). parseSearchQuery below and tagsSnap still carry
 // their own inline copies of this stripping; fold them into this helper when
-// the queued snap-parsing fixes (ahood-cli#134/#136/#137/#138) next touch them,
+// the queued snap-parsing fixes (ahood-cli#136/#137/#138) next touch them,
 // rather than growing a fourth variant.
 export function unrecognizedArgs(args: string[], booleanFlags: string[], valueFlags: string[]): string[] {
-  return args.filter(
-    (a, i) =>
-      !booleanFlags.includes(a) &&
-      !valueFlags.includes(a) &&
-      !valueFlags.some((f) => a.startsWith(`${f}=`)) &&
-      !valueFlags.includes(args[i - 1]),
-  );
+  return unrecognizedIndices(args, booleanFlags, valueFlags).map((i) => args[i]);
+}
+
+// The same stripping rules as unrecognizedArgs, reporting WHERE the leftovers
+// sat rather than what they were -- and the primitive the two share, so there
+// is still exactly one copy of those rules (the whole point of #135's helper;
+// a second hand-rolled variant is the mistake it exists to stop).
+//
+// `snap create` needs the positions, not just the tokens: its leftovers are the
+// words of a freeform note, so "starts with --" is the only thing it can reject
+// outright, and the one remaining signal that a bare token was misplaced is that
+// the leftovers sit on BOTH sides of a flag the command consumed -- which is
+// precisely `snap create "note" --tags deploy bugfix` folding "bugfix" into the
+// note body (ahood-cli#134). Positions are the only way to see that gap.
+export function unrecognizedIndices(args: string[], booleanFlags: string[], valueFlags: string[]): number[] {
+  const indices: number[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (booleanFlags.includes(arg)) continue;
+    if (valueFlags.includes(arg)) continue;
+    if (valueFlags.some((f) => arg.startsWith(`${f}=`))) continue;
+    if (valueFlags.includes(args[i - 1])) continue;
+    indices.push(i);
+  }
+  return indices;
 }
 
 // Shared by every "<verb> <query> [--json] [--limit <n>]" command (skill

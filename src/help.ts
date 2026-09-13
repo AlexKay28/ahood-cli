@@ -332,14 +332,17 @@ export const SNAP_COMMANDS_HELP: CommandHelp[] = [
     desc:
       "Capture a new private snap. Pass the content as an argument, or omit it and pipe content on stdin " +
       "(e.g. `echo \"...\" | ahood snap create`, or a piped heredoc) -- useful for capturing a whole session's " +
-      "worth of freeform text at once. Prints the new snap's id on success.",
+      "worth of freeform text at once. Prints the new snap's id on success. An unrecognized flag is refused " +
+      "rather than folded into the note; pass content that itself starts with `--` after a bare `--`.",
     flags: [
       "--tags <comma,separated>   Attach tags to the new snap.",
       "--json                     Emit {id, created_at} instead of just the bare id.",
+      "--                         End of options: everything after it is content, verbatim.",
     ],
     examples: [
       'ahood snap create "Debugged the flaky CI step, root cause was a race in the cache key." --tags deploy,bugfix',
       'echo "..." | ahood snap create',
+      'ahood snap create -- "--json broke the parser"',
     ],
   },
   {
