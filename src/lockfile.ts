@@ -153,23 +153,39 @@ function writeLockfile(path: string, lockfile: Lockfile): void {
   writeJsonFileAtomic(path, lockfile);
 }
 
-// A lock directory is stale if the PID recorded inside it (written by the
-// acquirer below) belongs to a process that's no longer running, per
-// isPidDead above. A missing/unparseable pid file is treated as "not stale"
-// -- either a lock from before this file existed, or another process is
-// still mid-way through acquiring (mkdirSync succeeded, the pid write hasn't
-// landed yet) -- safer to wait it out than to reclaim a lock that's actually
-// still being set up.
-function isLockStale(pidFile: string): boolean {
+// The pid recorded in a lock directory by its acquirer below, or undefined if
+// there is no readable, plausible one: no pid file at all (a lock from before
+// this file existed, or one whose acquirer is still mid-way through setting it
+// up -- mkdirSync succeeded, the pid write hasn't landed yet), or contents
+// that don't parse as a pid.
+function readLockPid(pidFile: string): number | undefined {
   let pidText: string;
   try {
     pidText = readFileSync(pidFile, "utf-8");
   } catch {
-    return false;
+    return undefined;
   }
   const pid = Number(pidText);
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  return isPidDead(pid);
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+// A lock directory is stale if the pid recorded inside it belongs to a process
+// that's no longer running, per isPidDead above. No readable pid means "not
+// stale": safer to wait out a lock that may still be being set up than to
+// reclaim one that is actually held.
+function isLockStale(pidFile: string): boolean {
+  const pid = readLockPid(pidFile);
+  return pid !== undefined && isPidDead(pid);
+}
+
+// Deliberately NOT the negation of isLockStale: with no readable pid at all a
+// lock is neither stale nor demonstrably held, and the two callers want
+// opposite answers in that case. Reclaiming needs proof the holder is dead
+// (hence isLockStale), while withLock's deadline branch needs proof that
+// someone is alive before it backs off a reclaim failure it already observed.
+function isLockHeldByLiveProcess(pidFile: string): boolean {
+  const pid = readLockPid(pidFile);
+  return pid !== undefined && !isPidDead(pid);
 }
 
 // Simple advisory lock via mkdir's atomicity (EEXIST on a second caller),
@@ -191,10 +207,10 @@ export function withLock<T>(path: string, fn: () => T): T {
   const pidFile = join(lockDir, "pid");
   const deadline = Date.now() + 5000;
   // Set when the lock was judged stale but could not actually be removed and
-  // is still sitting there -- see the reclaim branch below. Reported instead
-  // of the generic timeout, because "another process holds the lock" sends
-  // the user hunting for a process that provably no longer exists
-  // (ahood-cli#140).
+  // that directory is still sitting there -- see the reclaim branch below.
+  // Reported instead of the generic timeout, because "another process holds
+  // the lock" sends the user hunting for a process that provably no longer
+  // exists (ahood-cli#140).
   let reclaimError: NodeJS.ErrnoException | undefined;
   for (;;) {
     try {
@@ -218,7 +234,17 @@ export function withLock<T>(path: string, fn: () => T): T {
       // threw and never printed anything -- the one thing a CLI built to run
       // unattended in CI must never do (ahood-cli#140).
       if (Date.now() > deadline) {
-        if (reclaimError) {
+        // The remembered failure is re-confirmed here rather than trusted,
+        // because a process that DOES have permission (a root/owner ahood in
+        // another terminal) can clear that directory and take the lock for
+        // real while this one waits -- and "the process that held it is gone"
+        // would then be a confident lie about a lock somebody is legitimately
+        // holding. Re-confirming asks exactly what the message claims: is
+        // there still a directory, and is nobody alive holding it? Identity
+        // (inode, birthtime) deliberately isn't used for this: a removed and
+        // immediately recreated directory routinely gets the same inode back,
+        // so it can't tell a replacement from the original anyway.
+        if (reclaimError && existsSync(lockDir) && !isLockHeldByLiveProcess(pidFile)) {
           throw new Error(
             `Could not reclaim the stale lock on ${path} at ${lockDir}: ${reclaimError.code ?? reclaimError.message}. The process that held it is gone, but this one cannot remove that directory -- delete it manually (it may belong to another user, e.g. left behind by a sudo/root run, or sit on a read-only filesystem).`,
           );
@@ -227,7 +253,6 @@ export function withLock<T>(path: string, fn: () => T): T {
           `Timed out waiting for the lock on ${path} at ${lockDir}. If no other ahood process is running, delete that directory manually.`,
         );
       }
-      reclaimError = undefined;
       if (isLockStale(pidFile)) {
         // Reclaim it. Two very different conditions can fail that, and only
         // one of them is the race the old comment here claimed: if the
@@ -240,6 +265,17 @@ export function withLock<T>(path: string, fn: () => T): T {
         // immediately because a mid-reclaim race can also surface as e.g.
         // ENOTEMPTY with the directory still present, and that one does clear
         // itself on the next attempt.
+        //
+        // The memory deliberately survives later iterations: a failed
+        // recursive removal can take the `pid` file with it (it deletes the
+        // contents, then fails on the directory itself -- which of the two
+        // happens before the error is an implementation detail that differs
+        // between Node versions), and without a pid file isLockStale reports
+        // "not stale", so this branch never runs again and there is no second
+        // chance to observe the failure. Clearing it per-iteration made the
+        // error message depend on that detail, which is why it read correctly
+        // on one machine and fell back to the generic timeout on another
+        // (ahood-cli#145).
         try {
           rmSync(lockDir, { recursive: true, force: true });
         } catch (removeError) {
