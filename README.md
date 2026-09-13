@@ -252,7 +252,7 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | `ahood snap remove <id> [--yes]` | Permanently delete a snap (prompts for confirmation unless --yes is passed). |
 | `ahood snap share <id> [--json]` | Mint (or return the existing) shareable link for a snap. |
 | `ahood snap unshare <id> [--yes]` | Revoke a snap's share link (the snap itself is untouched; prompts for confirmation unless --yes is passed). |
-| `ahood snap tags <id> [tag1,tag2,...] [--json]` | Replace a snap's tags (omit the tag list, or pass an empty one, to clear all tags). |
+| `ahood snap tags <id> [tag ...] [--clear] [--json]` | Print a snap's tags, or replace them with the tags given. |
 <!-- COMMANDS_TABLE_END -->
 
 Run `ahood --help`, `ahood skill --help`, `ahood group --help`, `ahood snap --help`, or `ahood <command> --help` (also `ahood help <command>` / `ahood help skill <verb>` / `ahood help group <verb>` / `ahood help snap <verb>`) for the same reference — including per-command flags and examples — directly in your terminal. `ahood --version` prints the installed CLI version.
