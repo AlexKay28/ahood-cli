@@ -9,12 +9,15 @@ import { join } from "node:path";
 // throw to simulate a lock-acquisition/write failure, without the 5s real
 // lock-timeout wait a genuine contention test would need. Every other test
 // in this file gets the real, unmodified withLock behavior.
+// removeLockfileEntry is wrapped the same way for the same reason: it is the
+// only way to simulate a Ctrl-C/crash landing exactly on the pin clear
+// (ahood-cli#142) without actually killing the test process.
 vi.mock("../src/lockfile.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/lockfile.js")>();
-  return { ...actual, withLock: vi.fn(actual.withLock) };
+  return { ...actual, withLock: vi.fn(actual.withLock), removeLockfileEntry: vi.fn(actual.removeLockfileEntry) };
 });
 import { remove } from "../src/commands/remove.js";
-import { writeLockfileEntry, readLockfile, withLock } from "../src/lockfile.js";
+import { writeLockfileEntry, readLockfile, removeLockfileEntry, withLock } from "../src/lockfile.js";
 import { agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { hashMcpServerConfig } from "../src/commands/add.js";
 
@@ -330,6 +333,103 @@ describe("remove", () => {
     await remove(["alice/demo", "--yes"]);
 
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  // ahood-cli#142: the two halves of an mcp removal are not interchangeable.
+  // The pin is the ONLY thing that makes an mcp install visible to
+  // list/update, so clearing it first turns any interruption before the
+  // .mcp.json delete into a live secret nothing will ever surface again.
+  // Deleting the entry first inverts that: the leftover is a dangling pin,
+  // which a re-run finds and clears.
+  const interruptedMcpRemove = async (): Promise<{ mcpEntry: Record<string, unknown> }> => {
+    const mcpEntry = { command: "npx", args: ["-y", "@x/weather@1.0.0"], env: { API_KEY: "secret-val" } };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: { weather: mcpEntry } }, null, 2));
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+      mcp_config_hash: hashMcpServerConfig(mcpEntry),
+    });
+    // Stands in for a Ctrl-C, a crash, or an EACCES landing on the pin clear.
+    vi.mocked(removeLockfileEntry).mockImplementationOnce(() => {
+      throw new Error("simulated interruption at the pin clear");
+    });
+    await expect(remove(["alice/weather", "--yes"])).rejects.toThrow(/simulated interruption/);
+    return { mcpEntry };
+  };
+
+  it("deletes the .mcp.json entry before clearing the pin, so an interruption strands a pin and never a secret (ahood-cli#142)", async () => {
+    await interruptedMcpRemove();
+
+    // The half that must already be done: the entry, and the resolved secret
+    // in its env, are gone from the file shared with other MCP clients.
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers.weather).toBeUndefined();
+    // The half that may legitimately be left over: a pin pointing at nothing.
+    // This is the recoverable direction -- asserted explicitly so the reverse
+    // (secret live, pin gone) can never pass this test.
+    expect(readLockfile(join(dir, ".claude", "skills.lock.json"))).toHaveProperty("alice/weather");
+  });
+
+  it("clears the dangling pin left by an interrupted remove on a re-run (ahood-cli#142)", async () => {
+    await interruptedMcpRemove();
+    // Precondition for what recovery means here -- without this the re-run
+    // below would prove nothing about the ordering.
+    expect(JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).mcpServers.weather).toBeUndefined();
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await remove(["alice/weather", "--yes"]);
+
+    expect(readLockfile(join(dir, ".claude", "skills.lock.json"))).toEqual({});
+    // Nothing was left to warn about -- the entry really is gone.
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith("Removed alice/weather");
+  });
+
+  it("still clears the pin when the agent file vanishes during the confirm prompt, instead of failing on a raw ENOENT (ahood-cli#142)", async () => {
+    mkdirSync(join(dir, ".claude", "agents"), { recursive: true });
+    const dest = join(dir, agentPath("alice", "reviewer"));
+    writeFileSync(dest, "# reviewer agent\n");
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/reviewer", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+    });
+
+    // remove() takes its existsSync BEFORE the unbounded confirm() prompt, so
+    // the file can disappear in between (another process, a `git clean`, the
+    // user tidying up while the prompt sits open). Deleting it from inside the
+    // stdin stub's read() puts the removal in exactly that window: after the
+    // prompt is issued, before the answer is consumed.
+    const written: string[] = [];
+    let answered = false;
+    const fakeStdin = new Readable({
+      read() {
+        if (answered) return;
+        answered = true;
+        rmSync(dest, { force: true });
+        this.push("yes\n");
+        this.push(null);
+      },
+    }) as unknown as NodeJS.ReadStream & { fd: 0 };
+    const fakeStdout = new Writable({
+      write(chunk, _enc, cb) {
+        written.push(chunk.toString());
+        cb();
+      },
+    }) as unknown as NodeJS.WriteStream & { fd: 1 };
+    vi.spyOn(process, "stdin", "get").mockReturnValue(fakeStdin);
+    vi.spyOn(process, "stdout", "get").mockReturnValue(fakeStdout);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await remove(["alice/reviewer"]);
+
+    expect(written.join("")).toMatch(/Remove alice\/reviewer/); // the prompt really happened
+    expect(existsSync(dest)).toBe(false);
+    // The point of the test: a raw errno out of the delete used to propagate
+    // and skip the pin clear, leaving a pin for a file that no longer exists.
+    expect(readLockfile(join(dir, ".claude", "skills.lock.json"))).toEqual({});
+    expect(logSpy).toHaveBeenCalledWith("Removed alice/reviewer");
   });
 
   it("rejects a spec that tries to traverse outside .claude/skills/ via '..'", async () => {

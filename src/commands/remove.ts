@@ -1,4 +1,4 @@
-import { existsSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { confirm } from "../confirm.js";
 import { readLockfile, removeLockfileEntry, withLock, writeJsonFileAtomic } from "../lockfile.js";
 import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, MCP_CONFIG_PATH } from "../spec.js";
@@ -41,15 +41,31 @@ export async function remove(args: string[]): Promise<void> {
     return;
   }
 
+  // Every artifact the pin points at is deleted BEFORE the pin itself, which
+  // is cleared exactly once at the end of this function. The two interruption
+  // states are not symmetric, which is the whole reason for the ordering: a
+  // pin left behind after its artifact is gone is a dangling reference that a
+  // re-run of this same command finds (hadLockfileEntry) and clears, while an
+  // artifact left behind after its pin is gone is invisible to list/update
+  // forever -- and for an mcp-kind install that artifact is a live .mcp.json
+  // entry holding a resolved secret (ahood-cli#142). The rule is applied
+  // uniformly rather than per-kind: the directory and agent file are lower
+  // stakes (no secret, and a re-run's own existsSync rediscovers them), but
+  // ordering them by stakes would just make the invariant harder to keep.
+  //
+  // `force: true` on both, rather than trusting the existsSync taken at the
+  // top: an unbounded confirm() prompt sits between that check and here, so
+  // the path may legitimately be gone by now. Without it, unlinkSync threw a
+  // raw ENOENT that propagated out and skipped the pin clear below, leaving
+  // the pin behind for a file that no longer existed (ahood-cli#142).
   if (dirExisted) rmSync(dir, { recursive: true, force: true });
-  if (agentExisted) unlinkSync(agentFile);
-  removeLockfileEntry(LOCKFILE_PATH, key);
+  if (agentExisted) rmSync(agentFile, { force: true });
 
   // An mcp-kind install has no directory or agent file on disk -- its only
-  // footprint here is the lockfile entry just cleared above and a live
-  // entry in .mcp.json (which add.ts's installMcpEntry merged in, possibly
-  // holding a resolved secret in its `env`). Real removal (delete that one
-  // key) only happens when the on-disk entry's fingerprint still matches
+  // footprint is the lockfile entry (cleared below, once this block has run)
+  // and a live entry in .mcp.json (which add.ts's installMcpEntry merged in,
+  // possibly holding a resolved secret in its `env`). Real removal (delete
+  // that one key) only happens when the on-disk entry's fingerprint matches
   // what was recorded at install/update time -- same posture as add.ts's
   // own assertNoCollision: never blind-write/delete something this process
   // didn't verify it still owns. Without SOME check here, "Removed" would
@@ -81,9 +97,9 @@ export async function remove(args: string[]): Promise<void> {
     // printed a bare "Removed" with the entry (and its secret) still live,
     // the very false-assurance bug the block above exists to prevent
     // (ahood-cli#115). The lockfile's mcp_config_hash, read at the top of
-    // this function before the pin was cleared, is direct evidence that
-    // ahood DID install an entry into this file, so record why the read
-    // failed and warn off that instead of off a shape we can't inspect.
+    // this function, is direct evidence that ahood DID install an entry into
+    // this file, so record why the read failed and warn off that instead of
+    // off a shape we can't inspect.
     mcpConfigUnreadable = error instanceof Error ? error.message : String(error);
   }
 
@@ -119,6 +135,11 @@ export async function remove(args: string[]): Promise<void> {
       // removedMcpEntry stays false -- falls through to the warning below.
     }
   }
+
+  // Last, per the ordering note above: everything this pin could point at has
+  // now either been deleted or been diagnosed and warned about below, so the
+  // pin has no surviving work left to surface (ahood-cli#142).
+  removeLockfileEntry(LOCKFILE_PATH, key);
 
   if (mcpConfigUnreadable !== undefined && lockEntry?.mcp_config_hash !== undefined) {
     // Its own wording rather than the branch below's: "remove it manually"
