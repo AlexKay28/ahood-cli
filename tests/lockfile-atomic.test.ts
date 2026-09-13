@@ -1,8 +1,19 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { writeJsonFileAtomic } from "../src/lockfile.js";
 
 // Lives in its own file because writeJsonFileAtomic's failure path can only be
@@ -201,6 +212,119 @@ describe("writeJsonFileAtomic", () => {
       // directory through the same mocked readdirSync.
       hooks.onReaddir = null;
       expect(JSON.parse(readFileSync(target, "utf-8"))).toEqual({ mcpServers: { demo: { command: "node" } } });
+    });
+  });
+
+  // The contract from ahood-cli#144: a symlinked .mcp.json is written THROUGH,
+  // onto whatever the link resolves to. `outside` stands in for the shared or
+  // out-of-tree config someone symlinks at precisely so the MCP server secrets
+  // never land in the project directory.
+  describe("symlinked destination (#144)", () => {
+    let outside: string;
+    const secrets = { mcpServers: { demo: { env: { API_KEY: "s3cret" } } } };
+
+    beforeEach(() => {
+      outside = mkdtempSync(join(tmpdir(), "ahood-atomic-outside-"));
+    });
+
+    afterEach(() => {
+      rmSync(outside, { recursive: true, force: true });
+    });
+
+    it("writes onto the link's target and leaves the link a link", () => {
+      const real = join(outside, "real.json");
+      writeFileSync(real, '{"mcpServers":{}}\n');
+      chmodSync(real, 0o640);
+      symlinkSync(real, target);
+
+      writeJsonFileAtomic(target, secrets);
+
+      // The content reached the file the user pointed at...
+      expect(JSON.parse(readFileSync(real, "utf-8"))).toEqual(secrets);
+      // ...and the arrangement survived: still a symlink, not a regular file
+      // quietly holding the secrets inside the project directory.
+      expect(lstatSync(target).isSymbolicLink()).toBe(true);
+      expect((statSync(real).mode & 0o777).toString(8)).toBe("640");
+      expect(readdirSync(dir)).toEqual([".mcp.json"]);
+      expect(tempFiles(dir)).toEqual([]);
+      expect(tempFiles(outside)).toEqual([]);
+    });
+
+    it("puts the temp file beside the resolved target, so the rename never crosses filesystems", () => {
+      const real = join(outside, "real.json");
+      writeFileSync(real, '{"mcpServers":{}}\n');
+      symlinkSync(real, target);
+
+      let renamed: [string, string] | undefined;
+      hooks.onRename = (oldPath, newPath) => {
+        renamed = [oldPath, newPath];
+      };
+
+      writeJsonFileAtomic(target, secrets);
+
+      expect(renamed).toBeDefined();
+      // Same directory on both sides of the rename -- an out-of-tree target on
+      // another mount would be EXDEV otherwise.
+      expect(dirname(renamed![0])).toBe(outside);
+      expect(renamed![1]).toBe(real);
+    });
+
+    it("creates the target of a dangling symlink rather than replacing the link", () => {
+      const real = join(outside, "not-yet.json");
+      symlinkSync(real, target);
+      const reference = join(outside, "reference.json");
+      writeFileSync(reference, "{}\n");
+
+      writeJsonFileAtomic(target, secrets);
+
+      expect(JSON.parse(readFileSync(real, "utf-8"))).toEqual(secrets);
+      expect(lstatSync(target).isSymbolicLink()).toBe(true);
+      // Nothing to preserve at a destination that didn't exist, so it lands at
+      // the umask default, exactly as a brand-new regular destination does.
+      expect(statSync(real).mode & 0o777).toBe(statSync(reference).mode & 0o777);
+    });
+
+    it("follows a chain of links to the file at the end of it", () => {
+      const real = join(outside, "real.json");
+      const middle = join(outside, "middle.json");
+      writeFileSync(real, '{"mcpServers":{}}\n');
+      symlinkSync(real, middle);
+      symlinkSync(middle, target);
+
+      writeJsonFileAtomic(target, secrets);
+
+      expect(JSON.parse(readFileSync(real, "utf-8"))).toEqual(secrets);
+      expect(lstatSync(target).isSymbolicLink()).toBe(true);
+      expect(lstatSync(middle).isSymbolicLink()).toBe(true);
+    });
+
+    it("refuses a link that loops back on itself instead of spinning", () => {
+      const other = join(outside, "loop.json");
+      symlinkSync(other, target);
+      symlinkSync(target, other);
+
+      expect(() => writeJsonFileAtomic(target, secrets)).toThrow(/loops back on itself/);
+      expect(lstatSync(target).isSymbolicLink()).toBe(true);
+      expect(tempFiles(dir)).toEqual([]);
+      expect(tempFiles(outside)).toEqual([]);
+    });
+
+    it("sweeps orphaned temp files from both the target's directory and the link's (#125)", () => {
+      const child = spawnSync(process.execPath, ["-e", ""]);
+      if (!child.pid) throw new Error("could not spawn a throwaway process");
+      const real = join(outside, "real.json");
+      writeFileSync(real, '{"mcpServers":{}}\n');
+      symlinkSync(real, target);
+      // Left by a crashed write under this fix (beside the target) and by one
+      // under a pre-#144 version (beside the link) respectively.
+      const besideTarget = join(outside, `real.json.tmp-${child.pid}-424242424242424242`);
+      const besideLink = join(dir, `.mcp.json.tmp-${child.pid}-424242424242424242`);
+      for (const path of [besideTarget, besideLink]) writeFileSync(path, "{}\n", { mode: 0o600 });
+
+      writeJsonFileAtomic(target, secrets);
+
+      expect(existsSync(besideTarget)).toBe(false);
+      expect(existsSync(besideLink)).toBe(false);
     });
   });
 });
