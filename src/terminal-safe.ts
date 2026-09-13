@@ -27,3 +27,39 @@ const CONTROL_CHARACTERS = /[\x00-\x1f\x7f-\x9f]/g;
 export function sanitizeForTerminal(text: unknown, maxLength = 200): string {
   return String(text).replace(CONTROL_CHARACTERS, " ").slice(0, maxLength);
 }
+
+// Same C0/C1 range as CONTROL_CHARACTERS above, minus the three characters
+// that carry a document's layout rather than a terminal instruction: tab
+// (\x09), line feed (\x0a) and carriage return (\x0d).
+const CONTROL_CHARACTERS_EXCEPT_LAYOUT = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g;
+
+// The document-shaped sibling of sanitizeForTerminal, for the one caller that
+// prints a whole publisher-authored file to a human's terminal
+// (`ahood skill read`, ahood-cli#133) rather than a field interpolated into a
+// CLI-authored message. Two of sanitizeForTerminal's decisions invert at that
+// size, which is why this is a separate function rather than an extra
+// argument on that one -- a flag that flips half of a function's documented
+// behaviour is harder to reason about than two functions with two rationales:
+//
+//   - Newlines are preserved. #127 flattens them because a forged prompt line
+//     ("...\n\nEnter your token:") needs no escape sequence at all, and that
+//     rationale explicitly rests on callers bounding input "to a few lines'
+//     worth of text". A markdown document is not that: flattening it yields
+//     one unreadable line, destroying the command. The spoofing risk it trades
+//     away is also much weaker here -- `read` prints and exits without ever
+//     prompting, and a user who typed `ahood skill read` has already been told
+//     they are looking at someone else's untrusted prose.
+//
+//   - There is no length cap. sanitizeForTerminal's 200 exists so one field
+//     can't flood the terminal; capping a document the user explicitly asked
+//     to read is its own failure mode, and a hostile one: a publisher could
+//     simply push the part worth hiding past the cap and let the CLI truncate
+//     it away, turning a safety measure into a concealment primitive. Once the
+//     escapes are gone the residue is plain text that scrolls -- which the
+//     terminal's scrollback, a pager, or Ctrl-C already handles, and which
+//     cannot repaint, retitle, or hide anything.
+//
+// Takes `unknown` for the same reason sanitizeForTerminal does (ahood-cli#122).
+export function sanitizeDocumentForTerminal(text: unknown): string {
+  return String(text).replace(CONTROL_CHARACTERS_EXCEPT_LAYOUT, " ");
+}
