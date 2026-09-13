@@ -402,14 +402,25 @@ export const SNAP_COMMANDS_HELP: CommandHelp[] = [
     flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
   },
   {
-    usage: "ahood snap tags <id> [tag1,tag2,...] [--json]",
-    summary: "Replace a snap's tags (omit the tag list, or pass an empty one, to clear all tags).",
+    usage: "ahood snap tags <id> [tag ...] [--clear] [--json]",
+    summary: "Print a snap's tags, or replace them with the tags given.",
     desc:
-      "Replace the full set of tags on a snap -- this is not a merge, so any existing tags not listed are " +
-      "dropped. Omitting the tag list entirely, or passing an empty string, clears all tags. No confirmation " +
-      "prompt: unlike remove/unshare this only touches metadata, never the snap's content or shareability.",
-    flags: ["--json    Emit {id, tags} instead of a plain-text summary."],
-    examples: ["ahood snap tags snap_123 deploy,bugfix", 'ahood snap tags snap_123 ""'],
+      "With no tag list, prints the snap's current tags and changes nothing. With a tag list, replaces the " +
+      "full set -- this is not a merge, so any existing tags not listed are dropped. Tags may be given as " +
+      "separate arguments, comma-separated, or both; quote a tag that contains a space. Clearing every tag " +
+      "is explicit: pass --clear or an empty string. Each tag prints quoted, so one multi-word tag never " +
+      "looks like two. No confirmation prompt: unlike remove/unshare this only touches metadata, never the " +
+      "snap's content or shareability, and the tags it replaces can be read back first.",
+    flags: [
+      "--clear   Remove every tag from the snap.",
+      "--json    Emit {id, tags} instead of a plain-text summary.",
+    ],
+    examples: [
+      "ahood snap tags snap_123",
+      "ahood snap tags snap_123 deploy bugfix",
+      "ahood snap tags snap_123 deploy,bugfix",
+      "ahood snap tags snap_123 --clear",
+    ],
   },
 ];
 

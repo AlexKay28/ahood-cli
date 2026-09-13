@@ -781,12 +781,66 @@ describe("snap commands", () => {
       expect(JSON.parse(calls[0].init.body as string)).toEqual({ tags: ["deploy", "bugfix"] });
     });
 
-    it("clears all tags when no tag list is given", async () => {
-      const calls = stubApi(200, { id: ID, tags: [] });
+    // ahood-cli#138: the bare form used to PATCH {"tags":[]} unconfirmed, and
+    // it is the form a user reaches for to ASK what a snap's tags are.
+    it("reads the snap's tags without issuing a PATCH when no tag list is given", async () => {
+      const calls = stubApi(200, { id: ID, content: "note", tags: ["deploy", "bugfix"] });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
       await tagsSnap([ID]);
 
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toBe(`${API_URL}/api/v1/snaps/${ID}`);
+      expect(calls[0].init.method).toBeUndefined();
+      expect(logSpy).toHaveBeenCalledWith(`Tags for ${ID}: "deploy", "bugfix"`);
+    });
+
+    it("reports no tags on a read of an untagged snap, still without a PATCH", async () => {
+      const calls = stubApi(200, { id: ID, content: "note", tags: [] });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await tagsSnap([ID]);
+
+      expect(calls.every((c) => c.init.method === undefined)).toBe(true);
+      expect(logSpy).toHaveBeenCalledWith(`${ID} has no tags.`);
+    });
+
+    it("--json on a read emits {id, tags} and issues no PATCH", async () => {
+      const calls = stubApi(200, { id: ID, content: "note", tags: ["deploy"] });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await tagsSnap([ID, "--json"]);
+
+      expect(calls.every((c) => c.init.method === undefined)).toBe(true);
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ id: ID, tags: ["deploy"] }));
+    });
+
+    it("degrades to the no-tags message instead of crashing when a read returns tags: null", async () => {
+      stubApi(200, { id: ID, content: "note", tags: null });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await tagsSnap([ID]);
+
+      expect(logSpy).toHaveBeenCalledWith(`${ID} has no tags.`);
+    });
+
+    it("clears all tags with --clear", async () => {
+      const calls = stubApi(200, { id: ID, tags: [] });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await tagsSnap([ID, "--clear"]);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].init.method).toBe("PATCH");
       expect(JSON.parse(calls[0].init.body as string)).toEqual({ tags: [] });
+      expect(logSpy).toHaveBeenCalledWith(`Cleared tags for ${ID}.`);
+    });
+
+    it("refuses --clear together with a tag list rather than guessing which one wins", async () => {
+      const calls = stubApi(200, { id: ID, tags: [] });
+
+      await expect(tagsSnap([ID, "deploy", "--clear"])).rejects.toThrow(/--clear takes no tag list/);
+      expect(calls).toHaveLength(0);
     });
 
     it("clears all tags when an empty string is given", async () => {
@@ -794,10 +848,22 @@ describe("snap commands", () => {
 
       await tagsSnap([ID, ""]);
 
+      expect(calls[0].init.method).toBe("PATCH");
       expect(JSON.parse(calls[0].init.body as string)).toEqual({ tags: [] });
     });
 
-    it("joins multiple unquoted positional words instead of silently dropping everything after the first", async () => {
+    // ahood-cli#137: these two shapes are indistinguishable once the trailing
+    // positionals are joined into one string, so joining had to pick one and
+    // broke the other. Parsing each positional on its own serves both.
+    it("takes space-separated positionals as separate tags, not one multi-word tag", async () => {
+      const calls = stubApi(200, { id: ID, tags: ["deploy", "bugfix"] });
+
+      await tagsSnap([ID, "deploy", "bugfix"]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ tags: ["deploy", "bugfix"] });
+    });
+
+    it("still splits an unquoted comma-separated list the shell delivered as several tokens", async () => {
       const calls = stubApi(200, { id: ID, tags: ["deploy", "bugfix"] });
 
       await tagsSnap([ID, "deploy,", "bugfix"]);
@@ -805,13 +871,32 @@ describe("snap commands", () => {
       expect(JSON.parse(calls[0].init.body as string)).toEqual({ tags: ["deploy", "bugfix"] });
     });
 
-    it("degrades to the cleared message instead of crashing when the server returns tags: null", async () => {
+    it("keeps a quoted tag that contains a space as a single tag", async () => {
+      const calls = stubApi(200, { id: ID, tags: ["needs review"] });
+
+      await tagsSnap([ID, "needs review"]);
+
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ tags: ["needs review"] });
+    });
+
+    it("degrades to the cleared message instead of crashing when a write returns tags: null", async () => {
       stubApi(200, { id: ID, tags: null });
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-      await tagsSnap([ID]);
+      await tagsSnap([ID, "--clear"]);
 
       expect(logSpy).toHaveBeenCalledWith(`Cleared tags for ${ID}.`);
+    });
+
+    // ahood-cli#137: unquoted, one tag "deploy bugfix" and two tags "deploy"
+    // and "bugfix" printed the identical line, so the collapse left no trace.
+    it("prints each updated tag quoted so one multi-word tag can't pass for two", async () => {
+      stubApi(200, { id: ID, tags: ["deploy bugfix"] });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await tagsSnap([ID, "deploy bugfix"]);
+
+      expect(logSpy).toHaveBeenCalledWith(`Tags for ${ID}: "deploy bugfix"`);
     });
 
     it("prints the updated tag list in plain mode", async () => {
@@ -820,16 +905,7 @@ describe("snap commands", () => {
 
       await tagsSnap([ID, "deploy,bugfix"]);
 
-      expect(logSpy).toHaveBeenCalledWith(`Tags for ${ID}: deploy, bugfix`);
-    });
-
-    it("prints a cleared message in plain mode when the result has no tags", async () => {
-      stubApi(200, { id: ID, tags: [] });
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
-      await tagsSnap([ID]);
-
-      expect(logSpy).toHaveBeenCalledWith(`Cleared tags for ${ID}.`);
+      expect(logSpy).toHaveBeenCalledWith(`Tags for ${ID}: "deploy", "bugfix"`);
     });
 
     it("--json emits {id, tags}", async () => {

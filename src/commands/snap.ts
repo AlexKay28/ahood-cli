@@ -35,7 +35,8 @@ const SHOW_USAGE = "Usage: ahood snap show <id> [--json]";
 const REMOVE_USAGE = "Usage: ahood snap remove <id> [--yes]";
 const SHARE_USAGE = "Usage: ahood snap share <id> [--json]";
 const UNSHARE_USAGE = "Usage: ahood snap unshare <id> [--yes]";
-const TAGS_USAGE = "Usage: ahood snap tags <id> [tag1,tag2,...] [--json] (omit or pass an empty value to clear all tags)";
+const TAGS_USAGE =
+  'Usage: ahood snap tags <id> [tag ...] [--clear] [--json] (with no tag list, prints the snap\'s current tags; pass --clear or "" to remove them all)';
 
 // There's no existing "read stdin to completion" helper in this codebase to
 // reuse -- confirm.ts and secret-prompt.ts both only ever read a single
@@ -340,9 +341,39 @@ export async function unshareSnap(args: string[]): Promise<void> {
   console.log(`Unshared snap ${id}.`);
 }
 
+// Shared by both of tagsSnap's paths so reading a snap's tags and the echo
+// after replacing them print the identical line -- the read is meant to be the
+// way a user checks what a write did, which only works if the two agree.
+//
+// Each tag is printed quoted. Unquoted, `Tags for X: deploy bugfix` is
+// character-for-character what ONE tag "deploy bugfix" and TWO tags "deploy"
+// and "bugfix" both printed, so a tag list that had silently collapsed into a
+// single multi-word tag looked exactly like the correct result and the mistake
+// left no trace on screen (ahood-cli#137). JSON.stringify rather than manual
+// quoting so a tag that itself contains a quote or a newline stays unambiguous.
+function printTags(jsonOutput: boolean, id: string, tags: string[] | null, emptyMessage: string): void {
+  // ?? [] -- see printSnaps' identical degrade-on-null guard above
+  // (ahood-cli#106): a degraded response shouldn't crash on undefined.length.
+  // Normalized before the --json branch too, so the emitted shape is the same
+  // {id, tags: []} whether the server said [] or null.
+  const list = tags ?? [];
+  if (jsonOutput) {
+    console.log(JSON.stringify({ id, tags: list }));
+    return;
+  }
+  console.log(list.length > 0 ? `Tags for ${id}: ${list.map((t) => JSON.stringify(t)).join(", ")}` : emptyMessage);
+}
+
 export async function tagsSnap(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
-  const positionals = args.filter((a) => a !== "--json");
+  const clear = args.includes("--clear");
+  // Folded onto flags.ts's shared stripping helper, which this command was the
+  // last caller still hand-rolling its own copy of (see unrecognizedArgs'
+  // comment, ahood-cli#135/#136). The `args.filter(a => a !== "--json")` it
+  // replaces knew about exactly one flag, so --clear below would have meant
+  // growing a third variant of the same rules -- the duplication that let
+  // `snap list` ship with no unknown-flag check at all.
+  const positionals = unrecognizedArgs(args, ["--json", "--clear"], []);
   // Reject stray "--" flags rather than folding them into the tag list
   // (parseSearchQuery in flags.ts does the same). Without this, the natural
   // mistake `snap tags <id> --tags a,b` -- natural because `snap create`
@@ -353,38 +384,56 @@ export async function tagsSnap(args: string[]): Promise<void> {
   const id = positionals[0];
   if (!id) throw new UsageError(TAGS_USAGE);
 
-  // PATCH replaces the full tag set (not a merge) -- omitting the tags
-  // argument, or passing an empty string, both clear every tag, matching
-  // the "pass [] to clear" contract of the endpoint itself. Joined, not
-  // just positionals[1] -- an unquoted "tag1, tag2" arrives as multiple
-  // positional tokens, and taking only the first one silently dropped the
-  // rest with no error, the same bug createSnap's own content-joining
-  // above already fixed.
-  const tagsArg = positionals.slice(1).join(" ");
-  const tags = tagsArg
-    ? tagsArg
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean)
-    : [];
+  const tagArgs = positionals.slice(1);
+  if (clear && tagArgs.length > 0) {
+    throw new UsageError(
+      `--clear takes no tag list, but got "${tagArgs[0]}". Pass --clear to remove every tag, or the tags to set -- not both.\n${TAGS_USAGE}`,
+    );
+  }
 
-  // No confirm() gate, unlike remove/unshare -- this only replaces metadata
-  // (tags), never the snap's content or its shareability, and re-running
-  // `tags` with the old set restores it exactly. Per ahood-cli#114's spec.
+  // The bare `snap tags <id>` form READS instead of clearing (ahood-cli#138).
+  // It used to PATCH {"tags":[]} unconfirmed, and it is the form a user reaches
+  // for to ASK what a snap's tags are -- `git tag`, `docker tag` and `hg tags`
+  // all read on their bare form, and nothing else in this CLI showed one snap's
+  // tags (`snap show` prints content only, `snap list` truncates across all
+  // snaps), so the answer was destroyed by the act of asking. Destroying a tag
+  // set now takes saying so: --clear, or the documented explicit "" form below.
+  // That's why there's still no confirm() gate here, unlike remove/unshare --
+  // the accident it would have guarded against can no longer be typed by
+  // accident, and #114's original reasoning (metadata only, and re-running
+  // `tags` with the old set restores it exactly) holds once the user can
+  // actually find out what the old set was.
+  if (!clear && tagArgs.length === 0) {
+    const snap = await apiJson<SnapDetail>(`/api/v1/snaps/${encodeURIComponent(id)}`);
+    printTags(jsonOutput, snap.id, snap.tags, `${snap.id} has no tags.`);
+    return;
+  }
+
+  // Each positional is parsed on its own, then concatenated -- NOT joined into
+  // one string first. The join existed to rescue an unquoted `tags <id>
+  // "deploy, bugfix"`, which the shell hands over as two argv entries and which
+  // taking only positionals[1] silently truncated (ahood-cli#114). But joining
+  // cannot tell that apart from a user typing space separators, so `tags <id>
+  // deploy bugfix` became the single tag "deploy bugfix" (ahood-cli#137).
+  // Splitting per token serves both: ["deploy,", "bugfix"] and ["deploy",
+  // "bugfix"] each yield ["deploy", "bugfix"], while a tag that genuinely
+  // contains a space stays expressible by quoting it as one argument -- which
+  // treating whitespace as a separator would have taken away.
+  const tags = tagArgs.flatMap((arg) =>
+    arg
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean),
+  );
+
+  // PATCH replaces the full tag set (not a merge) -- passing --clear, or an
+  // empty string, sends [] and clears every tag, matching the "pass [] to
+  // clear" contract of the endpoint itself.
   const updated = await apiJson<{ id: string; tags: string[] | null }>(`/api/v1/snaps/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tags }),
   });
 
-  if (jsonOutput) {
-    console.log(JSON.stringify(updated));
-    return;
-  }
-  // ?? [] -- see printSnaps' identical degrade-on-null guard above
-  // (ahood-cli#106): a degraded response shouldn't crash on undefined.length.
-  const updatedTags = updated.tags ?? [];
-  console.log(
-    updatedTags.length > 0 ? `Tags for ${updated.id}: ${updatedTags.join(", ")}` : `Cleared tags for ${updated.id}.`,
-  );
+  printTags(jsonOutput, updated.id, updated.tags, `Cleared tags for ${updated.id}.`);
 }
