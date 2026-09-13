@@ -219,9 +219,23 @@ describe("update", () => {
     // re-extracts even when unchanged) is deliberately short-circuited
     // before hitting /download, so an up-to-date entry with a secret in its
     // env never re-triggers a masked prompt for no reason.
+    //
+    // The .mcp.json entry is part of the fixture rather than absent
+    // (ahood-cli#139): the skip is now conditional on the entry actually
+    // being on disk, and a pin with no entry at all is the bug, not the
+    // no-op. The assertions below are unchanged -- the secret-bearing env
+    // is what makes "never hit /download" mean "never prompted", since the
+    // prompt lives behind the archive this test refuses to serve.
+    const installedEntry = {
+      command: "npx",
+      args: ["-y", "@example/weather-mcp@1.0.0"],
+      env: { WEATHER_API_KEY: "sk-live-already-up-to-date" },
+    };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: { weather: installedEntry } }, null, 2));
     writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
       version: "1.0.0",
       checksum_sha256: "abc",
+      mcp_config_hash: hashMcpServerConfig(installedEntry),
     });
 
     const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
@@ -251,6 +265,8 @@ describe("update", () => {
     expect(errorSpy).not.toHaveBeenCalled();
     expect(process.exitCode).not.toBe(1);
     expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("/download"))).toBe(false);
+    // ...and the entry (secret included) is byte-for-byte what it was.
+    expect(JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).mcpServers.weather).toEqual(installedEntry);
   });
 
   it("performs a real update when a newer version is available and the fingerprint matches (ahood-cli#169)", async () => {
@@ -371,6 +387,232 @@ describe("update", () => {
     const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
     expect(mcpConfig.mcpServers.weather).toEqual({ url: "https://mcp.example.com/v2/sse" });
     expect(process.exitCode).not.toBe(1);
+  });
+
+  // ahood-cli#139: the self-heal above only ever ran when a NEWER version
+  // existed -- with the pin already at latest, `update` short-circuited on
+  // the version comparison alone and reported "already up to date" about a
+  // server that was no longer in .mcp.json. A skill or agent in the same
+  // state is restored (add() is called unconditionally for those kinds), so
+  // mcp was the one kind whose repair command couldn't repair it.
+  it("self-heals a deleted .mcp.json entry even when the pin is already at latest (ahood-cli#139)", async () => {
+    const manifest = { name: "weather", description: "x", remotes: [{ url: "https://mcp.example.com/v1/sse" }] };
+    const archive = await tarGz({ "server.json": JSON.stringify(manifest) });
+    const checksum = sha256(archive);
+
+    // The file is still there and still holds someone else's server -- the
+    // shape a bad merge or a hand cleanup leaves behind, which is why this
+    // also asserts the unrelated entry survives the repair.
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: { other: { url: "https://other.example.com/sse" } } }, null, 2));
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: checksum,
+      mcp_config_hash: hashMcpServerConfig({ url: "https://mcp.example.com/v1/sse" }),
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `${API_URL}/api/v1/skills/alice/weather`) {
+          return new Response(
+            JSON.stringify({
+              // Same version the lockfile already pins -- nothing to upgrade to.
+              skill_versions: { version: "1.0.0", manifest: [{ path: "server.json" }], checksum_sha256: checksum },
+              kind: "mcp",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === `${API_URL}/api/v1/skills/alice/weather/download?version=1.0.0`) {
+          return new Response(new Uint8Array(archive), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await update([]);
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers.weather).toEqual({ url: "https://mcp.example.com/v1/sse" });
+    expect(mcpConfig.mcpServers.other).toEqual({ url: "https://other.example.com/sse" }); // untouched
+    expect(logSpy.mock.calls.map((c) => String(c[0])).join("\n")).not.toContain("already up to date");
+    const lockfile = readLockfile(join(dir, ".claude", "skills.lock.json"));
+    expect(lockfile["alice/weather"].mcp_config_hash).toBe(hashMcpServerConfig({ url: "https://mcp.example.com/v1/sse" }));
+    expect(process.exitCode).not.toBe(1);
+  });
+
+  // ahood-cli#139: an entry emptied in place is just as dead as a deleted
+  // one, so it must not be reported as up to date -- but ahood never writes
+  // `{}` or `null`, so it can't prove the entry is its own either. It falls
+  // through to updateMcpEntry's fingerprint check, which refuses it (before
+  // any download or prompt) with the hand-edit message, rather than stamping
+  // over whatever put it there.
+  it.each([
+    ["an empty object", {}],
+    ["null", null],
+  ])("refuses rather than claiming up-to-date when the .mcp.json entry was emptied to %s (ahood-cli#139)", async (_label, emptied) => {
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: { weather: emptied } }, null, 2));
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+      mcp_config_hash: hashMcpServerConfig({ url: "https://mcp.example.com/v1/sse" }),
+    });
+
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${API_URL}/api/v1/skills/alice/weather`) {
+        return new Response(
+          JSON.stringify({
+            skill_versions: { version: "1.0.0", manifest: [{ path: "server.json" }], checksum_sha256: "abc" },
+            kind: "mcp",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await update([]);
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/modified since install/));
+    expect(logSpy.mock.calls.map((c) => String(c[0])).join("\n")).not.toContain("already up to date");
+    expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("/download"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).mcpServers.weather).toEqual(emptied);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+  });
+
+  // ahood-cli#139: the self-heal has no on-disk entry to carry secrets
+  // forward from, so it genuinely has to resolve them again -- and a bare
+  // `ahood skill update` walks every locked entry unattended. updateMcpEntry
+  // passes allowNonTtyPrompt: false, so with no TTY (exactly the shape under
+  // vitest) this must name the variable and fail, not block on stdin. A
+  // regression here would surface as this test timing out.
+  it("fails an unattended self-heal with a named variable instead of hanging on the secret prompt (ahood-cli#139)", async () => {
+    const manifest = {
+      name: "weather",
+      description: "x",
+      packages: [
+        {
+          registry_type: "npm",
+          identifier: "@example/weather-mcp",
+          version: "1.0.0",
+          runtime_hint: "npx",
+          environment_variables: [{ name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true }],
+        },
+      ],
+    };
+    const archive = await tarGz({ "server.json": JSON.stringify(manifest) });
+    const checksum = sha256(archive);
+    const originalSecret = process.env.WEATHER_API_KEY;
+    delete process.env.WEATHER_API_KEY;
+
+    // Entry deleted; the secret that was in it went with it.
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: {} }, null, 2));
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: checksum,
+      mcp_config_hash: "stale-hash-of-the-entry-that-was-deleted",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `${API_URL}/api/v1/skills/alice/weather`) {
+          return new Response(
+            JSON.stringify({
+              skill_versions: { version: "1.0.0", manifest: [{ path: "server.json" }], checksum_sha256: checksum },
+              kind: "mcp",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === `${API_URL}/api/v1/skills/alice/weather/download?version=1.0.0`) {
+          return new Response(new Uint8Array(archive), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await update([]);
+    } finally {
+      if (originalSecret !== undefined) process.env.WEATHER_API_KEY = originalSecret;
+    }
+
+    const errors = errorSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(errors).toContain("WEATHER_API_KEY");
+    expect(errors).toMatch(/no terminal to prompt on/);
+    expect(process.exitCode).toBe(1);
+    // Nothing half-written: the entry is still absent, the pin still at 1.0.0.
+    expect(JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).mcpServers.weather).toBeUndefined();
+    expect(readLockfile(join(dir, ".claude", "skills.lock.json"))["alice/weather"].version).toBe("1.0.0");
+    process.exitCode = 0;
+  });
+
+  // ahood-cli#139: deciding whether the entry is present means reading
+  // .mcp.json on a path that never read it before, and readMcpConfig throws
+  // on a file it can't parse. That error is deliberately not swallowed into
+  // "no entry" or into the silent skip -- the per-entry catch reports it and
+  // the rest of the batch still updates, matching what the version-differs
+  // path has always done with the same unparseable file.
+  it("reports an unparseable .mcp.json per-entry without stopping the rest of the batch (ahood-cli#139)", async () => {
+    writeFileSync(join(dir, MCP_CONFIG_PATH), "{ this is not json");
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+      mcp_config_hash: hashMcpServerConfig({ url: "https://mcp.example.com/v1/sse" }),
+    });
+
+    const goodArchive = await tarGz({ "SKILL.md": "# good\n" });
+    const goodChecksum = sha256(goodArchive);
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/good", {
+      version: "1.0.0",
+      checksum_sha256: "old",
+    });
+
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `${API_URL}/api/v1/skills/alice/weather`) {
+        return new Response(
+          JSON.stringify({
+            skill_versions: { version: "1.0.0", manifest: [{ path: "server.json" }], checksum_sha256: "abc" },
+            kind: "mcp",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url === `${API_URL}/api/v1/skills/alice/good`) {
+        return new Response(
+          JSON.stringify({ skill_versions: { version: "1.1.0", manifest: [{ path: "SKILL.md" }], checksum_sha256: goodChecksum } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url === `${API_URL}/api/v1/skills/alice/good/download?version=1.1.0`) {
+        return new Response(new Uint8Array(goodArchive), { status: 200 });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await update([]);
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/alice\/weather.*not valid JSON/));
+    expect(logSpy.mock.calls.map((c) => String(c[0])).join("\n")).not.toContain("already up to date");
+    // The unrelated skill in the same batch still updated.
+    expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe("# good\n");
+    expect(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).toBe("{ this is not json"); // never rewritten
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
   });
 
   it("refuses to update when no fingerprint was ever recorded (a legacy entry predating this field) (ahood-cli#169)", async () => {
