@@ -32,6 +32,33 @@ describe("search", () => {
     await expect(search(["foo", "--tags", "ci"])).rejects.toThrow(/Unknown flag: --tags/);
   });
 
+  // ahood-cli#136 was filed against `snap search`, but the bug lived in the
+  // shared flagValue/parseSearchQuery pair, so this command had it too:
+  // `--limit 1 --limit 2` searched with per_page=1, and a query word sitting
+  // after the second --limit was deleted from q. Refusing the repeat is
+  // therefore a deliberate behaviour change here as well, not a side effect.
+  it("rejects a repeated --limit rather than silently using the first one", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ skills: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(search(["foo", "--limit", "1", "--limit", "2"])).rejects.toThrow(/--limit given more than once/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // The stripping half of #136: only the occurrence that consumed a value may
+  // remove one, so a query word after --limit's value stays in q.
+  it("keeps a query word that follows --limit's value", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ skills: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await search(["foo", "--limit", "5", "bar"]);
+
+    const params = new URL(String(fetchMock.mock.calls[0][0])).searchParams;
+    expect(params.get("q")).toBe("foo bar");
+    expect(params.get("per_page")).toBe("5");
+  });
+
   it("--json prints the raw skills array instead of formatted prose", async () => {
     const skills = [{ slug: "demo", name: "Demo", tagline: null, downloads_count: 3, profiles: { username: "alice" } }];
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ skills }), { status: 200 })));

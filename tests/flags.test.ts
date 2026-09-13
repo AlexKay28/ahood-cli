@@ -32,6 +32,33 @@ describe("flagValue", () => {
   it("preserves a literal = inside the value for the --flag=value form", () => {
     expect(flagValue(["--tagline=a=b"], "--tagline")).toBe("a=b");
   });
+
+  // ahood-cli#136: first-wins silently discarded the second value (and the
+  // stripping below silently ate its neighbour). Refused outright instead --
+  // neither value is guessed at.
+  it("throws on a repeated flag rather than returning the first value", () => {
+    expect(() => flagValue(["--tags", "a", "--tags", "bar"], "--tags")).toThrow(/--tags given more than once/);
+  });
+
+  it("throws on a repeat across the two spellings, in either order", () => {
+    expect(() => flagValue(["--tags", "a", "--tags=b"], "--tags")).toThrow(/--tags given more than once/);
+    expect(() => flagValue(["--tags=a", "--tags", "b"], "--tags")).toThrow(/--tags given more than once/);
+    expect(() => flagValue(["--tags=a", "--tags=b"], "--tags")).toThrow(/--tags given more than once/);
+  });
+
+  it("throws a UsageError for a repeat, so exit-code.ts maps it to 2", () => {
+    expect(() => flagValue(["--limit", "1", "--limit", "2"], "--limit")).toThrow(UsageError);
+  });
+
+  // "--tags accumulates" is the misconception that produces the repeat, so the
+  // message says how to actually pass several tags.
+  it("points a repeated --tags at the comma-separated spelling", () => {
+    expect(() => flagValue(["--tags", "a", "--tags", "b"], "--tags")).toThrow(/comma-separated value \(--tags a,b\)/);
+  });
+
+  it("does not mistake a repeat of a DIFFERENT flag for a repeat of this one", () => {
+    expect(flagValue(["--tags", "a", "--limit", "1", "--limit", "2"], "--tags")).toBe("a");
+  });
 });
 
 // ahood-cli#135 -- the check `snap list` was missing entirely.
@@ -54,10 +81,28 @@ describe("unrecognizedArgs", () => {
     expect(unrecognizedArgs(["--limit=5", "garbage"], ["--json"], ["--limit"])).toEqual(["garbage"]);
   });
 
-  // Deliberately NOT a leftover: a repeated value flag is a separate question
-  // (ahood-cli#136), and reporting it here would turn that fix into a
-  // behaviour change smuggled in under this one.
-  it("strips a repeated value flag and both of its values", () => {
-    expect(unrecognizedArgs(["--tags", "a", "--tags", "b"], [], ["--tags"])).toEqual([]);
+  // Was pinned as "strips a repeated value flag and both of its values" while
+  // ahood-cli#136 was still undecided. Decided: refused, with the same message
+  // flagValue gives, so whichever of the two a command reaches first says the
+  // same thing -- reporting the second --tags as "Unknown flag" instead would
+  // be a confusing way to describe a duplicate.
+  it("throws on a repeated value flag instead of stripping both of its values", () => {
+    expect(() => unrecognizedArgs(["--tags", "a", "--tags", "b"], [], ["--tags"])).toThrow(
+      /--tags given more than once/,
+    );
+    expect(() => unrecognizedArgs(["--tags", "a", "--tags=b"], [], ["--tags"])).toThrow(UsageError);
+  });
+
+  // The half of #136 that deleted a word: only the occurrence that actually
+  // consumed a value may strip one, so a bare token after a DIFFERENT flag's
+  // value is still a leftover (for snap search, still part of the query).
+  it("strips only the value the flag itself consumed, not every neighbour", () => {
+    expect(unrecognizedArgs(["foo", "--limit", "5", "bar"], ["--json"], ["--limit"])).toEqual(["foo", "bar"]);
+  });
+
+  // Mirrors flagValue's swallow-protection: a "--" token is never a value, so
+  // it is judged on its own instead of vanishing as --limit's neighbour.
+  it("does not consume a following flag as a value", () => {
+    expect(unrecognizedArgs(["--limit", "--bogus"], ["--json"], ["--limit"])).toEqual(["--bogus"]);
   });
 });

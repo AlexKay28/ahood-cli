@@ -201,6 +201,16 @@ describe("snap commands", () => {
       expect(calls).toHaveLength(0);
     });
 
+    // ahood-cli#136: this posted {"content":"note","tags":["a"]} -- "b" was
+    // discarded by flagValue's first-wins AND stripped out of the content by
+    // the filter, so the word vanished from both fields at exit 0.
+    it("rejects a repeated --tags instead of keeping the first value and eating the second", async () => {
+      const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
+
+      await expect(createSnap(["note", "--tags", "a", "--tags", "b"])).rejects.toThrow(/--tags given more than once/);
+      expect(calls).toHaveLength(0);
+    });
+
     it("still accepts a flags-first invocation, where all the content follows --tags", async () => {
       const calls = stubApi(201, { id: ID, created_at: "2026-09-08T00:00:00.000Z" });
 
@@ -438,6 +448,17 @@ describe("snap commands", () => {
       expect(calls).toHaveLength(2);
     });
 
+    // The sibling flag #136 noted but never exercised: --limit had the same
+    // flagValue-plus-filter pairing, so `--limit 1 --limit 2` silently sent
+    // limit=1. Refused now, exactly like --tags.
+    it("rejects a repeated --limit instead of silently using the first one", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+
+      await expect(listSnaps(["--limit", "1", "--limit", "2"])).rejects.toThrow(/--limit given more than once/);
+      await expect(listSnaps(["--tags", "a", "--tags", "b"])).rejects.toThrow(/--tags given more than once/);
+      expect(calls).toHaveLength(0);
+    });
+
     // The leftover check must not pre-empt flagValue's own missing-value error
     // (ahood-cli#105's swallow-protection), which is the more specific message.
     it("still errors via flagValue when --tags or --limit has no value", async () => {
@@ -540,6 +561,36 @@ describe("snap commands", () => {
       const requestedUrl = new URL(calls[0].url);
       expect(requestedUrl.searchParams.get("limit")).toBe("5");
       expect(requestedUrl.searchParams.get("q")).toBe("foo");
+    });
+
+    // The headline reproduction of ahood-cli#136: this issued
+    // GET /api/v1/snaps?q=foo&tags=a -- "bar" was dropped by flagValue AND
+    // deleted from the query by the filter, so the user got results for a
+    // search they never typed, with nothing on stderr.
+    it("rejects a repeated --tags instead of dropping its value and deleting the next query word", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+
+      await expect(searchSnaps(["foo", "--tags", "a", "--tags", "bar"])).rejects.toThrow(
+        /--tags given more than once/,
+      );
+      await expect(searchSnaps(["foo", "--limit", "1", "--limit", "2"])).rejects.toThrow(
+        /--limit given more than once/,
+      );
+      expect(calls).toHaveLength(0);
+    });
+
+    // The other half of #136, and the regression that matters most: the fix
+    // must strip only the token the flag actually consumed, so a query word
+    // that merely FOLLOWS a value is still part of q.
+    it("keeps a query word that follows a flag's value", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await searchSnaps(["foo", "--limit", "5", "bar"]);
+
+      const params = new URL(calls[0].url).searchParams;
+      expect(params.get("q")).toBe("foo bar");
+      expect(params.get("limit")).toBe("5");
     });
 
     it("prints a friendly message when there are no results", async () => {
