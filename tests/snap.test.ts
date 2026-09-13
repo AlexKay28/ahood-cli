@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { Readable, Writable } from "node:stream";
+import { UsageError } from "../src/usage-error.js";
 import { createSnap, listSnaps, searchSnaps, showSnap, removeSnap, shareSnap, unshareSnap, tagsSnap } from "../src/commands/snap.js";
 
 const API_URL = "http://ahood.test";
@@ -295,6 +296,72 @@ describe("snap commands", () => {
 
     it("rejects a non-positive --limit", async () => {
       await expect(listSnaps(["--limit", "0"])).rejects.toThrow(/--limit must be a positive integer/);
+    });
+
+    // ahood-cli#135. The singular typo used to reach the server as no tags
+    // param at all, so every snap came back and was printed as though it were
+    // the filtered set -- while the sibling `snap search --tag ci` refused the
+    // identical typo. No request may be issued: a silently unfiltered result is
+    // worse than an error because the user can't tell the two apart.
+    it("rejects an unrecognized flag without issuing a request", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+
+      await expect(listSnaps(["--tag", "ci"])).rejects.toThrow(/Unknown flag: --tag/);
+      expect(calls).toHaveLength(0);
+    });
+
+    // UsageError specifically, so exit-code.ts maps it to 2 and it matches what
+    // `snap search` already throws for the same typo (ahood-cli#135).
+    it("throws a UsageError for an unrecognized flag, not a plain Error", async () => {
+      stubApi(200, { snaps: [], next_cursor: null });
+
+      await expect(listSnaps(["--tag", "ci"])).rejects.toThrow(UsageError);
+    });
+
+    it("rejects an unrecognized flag even when valid flags are also present", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+
+      await expect(listSnaps(["--json", "--limit", "5", "--tags", "ci", "--bogus"])).rejects.toThrow(
+        /Unknown flag: --bogus/,
+      );
+      expect(calls).toHaveLength(0);
+    });
+
+    // `snap list` takes no positional argument and index.ts's dispatchSnap
+    // consumes only the verb, so a stray token means nothing anywhere and is a
+    // mistake rather than something to ignore (ahood-cli#135).
+    it("rejects a stray positional without issuing a request", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+
+      await expect(listSnaps(["garbage"])).rejects.toThrow(/Unexpected argument: garbage/);
+      expect(calls).toHaveLength(0);
+    });
+
+    // Regression guard for the reject-leftovers check above: --tags' and
+    // --limit's own VALUES are not leftovers, however they're spelled.
+    it("still accepts --json, --limit and --tags together in both spellings", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await listSnaps(["--json", "--limit=5", "--tags", "deploy,ci"]);
+      await listSnaps(["--json", "--limit", "5", "--tags=deploy,ci"]);
+
+      for (const call of calls) {
+        const params = new URL(call.url).searchParams;
+        expect(params.get("limit")).toBe("5");
+        expect(params.get("tags")).toBe("deploy,ci");
+      }
+      expect(calls).toHaveLength(2);
+    });
+
+    // The leftover check must not pre-empt flagValue's own missing-value error
+    // (ahood-cli#105's swallow-protection), which is the more specific message.
+    it("still errors via flagValue when --tags or --limit has no value", async () => {
+      const calls = stubApi(200, { snaps: [], next_cursor: null });
+
+      await expect(listSnaps(["--tags"])).rejects.toThrow(/--tags requires a value/);
+      await expect(listSnaps(["--limit"])).rejects.toThrow(/--limit requires a value/);
+      expect(calls).toHaveLength(0);
     });
 
     it("degrades to the empty-list message instead of crashing when the server returns snaps: null", async () => {

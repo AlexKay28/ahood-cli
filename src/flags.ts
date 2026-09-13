@@ -30,6 +30,31 @@ export function flagValue(args: string[], flag: string): string | undefined {
   return undefined;
 }
 
+// Returns the tokens left over after stripping the flags a command declares:
+// `booleanFlags` stand alone (--json), `valueFlags` consume the following token
+// and also accept the --flag=value form. Whatever remains is something the
+// command does NOT accept -- an unrecognized "--" flag or a stray positional --
+// and it's the caller's job to reject it (or, for a query/id command, to
+// interpret it as the positional).
+//
+// Lives here rather than inline in each command because hand-rolling this check
+// per command is exactly how `snap list` ended up with no check at all while
+// its sibling `snap search` had one, so `snap list --tag ci` (singular typo)
+// issued an UNFILTERED request and printed every snap as though it were the
+// filtered set (ahood-cli#135). parseSearchQuery below and tagsSnap still carry
+// their own inline copies of this stripping; fold them into this helper when
+// the queued snap-parsing fixes (ahood-cli#134/#136/#137/#138) next touch them,
+// rather than growing a fourth variant.
+export function unrecognizedArgs(args: string[], booleanFlags: string[], valueFlags: string[]): string[] {
+  return args.filter(
+    (a, i) =>
+      !booleanFlags.includes(a) &&
+      !valueFlags.includes(a) &&
+      !valueFlags.some((f) => a.startsWith(`${f}=`)) &&
+      !valueFlags.includes(args[i - 1]),
+  );
+}
+
 // Shared by every "<verb> <query> [--json] [--limit <n>]" command (skill
 // search, snap search) -- factored out after this exact logic was
 // duplicated verbatim between them, which is exactly how ahood-cli#105's

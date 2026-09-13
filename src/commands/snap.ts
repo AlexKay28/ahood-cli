@@ -1,5 +1,5 @@
 import { apiJson } from "../http.js";
-import { flagValue, parseSearchQuery } from "../flags.js";
+import { flagValue, parseSearchQuery, unrecognizedArgs } from "../flags.js";
 import { confirm } from "../confirm.js";
 import { UsageError } from "../usage-error.js";
 
@@ -148,6 +148,22 @@ export async function listSnaps(args: string[]): Promise<void> {
   const jsonOutput = args.includes("--json");
   const limitStr = flagValue(args, "--limit");
   const tagsStr = flagValue(args, "--tags");
+  // Reject whatever this command doesn't accept instead of issuing an
+  // unfiltered request and presenting the result as the filtered set:
+  // `snap list --tag ci` (singular typo) used to send no tags param at all and
+  // print every snap, while the sibling `snap search --tag ci` refused the
+  // identical typo -- so a user filtering for "deploy" and seeing three snaps
+  // couldn't tell them from the three most recent (ahood-cli#135). That's the
+  // same silent-broadening this command's verbatim --tags pass-through below
+  // was chosen to avoid; it was defended at the small end and left open at the
+  // large one. `snap list` takes no positional argument either, and nothing
+  // upstream gives a stray token a meaning (index.ts's dispatchSnap consumes
+  // only the verb, and intercepts --help/-h before the handler runs), so an
+  // extra positional is a mistake too rather than something to ignore.
+  const extra = unrecognizedArgs(args, ["--json"], ["--limit", "--tags"])[0];
+  if (extra !== undefined) {
+    throw new UsageError(`${extra.startsWith("--") ? "Unknown flag" : "Unexpected argument"}: ${extra}\n${LIST_USAGE}`);
+  }
   validateLimit(limitStr, LIST_USAGE);
 
   const qs = new URLSearchParams();
