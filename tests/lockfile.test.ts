@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -251,6 +251,187 @@ describe("lockfile", () => {
       },
       60_000,
     );
+  });
+
+  describe("two waiters racing to reclaim one stale lock (#141)", () => {
+    const builtLockfile = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "lockfile.js");
+
+    // A lock directory whose recorded holder has already exited by the time
+    // spawnSync returns -- the shape a hard-killed (SIGKILL/OOM) holder leaves
+    // behind, and the precondition for a reclaim.
+    function plantStaleLock(): string {
+      const lockDir = `${lockPath}.lock`;
+      mkdirSync(lockDir, { recursive: true });
+      const dead = spawnSync(process.execPath, ["-e", ""]);
+      writeFileSync(join(lockDir, "pid"), String(dead.pid));
+      return lockDir;
+    }
+
+    // Two real child processes, because the race is between PROCESSES and
+    // withLock is synchronous: nothing inside a single Node process can ever
+    // interleave two of its critical sections, so an in-process test could not
+    // reproduce this bug at all.
+    //
+    // The interleaving is FORCED, not hoped for, by two scripted gates:
+    //
+    //   1. A barrier on the first read of the `pid` file -- the read inside
+    //      isLockStale. Neither child gets past it until both have read the
+    //      SAME dead pid, which is steps 1-3 of the issue: two waiters judging
+    //      one dead holder stale off one snapshot. Each child reports whether
+    //      the barrier actually met, so a barrier that quietly timed out
+    //      cannot pass itself off as a success.
+    //   2. A one-shot gate in the LATE child only, on its removal of the lock
+    //      directory: it holds that removal until the other child is provably
+    //      inside its critical section. That is step 5 -- the delete landing
+    //      on a live successor's lock instead of on the dead holder's.
+    //
+    // Only the late child is gated, so the early one never waits on it and the
+    // pair cannot deadlock; both gates are bounded regardless.
+    function raceChild(role: string, hook: string, log: string, barrierDir: string): Promise<string> {
+      const script = `
+        const fs = require("node:fs");
+        const lockPath = ${JSON.stringify(lockPath)};
+        const lockDir = lockPath + ".lock";
+        const pidFile = lockDir + "/pid";
+        const log = ${JSON.stringify(log)};
+        const barrierDir = ${JSON.stringify(barrierDir)};
+        const role = ${JSON.stringify(role)};
+        const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+        const realReadFileSync = fs.readFileSync;
+        let barrier = "BARRIER-NEVER-REACHED";
+        let atBarrier = false;
+        fs.readFileSync = (target, ...rest) => {
+          if (target === pidFile && !atBarrier) {
+            atBarrier = true;
+            fs.writeFileSync(barrierDir + "/" + role, "");
+            const until = Date.now() + 5000;
+            while (fs.readdirSync(barrierDir).length < 2 && Date.now() < until) sleep(5);
+            barrier = fs.readdirSync(barrierDir).length === 2 ? "BARRIER-OK" : "BARRIER-TIMEOUT";
+          }
+          return realReadFileSync(target, ...rest);
+        };
+        ${hook}
+        import(${JSON.stringify(pathToFileURL(builtLockfile).href)}).then(({ withLock }) => {
+          try {
+            withLock(lockPath, () => {
+              fs.appendFileSync(log, "ENTER " + role + "\\n");
+              sleep(400);
+              fs.appendFileSync(log, "EXIT " + role + "\\n");
+            });
+            console.log("ACQUIRED " + role + " " + barrier);
+          } catch (error) {
+            console.log("THREW " + role + " " + error.message);
+          }
+        });`;
+      return new Promise((resolve) => {
+        const child = spawn(process.execPath, ["-e", script]);
+        let stdout = "";
+        child.stdout.setEncoding("utf8");
+        child.stdout.on("data", (chunk) => (stdout += chunk));
+        child.on("close", () => resolve(stdout));
+      });
+    }
+
+    it(
+      "never lets both of them into the critical section at once",
+      async () => {
+        expect(existsSync(builtLockfile), "run `npm run build` before the tests -- this case needs dist/").toBe(true);
+        plantStaleLock();
+        const log = join(dir, "critical-section.log");
+        const barrierDir = join(dir, "barrier");
+        writeFileSync(log, "");
+        mkdirSync(barrierDir);
+
+        const [early, late] = await Promise.all([
+          raceChild("early", "", log, barrierDir),
+          raceChild(
+            "late",
+            `
+              const realRmSync = fs.rmSync;
+              let gated = false;
+              fs.rmSync = (target, options) => {
+                if (target === lockDir && !gated) {
+                  gated = true;
+                  const until = Date.now() + 1500;
+                  while (Date.now() < until && !realReadFileSync(log, "utf8").includes("ENTER")) sleep(5);
+                }
+                return realRmSync(target, options);
+              };
+            `,
+            log,
+            barrierDir,
+          ),
+        ]);
+
+        // Proof the race was actually staged: both children sat at the barrier
+        // until the other arrived, so both really did judge the same dead
+        // holder stale before either acted on that judgement.
+        expect(early).toContain("BARRIER-OK");
+        expect(late).toContain("BARRIER-OK");
+        // Both get in eventually -- the loser waits the winner out rather than
+        // failing.
+        expect(early).toContain("ACQUIRED");
+        expect(late).toContain("ACQUIRED");
+
+        const events = readFileSync(log, "utf-8").trim().split("\n");
+        let inside = 0;
+        let mostInsideAtOnce = 0;
+        for (const event of events) {
+          inside += event.startsWith("ENTER") ? 1 : -1;
+          mostInsideAtOnce = Math.max(mostInsideAtOnce, inside);
+        }
+        expect(mostInsideAtOnce, `critical sections overlapped: ${events.join(" | ")}`).toBe(1);
+        expect(events).toHaveLength(4);
+      },
+      60_000,
+    );
+
+    it("does not delete a successor's lock on release after its own was taken away", () => {
+      const lockDir = `${lockPath}.lock`;
+      const pidFile = join(lockDir, "pid");
+      // A live process that is definitely not this one, standing in for the
+      // waiter that reclaimed this lock after wrongly judging its holder dead.
+      const successorPid = String(process.ppid);
+
+      withLock(lockPath, () => {
+        rmSync(lockDir, { recursive: true, force: true });
+        mkdirSync(lockDir);
+        writeFileSync(pidFile, successorPid);
+      });
+
+      expect(existsSync(lockDir), "the successor's lock was deleted by the process it displaced").toBe(true);
+      expect(readFileSync(pidFile, "utf-8")).toBe(successorPid);
+    });
+
+    it("still releases a lock it holds without a pid file of its own", () => {
+      // The pid write is best-effort, so a lock whose pid file never landed is
+      // reachable. Release must not skip such a directory: nothing can ever
+      // judge a pid-less lock stale, so leaving it behind strands every later
+      // add/remove/update in that project until a human deletes it by hand.
+      const lockDir = `${lockPath}.lock`;
+      const script = `
+        const fs = require("node:fs");
+        const lockDir = ${JSON.stringify(lockDir)};
+        const realWriteFileSync = fs.writeFileSync;
+        fs.writeFileSync = (target, ...rest) => {
+          if (target === lockDir + "/pid") {
+            const error = new Error("EACCES: permission denied, open");
+            error.code = "EACCES";
+            throw error;
+          }
+          return realWriteFileSync(target, ...rest);
+        };
+        import(${JSON.stringify(pathToFileURL(builtLockfile).href)}).then(({ withLock }) => {
+          withLock(${JSON.stringify(lockPath)}, () => {
+            if (fs.existsSync(lockDir + "/pid")) throw new Error("the pid file was supposed to be unwritable");
+          });
+          console.log("RELEASED");
+        });`;
+      const child = spawnSync(process.execPath, ["-e", script], { encoding: "utf8", timeout: 30_000 });
+
+      expect(child.stdout, child.stderr).toContain("RELEASED");
+      expect(existsSync(lockDir)).toBe(false);
+    });
   });
 
   describe("withLock timeout message", () => {
