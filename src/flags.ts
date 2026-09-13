@@ -12,22 +12,51 @@ import { UsageError } from "./usage-error.js";
 //                    value, verbatim, even if it starts with "--" -- this is
 //                    the unambiguous escape hatch for values that genuinely
 //                    start with "--" (e.g. a tagline like "--fast and cheap").
+// A repeated value flag is refused rather than resolved. `flagValue` used to
+// return the FIRST match and stop, while the stripping below skipped EVERY
+// occurrence's neighbour, so `snap search foo --tags a --tags bar` searched for
+// "foo" tagged "a" and deleted "bar" from the query outright -- the user got
+// results for a command they did not type, at exit 0 (ahood-cli#136). Both
+// last-wins and first-wins are silent guesses about which fragment of a
+// command reassembled from shell history is the stale one; the CLI already
+// refuses flags it doesn't recognize, and refusing here is the only option that
+// cannot discard a value the user typed. The cost is one retry with the
+// duplicate deleted, which is also the edit the user has to make anyway.
+function assertFirstOccurrence(seen: Set<string>, flag: string): void {
+  if (seen.has(flag)) {
+    throw new UsageError(
+      `${flag} given more than once. Pass it once -- repeating it would silently discard one of the values` +
+        // Safe to say unconditionally for --tags: every --tags in this CLI
+        // (publish/edit/snap create/list/search) is one comma-separated value,
+        // and "it accumulates" is the misconception that produces the repeat.
+        (flag === "--tags" ? `; pass multiple tags as one comma-separated value (--tags a,b)` : "") +
+        `.`,
+    );
+  }
+  seen.add(flag);
+}
+
 export function flagValue(args: string[], flag: string): string | undefined {
   const prefix = `${flag}=`;
+  const seen = new Set<string>();
+  let found: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg.startsWith(prefix)) {
-      return arg.slice(prefix.length);
+      assertFirstOccurrence(seen, flag);
+      found = arg.slice(prefix.length);
+      continue;
     }
     if (arg === flag) {
       const value = args[i + 1];
       if (value === undefined || value.startsWith("--")) {
         throw new UsageError(`${flag} requires a value.`);
       }
-      return value;
+      assertFirstOccurrence(seen, flag);
+      found = value;
     }
   }
-  return undefined;
+  return found;
 }
 
 // Returns the tokens left over after stripping the flags a command declares:
@@ -41,10 +70,11 @@ export function flagValue(args: string[], flag: string): string | undefined {
 // per command is exactly how `snap list` ended up with no check at all while
 // its sibling `snap search` had one, so `snap list --tag ci` (singular typo)
 // issued an UNFILTERED request and printed every snap as though it were the
-// filtered set (ahood-cli#135). parseSearchQuery below and tagsSnap still carry
-// their own inline copies of this stripping; fold them into this helper when
-// the queued snap-parsing fixes (ahood-cli#136/#137/#138) next touch them,
-// rather than growing a fourth variant.
+// filtered set (ahood-cli#135). parseSearchQuery below is now a caller of this
+// helper rather than a second copy of it (folded in by ahood-cli#136, whose bug
+// existed in both copies); tagsSnap still carries its own inline copy -- fold it
+// in when the queued snap-parsing fixes (ahood-cli#137/#138) next touch it,
+// rather than growing a third variant again.
 export function unrecognizedArgs(args: string[], booleanFlags: string[], valueFlags: string[]): string[] {
   return unrecognizedIndices(args, booleanFlags, valueFlags).map((i) => args[i]);
 }
@@ -62,12 +92,33 @@ export function unrecognizedArgs(args: string[], booleanFlags: string[], valueFl
 // note body (ahood-cli#134). Positions are the only way to see that gap.
 export function unrecognizedIndices(args: string[], booleanFlags: string[], valueFlags: string[]): number[] {
   const indices: number[] = [];
+  const seen = new Set<string>();
+  // Which index (if any) the value flag just seen actually consumed. The test
+  // used to be `valueFlags.includes(args[i - 1])`, which stripped the neighbour
+  // of EVERY occurrence -- so a repeated --tags ate a word nothing had read
+  // (ahood-cli#136). Tracking the consuming occurrence means exactly one token
+  // per accepted flag disappears, and assertFirstOccurrence refuses the repeat
+  // with the same message flagValue gives, so a caller that reaches this helper
+  // first can't report the duplicate as "Unknown flag: --tags" instead.
+  let consumedAt = -1;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    if (i === consumedAt) continue;
     if (booleanFlags.includes(arg)) continue;
-    if (valueFlags.includes(arg)) continue;
-    if (valueFlags.some((f) => arg.startsWith(`${f}=`))) continue;
-    if (valueFlags.includes(args[i - 1])) continue;
+    if (valueFlags.includes(arg)) {
+      assertFirstOccurrence(seen, arg);
+      // Same swallow-protection as flagValue: a following "--" token is not
+      // this flag's value, it's the next flag, so leave it to be judged on its
+      // own (flagValue throws "requires a value" for it first in every caller).
+      const next = args[i + 1];
+      if (next !== undefined && !next.startsWith("--")) consumedAt = i + 1;
+      continue;
+    }
+    const equalsForm = valueFlags.find((f) => arg.startsWith(`${f}=`));
+    if (equalsForm !== undefined) {
+      assertFirstOccurrence(seen, equalsForm);
+      continue;
+    }
     indices.push(i);
   }
   return indices;
@@ -88,14 +139,11 @@ export function unrecognizedIndices(args: string[], booleanFlags: string[], valu
 // a flag that command doesn't implement instead of silently ignoring it and
 // returning unfiltered results.
 export function parseSearchQuery(args: string[], usage: string, valueFlags: string[] = []): string {
-  const stripped = ["--limit", ...valueFlags];
-  const queryParts = args.filter(
-    (a, i) =>
-      a !== "--json" &&
-      !stripped.includes(a) &&
-      !stripped.some((f) => a.startsWith(`${f}=`)) &&
-      !stripped.includes(args[i - 1]),
-  );
+  // Delegated to unrecognizedArgs rather than re-filtering here: this was the
+  // second hand-rolled copy of those stripping rules, and it carried the same
+  // repeated-flag bug (ahood-cli#136) that the first one did -- which is the
+  // duplication hazard #135's helper was extracted to end.
+  const queryParts = unrecognizedArgs(args, ["--json"], ["--limit", ...valueFlags]);
   const unknownFlag = queryParts.find((a) => a.startsWith("--"));
   if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${usage}`);
   const query = queryParts.join(" ");
