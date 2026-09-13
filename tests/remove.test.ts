@@ -324,6 +324,96 @@ describe("remove", () => {
     expect(logSpy).toHaveBeenCalledWith("Removed alice/demo");
   });
 
+  // The same three throw shapes again, but for a pin predating
+  // mcp_config_hash. #115's gate asked only for that fingerprint, so a legacy
+  // pin fell through BOTH warnings -- the unreadable read leaves
+  // mcpEntryPresent false, which disqualifies the second branch too -- and
+  // printed a bare "Removed" over a still-live entry and credential, the very
+  // false assurance #115 was filed to remove (ahood-cli#143).
+  for (const [shape, contents] of [
+    ["invalid JSON", '{"mcpServers": {"weather": {"command": "npx"},}}'],
+    ["a non-object top level", "[]"],
+    ["a non-object mcpServers", '{"mcpServers": []}'],
+  ] as const) {
+    it(`warns for a legacy mcp pin with no recorded fingerprint when .mcp.json is ${shape} (ahood-cli#143)`, async () => {
+      writeFileSync(join(dir, MCP_CONFIG_PATH), contents);
+      // No mcp_config_hash: installed before that field existed. No skill
+      // directory and no agent file either -- that absence is the only
+      // remaining evidence that this pin was an mcp install.
+      writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+        version: "1.0.0",
+        checksum_sha256: "abc",
+      });
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await remove(["alice/weather", "--yes"]);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/alice\/weather may still have an entry in .*\.mcp\.json.*ahood could not check/s),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/Fix the file, then delete the "weather" entry/));
+      // Without a fingerprint ahood cannot claim the entry is definitely
+      // there, only that one was installed and could not be checked -- #115's
+      // hedged wording is exactly right for this case and must not harden.
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("still has an entry"));
+      expect(logSpy).toHaveBeenCalledWith("Removed alice/weather");
+      expect(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).toBe(contents);
+    });
+  }
+
+  it("warns without 'modified' wording for a legacy mcp pin when .mcp.json is readable (ahood-cli#143)", async () => {
+    // The sibling branch's coverage of the same legacy pin, confirmed rather
+    // than assumed: the warning fires because the delete is skipped for want
+    // of a fingerprint (removedMcpEntry stays false), NOT because
+    // mcpEntryModified was set -- that check is itself gated on having a
+    // fingerprint, so it stays false. Which is the honest outcome: with
+    // nothing recorded to compare against, ahood must not claim the entry
+    // was modified.
+    const entry = { command: "npx", args: ["-y", "@x/weather"], env: { API_KEY: "secret-val" } };
+    writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: { weather: entry } }, null, 2));
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/weather", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await remove(["alice/weather", "--yes"]);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/alice\/weather still has an entry in .*\.mcp\.json/));
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("appears to have been modified"));
+    expect(logSpy).toHaveBeenCalledWith("Removed alice/weather");
+    // Never blind-deleted: no fingerprint means nothing was verified as ours.
+    expect(JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).mcpServers.weather).toEqual(entry);
+  });
+
+  it("also warns for a skill whose directory was deleted by hand, which is indistinguishable from a legacy mcp pin (ahood-cli#143)", async () => {
+    // LockEntry records no `kind`, so a skill pin with its directory already
+    // gone looks exactly like a pre-fingerprint mcp pin, and the one thing
+    // that could separate them -- reading .mcp.json -- is what just failed.
+    // Pinned deliberately: the hedged sentence is the cheaper error than the
+    // false "Removed" over a live credential, and this shape is far rarer
+    // than the intact skill install above, which stays silent.
+    writeFileSync(join(dir, MCP_CONFIG_PATH), "{ not json");
+    writeLockfileEntry(join(dir, ".claude", "skills.lock.json"), "alice/demo", {
+      version: "1.0.0",
+      checksum_sha256: "abc",
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await remove(["alice/demo", "--yes"]);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/alice\/demo may still have an entry in .*\.mcp\.json.*ahood could not check/s),
+    );
+    expect(logSpy).toHaveBeenCalledWith("Removed alice/demo");
+  });
+
   it("does not warn about .mcp.json when removing a skill with no matching entry there", async () => {
     mkdirSync(join(dir, skillDir("alice", "demo")), { recursive: true });
     writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: { "unrelated-server": { url: "https://x" } } }, null, 2));

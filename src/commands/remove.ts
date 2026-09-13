@@ -24,6 +24,14 @@ export async function remove(args: string[]): Promise<void> {
   const agentExisted = existsSync(agentFile);
   const lockEntry = readLockfile(LOCKFILE_PATH)[key];
   const hadLockfileEntry = lockEntry !== undefined;
+  // A pin whose install left nothing on disk is the defining shape of an
+  // mcp-kind install: its only footprint is this pin plus a live .mcp.json
+  // entry. Kept as evidence for the unreadable-.mcp.json warning at the
+  // bottom because, unlike mcp_config_hash, it exists for entries installed
+  // before that field did (lockfile.ts: "absent for any mcp entry installed
+  // before this field existed") and it is computed HERE, above the .mcp.json
+  // read -- so it survives the case where that read throws (ahood-cli#143).
+  const hadNoOnDiskFootprint = !dirExisted && !agentExisted && hadLockfileEntry;
 
   if (!dirExisted && !agentExisted && !hadLockfileEntry) {
     console.error(`${key} was not installed -- nothing to remove.`);
@@ -96,10 +104,10 @@ export async function remove(args: string[]): Promise<void> {
     // path. But leaving every flag false here meant the unreadable case
     // printed a bare "Removed" with the entry (and its secret) still live,
     // the very false-assurance bug the block above exists to prevent
-    // (ahood-cli#115). The lockfile's mcp_config_hash, read at the top of
-    // this function, is direct evidence that ahood DID install an entry into
-    // this file, so record why the read failed and warn off that instead of
-    // off a shape we can't inspect.
+    // (ahood-cli#115). Both the lockfile's mcp_config_hash and
+    // hadNoOnDiskFootprint, read at the top of this function, are evidence
+    // that ahood DID install an entry into this file, so record why the read
+    // failed and warn off that instead of off a shape we can't inspect.
     mcpConfigUnreadable = error instanceof Error ? error.message : String(error);
   }
 
@@ -141,7 +149,22 @@ export async function remove(args: string[]): Promise<void> {
   // pin has no surviving work left to surface (ahood-cli#142).
   removeLockfileEntry(LOCKFILE_PATH, key);
 
-  if (mcpConfigUnreadable !== undefined && lockEntry?.mcp_config_hash !== undefined) {
+  if (mcpConfigUnreadable !== undefined && (lockEntry?.mcp_config_hash !== undefined || hadNoOnDiskFootprint)) {
+    // Two independent pieces of evidence, because mcp_config_hash alone is
+    // not sufficient: it is absent for any mcp entry installed before that
+    // field existed, and for such a legacy pin the unreadable read also
+    // leaves mcpEntryPresent false -- so the `else if` below could not fire
+    // either and #115's fix silently did not apply, printing the bare
+    // "Removed" with the entry and its credential still live (ahood-cli#143).
+    // hadNoOnDiskFootprint closes that hole without needing the missing
+    // field. It cannot be narrowed further from the lockfile alone (LockEntry
+    // records no `kind`), so a skill whose directory was deleted by hand
+    // before this ran looks identical to a legacy mcp pin and warns too --
+    // deliberately, since the only thing that could tell them apart is the
+    // .mcp.json read that just failed, and a hedged sentence is the cheaper
+    // error of the two. A plain skill install still has its directory, so
+    // that far more common shape stays silent as ahood-cli#115 requires.
+    //
     // Its own wording rather than the branch below's: "remove it manually"
     // isn't actionable while the file doesn't parse, and we can't say the
     // entry is definitely still there -- only that one was installed and
