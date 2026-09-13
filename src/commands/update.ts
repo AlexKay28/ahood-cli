@@ -1,6 +1,6 @@
 import { LOCKFILE_PATH, parseOwnerSkill } from "../spec.js";
 import { readLockfile } from "../lockfile.js";
-import { add, fetchVersionMeta, updateMcpEntry } from "./add.js";
+import { add, fetchVersionMeta, readMcpConfig, updateMcpEntry } from "./add.js";
 import { UsageError } from "../usage-error.js";
 
 const USAGE = "Usage: ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]";
@@ -33,6 +33,40 @@ async function previewSkill(ownerSlashSkill: string, currentVersion: string | nu
     up_to_date: upToDate,
     changelog_md: upToDate ? null : meta.changelog_md ?? null,
   };
+}
+
+// Whether .mcp.json currently holds something that could actually start this
+// skill's server (ahood-cli#139). Anything ahood itself writes is a non-empty
+// JSON object -- buildMcpServerConfig always emits at least a `command` or a
+// `url` -- so a missing key, `null`, `{}`, or a bare scalar all mean the same
+// thing operationally: the server is gone, whatever the lockfile still pins.
+// An emptied entry is reported broken but is NOT self-healed by overwriting:
+// falling through hands it to updateMcpEntry, whose fingerprint check refuses
+// it (before any download or prompt) with the "delete it by hand, then
+// `ahood skill add`" message. ahood never writes `{}` or `null`, so something
+// else did, and quietly stamping over an entry ahood cannot prove is its own
+// is exactly what that check exists to prevent -- an actionable refusal beats
+// both a silent overwrite and today's false "already up to date".
+//
+// Deliberately narrow: an entry that is present and non-empty but doesn't
+// match its recorded fingerprint is NOT reported as broken here. That's a
+// hand-edit, `update` has always left those alone when the pin was already at
+// latest, and turning every locally-tweaked entry into a per-entry failure
+// would be a regression of its own.
+//
+// readMcpConfig() throws on an unreadable or malformed .mcp.json rather than
+// being caught and treated as "no entry": update.ts's per-entry catch turns
+// that into one `Failed to update <skill>: ...` line and a non-zero exit
+// without stopping the rest of the batch, which is what the version-differs
+// path has always done (updateMcpEntry reads the same file through the same
+// function). Swallowing it here would instead print "already up to date"
+// about an entry sitting in a file nothing can parse -- the same false
+// all-clear #139 is about.
+function mcpEntryIsIntact(skill: string): boolean {
+  const mcpServers = readMcpConfig().mcpServers as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(mcpServers, skill)) return false;
+  const entry = mcpServers[skill];
+  return typeof entry === "object" && entry !== null && Object.keys(entry).length > 0;
 }
 
 function padRow(cells: string[], widths: number[]): string {
@@ -134,13 +168,25 @@ export async function update(args: string[]): Promise<void> {
       const meta = await fetchVersionMeta(owner, skill, "latest");
       if (meta.kind === "mcp") {
         const currentEntry = lockfile[ownerSlashSkill];
-        if (currentEntry && currentEntry.version === meta.version) {
+        if (currentEntry && currentEntry.version === meta.version && mcpEntryIsIntact(skill)) {
           // Matches skill/agent update's own "nothing to do" case for a
           // pin that's already at latest -- not a warning (nothing's
           // wrong), and, unlike skill/agent (which always blindly
           // re-extracts even when nothing changed), skipped here
           // specifically so an up-to-date mcp entry with a secret in its
           // env never re-triggers a masked prompt for no reason.
+          //
+          // Conditioned on the entry actually being there (ahood-cli#139):
+          // .mcp.json is merged into rather than owned (see CLAUDE.md), so
+          // losing an entry to a merge or a hand cleanup is ordinary, and
+          // matching versions alone said "already up to date" about a server
+          // that no longer existed -- the one kind `update` could not repair,
+          // where skill/agent are restored by add() below regardless of
+          // version. Falling through runs updateMcpEntry's self-heal (see the
+          // "If the entry is missing entirely" case in add.ts), which does
+          // have to prompt for secrets there is no on-disk entry to carry
+          // forward; on the unattended path its allowNonTtyPrompt: false
+          // turns that into a named-variable error instead of a hang.
           console.log(`${ownerSlashSkill} is already up to date (v${meta.version}).`);
           continue;
         }
