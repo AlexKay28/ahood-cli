@@ -684,6 +684,22 @@ function readMcpEntryEnv(entry: unknown): Record<string, string> | undefined {
   return result;
 }
 
+// Every install path below undoes its own on-disk write when the lockfile
+// write that would have pinned it fails. This runs that undo so that a
+// failure IN the undo can never replace the original error: a rollback fails
+// for the same reasons the write did (the lock still contended, the disk
+// still full), and letting that escape would hand the user an EACCES or a
+// lock timeout in place of the checksum-conflict message that actually
+// explains what happened (ahood-cli#132). The warning is the consolation
+// prize -- it has to name what was left behind, since nothing else will.
+function rollbackOrWarn(rollback: () => void, warning: string): void {
+  try {
+    rollback();
+  } catch {
+    console.warn(warning);
+  }
+}
+
 async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, buffer: Buffer): Promise<void> {
   // Check for an existing .mcp.json collision BEFORE resolving secrets --
   // matches resolveMcpServerConfig's own "don't cost the user a prompt for
@@ -716,15 +732,46 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
       mcp_config_hash: hashMcpServerConfig(serverConfig),
     });
   } catch (error) {
-    if (!(error instanceof LockfileChecksumConflictError)) throw error;
     // Roll back the .mcp.json merge above under the same lock pattern --
     // re-read+delete rather than assuming nothing else changed it since.
-    withLock(MCP_CONFIG_PATH, () => {
-      const fileContents = readMcpConfig();
-      delete (fileContents.mcpServers as Record<string, unknown>)[skill];
-      writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
-    });
-    throw new Error(checksumConflictMessage(mcpKey, meta, error.existing));
+    //
+    // Runs for EVERY lockfile failure, not just a checksum conflict
+    // (ahood-cli#132) -- the same widening updateMcpEntry below already got,
+    // for the same reason. A rethrow-before-rollback here left the entry
+    // this function just merged in -- including, on the npm+npx path, the
+    // plaintext secret the user had just typed at the prompt -- sitting in
+    // .mcp.json with no lockfile pin at all. `remove` then bails at its
+    // `!dirExisted && !agentExisted && !hadLockfileEntry` check ("was not
+    // installed -- nothing to remove") before it ever reaches its .mcp.json
+    // cleanup, and a retried `add` refuses forever at assertNoCollision:
+    // the credential is removable only by hand-editing .mcp.json, and
+    // nothing tells the user it is there. Reachable from nothing worse than
+    // withLock's 5s timeout against a concurrent ahood, or an EACCES/ENOSPC
+    // on the write.
+    //
+    // Deletes, where updateMcpEntry's rollback restores: assertNoCollision
+    // has already established there was no entry under this key before this
+    // install wrote one, so there is nothing to put back. Deletes it
+    // unconditionally rather than re-fingerprinting it first the way
+    // remove.ts does -- remove is deciding about an entry of unknown age
+    // that may hold an intentional local edit, while this one was written
+    // by this same process moments ago and cannot be anyone else's work.
+    // Re-verifying here would only reintroduce the stranded-secret dead end
+    // above for whatever raced us.
+    rollbackOrWarn(
+      () => {
+        withLock(MCP_CONFIG_PATH, () => {
+          const fileContents = readMcpConfig();
+          delete (fileContents.mcpServers as Record<string, unknown>)[skill];
+          writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
+        });
+      },
+      `WARNING: could not roll back ${MCP_CONFIG_PATH} after ${mcpKey}'s install failed -- its mcpServers."${skill}" entry (which may contain a secret you entered) may still be present while ${LOCKFILE_PATH} has no pin for it. Delete that entry by hand before re-running \`ahood skill add ${mcpKey}\`.`,
+    );
+    if (error instanceof LockfileChecksumConflictError) {
+      throw new Error(checksumConflictMessage(mcpKey, meta, error.existing));
+    }
+    throw error;
   }
   console.log(`Installed ${owner}/${skill}@${meta.version} into ${MCP_CONFIG_PATH} as "${skill}"`);
   // Only the npm+npx package path ever carries secrets into `env` (headers
@@ -823,26 +870,26 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
     // `remove` permanently refuse -- the exact dead end the comments above
     // exist to prevent, reachable from nothing worse than withLock's 5s
     // timeout against a concurrent ahood, or an EACCES/ENOSPC on the write.
-    try {
-      withLock(MCP_CONFIG_PATH, () => {
-        const fileContents = readMcpConfig();
-        const mcpServers = fileContents.mcpServers as Record<string, unknown>;
-        if (previousOnDisk === undefined) {
-          delete mcpServers[skill];
-        } else {
-          mcpServers[skill] = previousOnDisk;
-        }
-        writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
-      });
-    } catch {
-      // The rollback can fail for the same reason the write did (lock still
-      // contended, disk still full). Warn rather than throw: the original
-      // error below is the more actionable one, and masking it with this
-      // one would hide why the update failed in the first place.
-      console.warn(
-        `WARNING: could not roll back ${MCP_CONFIG_PATH} after ${key}'s update failed -- its mcpServers."${skill}" entry may be on the new version while ${LOCKFILE_PATH} still pins the old one. Delete that entry by hand and run \`ahood skill add ${key}\` to reinstall.`,
-      );
-    }
+    //
+    // The rollback itself can fail for the same reason the write did (lock
+    // still contended, disk still full), so it goes through rollbackOrWarn:
+    // the original error below is the more actionable one, and masking it
+    // with this one would hide why the update failed in the first place.
+    rollbackOrWarn(
+      () => {
+        withLock(MCP_CONFIG_PATH, () => {
+          const fileContents = readMcpConfig();
+          const mcpServers = fileContents.mcpServers as Record<string, unknown>;
+          if (previousOnDisk === undefined) {
+            delete mcpServers[skill];
+          } else {
+            mcpServers[skill] = previousOnDisk;
+          }
+          writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
+        });
+      },
+      `WARNING: could not roll back ${MCP_CONFIG_PATH} after ${key}'s update failed -- its mcpServers."${skill}" entry may be on the new version while ${LOCKFILE_PATH} still pins the old one. Delete that entry by hand and run \`ahood skill add ${key}\` to reinstall.`,
+    );
     if (error instanceof LockfileChecksumConflictError) {
       throw new Error(checksumConflictMessage(key, meta, error.existing));
     }
@@ -932,9 +979,21 @@ export async function add(args: string[]): Promise<void> {
     try {
       writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, { version: meta.version, checksum_sha256: meta.checksum_sha256 });
     } catch (error) {
-      if (!(error instanceof LockfileChecksumConflictError)) throw error;
-      rmSync(destPath, { force: true });
-      throw new Error(checksumConflictMessage(key, meta, error.existing));
+      // Widened past the checksum-conflict case with installMcpEntry's own
+      // rollback (ahood-cli#132): an agent file left behind by a lock
+      // timeout is less dangerous than a stranded mcp secret -- `remove`
+      // finds it via agentExisted even with no pin -- but "a failed install
+      // installs nothing" is the invariant worth having at all three sites,
+      // and the previous version's content is gone either way, overwritten
+      // by the writeFileSync above before the pin was ever attempted.
+      rollbackOrWarn(
+        () => rmSync(destPath, { force: true }),
+        `WARNING: could not remove ${destPath} after ${key}'s install failed -- it may be left behind with no ${LOCKFILE_PATH} pin. Run \`ahood skill remove ${key}\` to clean it up.`,
+      );
+      if (error instanceof LockfileChecksumConflictError) {
+        throw new Error(checksumConflictMessage(key, meta, error.existing));
+      }
+      throw error;
     }
     console.log(`Installed ${key}@${meta.version} to ${destPath}`);
     return;
@@ -955,9 +1014,17 @@ export async function add(args: string[]): Promise<void> {
       checksum_sha256: meta.checksum_sha256,
     });
   } catch (error) {
-    if (!(error instanceof LockfileChecksumConflictError)) throw error;
-    rmSync(destDir, { recursive: true, force: true });
-    throw new Error(checksumConflictMessage(key, meta, error.existing));
+    // Same widening as the agent path above (ahood-cli#132). extractFreshVersion
+    // has already cleared any previous version out of this directory, so the
+    // only thing this deletes is what this failed install just put there.
+    rollbackOrWarn(
+      () => rmSync(destDir, { recursive: true, force: true }),
+      `WARNING: could not remove ${destDir} after ${key}'s install failed -- it may be left behind with no ${LOCKFILE_PATH} pin. Run \`ahood skill remove ${key}\` to clean it up.`,
+    );
+    if (error instanceof LockfileChecksumConflictError) {
+      throw new Error(checksumConflictMessage(key, meta, error.existing));
+    }
+    throw error;
   }
 
   console.log(`Installed ${key}@${meta.version} to ${destDir}`);
