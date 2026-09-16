@@ -17,6 +17,11 @@ export async function login(): Promise<void> {
     method: "POST",
   });
 
+  // Printed VERBATIM, deliberately not through sanitizeForTerminal the way
+  // `add` treats server-supplied text: this line exists so the user can
+  // compare it against the code on the /cli-auth page, and a tidied-up
+  // rendering would make that comparison meaningless. Pinned by
+  // tests/login-device-code-verbatim.test.ts (ahood#357).
   console.log(`First, confirm this code matches what you see in your browser: ${code}`);
   console.log(`Open ${verification_url} to approve.`);
 
@@ -36,6 +41,17 @@ export async function login(): Promise<void> {
       // shown to the human, never used to build a request, so a compromised
       // or redirected registry response can't point this at a host that
       // then harvests the device code and hands back an attacker's token.
+      //
+      // `code` is sent VERBATIM and must stay that way: do not trim it,
+      // change its case, strip its separator or otherwise tidy it. The format
+      // is defined once, in ahood's lib/auth/device-code.ts, and the server
+      // canonicalizes whatever arrives -- so this CLI stays format-agnostic
+      // and a server-side format fix needs no release of this package. In
+      // ahood#349 that property was all that stood between a bad ten-minute
+      // "Login timed out" and a bad error: the hyphen happens to be
+      // unreserved, so encodeURIComponent left it alone. Pinned by
+      // tests/login-device-code-verbatim.test.ts; contract in ahood's
+      // docs/adr/backend/0005-device-code-cross-repo-contract.md (ahood#357).
       res = await apiFetchWithTimeout(`/api/v1/auth/cli/device/${encodeURIComponent(code)}`);
     } catch (error) {
       // A THROWN fetch (DNS blip, dropped socket) is transient by nature, and
