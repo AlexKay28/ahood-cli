@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, renameSync, rmSync, rmdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import * as tarStream from "tar-stream";
 import { gunzipSync } from "node:zlib";
@@ -601,17 +601,49 @@ export async function resolveMcpServerConfig(
   return { manifest, serverConfig, secretNames };
 }
 
+// Whether the config that was (or is about to be) written to disk actually
+// carries a credential: `env` also holds non-secret configuration now
+// (ahood-cli#120), so only names the manifest declared as secrets count.
+// Load-bearing in two places since ahood-cli#158: the install/update paths
+// consult it to request 0600 for a .mcp.json they are about to CREATE, and
+// warnIfSecretsWereWritten consults it to decide whether anything secret-
+// sensitive was written at all.
+function secretsLanded(serverConfig: Record<string, unknown>, secretNames: string[]): boolean {
+  const env = serverConfig.env as Record<string, string> | undefined;
+  if (!env) return false;
+  return secretNames.some((name) => Object.prototype.hasOwnProperty.call(env, name));
+}
+
 // The plaintext-secret warning printed after a successful mcp install/update.
 // Still derived from the config that actually landed on disk -- the property
 // the old bare `serverConfig.env` check was chosen for -- but intersected with
 // the manifest's declared secrets, because `env` now also holds non-secret
 // configuration (ahood-cli#120) and would otherwise warn about credentials
 // for a server that declares none.
+//
+// ahood-cli#158 composes a second piece onto it. A brand-new .mcp.json is
+// created 0600 when a secret landed (see installMcpEntry/updateMcpEntry), but
+// an EXISTING file keeps its pre-existing mode (#119) -- deliberately, since
+// tightening it could break another tool or user that reads the shared config.
+// So when the credential landed in a file that is still group/world-readable,
+// the warning says so and suggests chmod 600, leaving the decision with the
+// user who knows their environment, instead of the CLI chmod-ing behind their
+// back.
 function warnIfSecretsWereWritten(serverConfig: Record<string, unknown>, secretNames: string[]): void {
-  const env = serverConfig.env as Record<string, string> | undefined;
-  if (!env) return;
-  if (!secretNames.some((name) => Object.prototype.hasOwnProperty.call(env, name))) return;
-  console.warn(`WARNING: ${MCP_CONFIG_PATH} now contains one or more secret values in plaintext -- do not commit it to version control.`);
+  if (!secretsLanded(serverConfig, secretNames)) return;
+  let warning = `WARNING: ${MCP_CONFIG_PATH} now contains one or more secret values in plaintext -- do not commit it to version control.`;
+  // statSync rather than lstat on purpose: a symlinked .mcp.json is written
+  // THROUGH (#144), so the mode that matters is the real file's. Best-effort:
+  // the write has already succeeded, so a stat that somehow fails must not
+  // surface as a second error -- the plaintext warning above still stands.
+  try {
+    if (statSync(MCP_CONFIG_PATH).mode & 0o077) {
+      warning += ` It is also readable by other users on this machine -- consider \`chmod 600 ${MCP_CONFIG_PATH}\`.`;
+    }
+  } catch {
+    // advisory only, see comment above
+  }
+  console.warn(warning);
 }
 
 // Fingerprint of exactly what ahood wrote into .mcp.json's mcpServers.<skill>
@@ -707,6 +739,11 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
   // collision check specifically rather than the manifest-shape check.
   assertNoCollision(readMcpConfig(), owner, skill);
   const { serverConfig, secretNames } = await resolveMcpServerConfig(buffer);
+  // Whether a credential landed decides two things now (ahood-cli#158): the
+  // mode a brand-new .mcp.json is created with below, and the warning after.
+  // 0600 applies to creation only -- an existing file keeps its pre-existing
+  // mode (#119) and gets the readability advisory in the warning instead.
+  const wroteSecrets = secretsLanded(serverConfig, secretNames);
 
   // Read-modify-write under an advisory lock, mirroring lockfile.ts's own
   // writeLockfileEntry: .mcp.json sits right next to the lockfile and can
@@ -721,7 +758,7 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
     const fileContents = readMcpConfig();
     assertNoCollision(fileContents, owner, skill);
     (fileContents.mcpServers as Record<string, unknown>)[skill] = serverConfig;
-    writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
+    writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents, wroteSecrets ? 0o600 : undefined);
   });
 
   const mcpKey = `${owner}/${skill}`;
@@ -763,7 +800,7 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
         withLock(MCP_CONFIG_PATH, () => {
           const fileContents = readMcpConfig();
           delete (fileContents.mcpServers as Record<string, unknown>)[skill];
-          writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
+          writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents, wroteSecrets ? 0o600 : undefined);
         });
       },
       `WARNING: could not roll back ${MCP_CONFIG_PATH} after ${mcpKey}'s install failed -- its mcpServers."${skill}" entry (which may contain a secret you entered) may still be present while ${LOCKFILE_PATH} has no pin for it. Delete that entry by hand before re-running \`ahood skill add ${mcpKey}\`.`,
@@ -831,6 +868,11 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
   // prompt is correct.
   const existingEnv = readMcpEntryEnv(existingOnDisk);
   const { serverConfig, secretNames } = await resolveMcpServerConfig(buffer, { existingEnv, allowNonTtyPrompt: false });
+  // Same dual use as installMcpEntry's (ahood-cli#158): the self-heal case can
+  // CREATE a .mcp.json that just resolved a secret (the carried-forward env is
+  // gone with a hand-deleted entry, so a genuine resolution just happened),
+  // and the warning needs the same fact afterward.
+  const wroteSecrets = secretsLanded(serverConfig, secretNames);
 
   // Read-modify-write under an advisory lock, mirroring installMcpEntry's
   // own pattern. Re-checks the fingerprint here too (not just above) since
@@ -847,7 +889,7 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
     }
     previousOnDisk = freshExisting;
     freshServers[skill] = serverConfig;
-    writeJsonFileAtomic(MCP_CONFIG_PATH, fresh);
+    writeJsonFileAtomic(MCP_CONFIG_PATH, fresh, wroteSecrets ? 0o600 : undefined);
   });
 
   try {
@@ -885,7 +927,7 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
           } else {
             mcpServers[skill] = previousOnDisk;
           }
-          writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents);
+          writeJsonFileAtomic(MCP_CONFIG_PATH, fileContents, wroteSecrets ? 0o600 : undefined);
         });
       },
       `WARNING: could not roll back ${MCP_CONFIG_PATH} after ${key}'s update failed -- its mcpServers."${skill}" entry may be on the new version while ${LOCKFILE_PATH} still pins the old one. Delete that entry by hand and run \`ahood skill add ${key}\` to reinstall.`,

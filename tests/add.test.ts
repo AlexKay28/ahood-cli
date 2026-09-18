@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -1080,6 +1080,94 @@ describe("add", () => {
     }
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("secret values in plaintext"));
+  });
+
+  // ahood-cli#158: a brand-new .mcp.json is created 0600 when the install just
+  // resolved a secret into it, and the warning grows a readability advisory
+  // only when a credential landed in a file that is still group/world-readable.
+  it("creates a brand-new .mcp.json at 0600 when a secret was written (ahood-cli#158)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      ]),
+    });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    delete process.env.WEATHER_API_KEY;
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect((statSync(join(dir, MCP_CONFIG_PATH)).mode & 0o777).toString(8)).toBe("600");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("secret values in plaintext"));
+    // The file is already private -- no readability advisory stacked on top.
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("chmod 600"));
+  });
+
+  it("leaves a brand-new .mcp.json at the umask default when no secret was written (ahood-cli#158)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false },
+      ]),
+    });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    process.env.WEATHER_REGION = "eu-west-1";
+
+    try {
+      await add([`${OWNER}/${SKILL}`]);
+    } finally {
+      delete process.env.WEATHER_REGION;
+    }
+
+    const reference = join(dir, "reference.json");
+    writeFileSync(reference, "{}\n");
+    expect(statSync(join(dir, MCP_CONFIG_PATH)).mode & 0o777).toBe(statSync(reference).mode & 0o777);
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("secret values in plaintext"));
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("chmod 600"));
+  });
+
+  it("keeps an existing loose .mcp.json's mode and warns it is readable by others when a secret lands (ahood-cli#158)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const configPath = join(dir, MCP_CONFIG_PATH);
+    writeFileSync(configPath, '{"mcpServers":{}}\n');
+    chmodSync(configPath, 0o644);
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      ]),
+    });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    delete process.env.WEATHER_API_KEY;
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    // #119's regression, pinned again through the real install flow: the
+    // tightening applies to creation, never to an existing file.
+    expect((statSync(configPath).mode & 0o777).toString(8)).toBe("644");
+    // Both halves of the composed warning -- the CLI deliberately did NOT
+    // chmod the pre-existing file itself, so it hands the user the command.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("secret values in plaintext"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("chmod 600"));
+  });
+
+  it("does not suggest chmod 600 when a secret lands in an existing already-tight .mcp.json (ahood-cli#158)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const configPath = join(dir, MCP_CONFIG_PATH);
+    writeFileSync(configPath, '{"mcpServers":{}}\n');
+    chmodSync(configPath, 0o600);
+    const archive = await tarGz({
+      "server.json": mcpManifestWithEnvVars([
+        { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      ]),
+    });
+    stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    delete process.env.WEATHER_API_KEY;
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect((statSync(configPath).mode & 0o777).toString(8)).toBe("600");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("secret values in plaintext"));
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("chmod 600"));
   });
 
   it("refuses, naming the variable, when a required secret is unset and there is no terminal to prompt on (ahood-cli#120 composes with the #169 guard)", async () => {

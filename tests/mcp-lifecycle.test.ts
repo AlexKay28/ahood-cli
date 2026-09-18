@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -246,6 +246,30 @@ describe("mcp lifecycle: add -> update -> remove", () => {
     serving = { version: "2.0.0", archive: archiveV2, checksum: sha256(archiveV2) };
     return output;
   }
+
+  // ahood-cli#158, the update-side half: with the entry hand-deleted the
+  // self-heal path CREATES a fresh .mcp.json, and the secret it re-resolves
+  // (nothing to carry forward anymore) must land in a 0600 file, exactly as a
+  // fresh install would create.
+  it("recreates a deleted .mcp.json at 0600 on a self-healing update that re-resolves its secret (ahood-cli#158)", async () => {
+    await installV1ThenServeV2([
+      { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+    ]);
+    rmSync(join(dir, MCP_CONFIG_PATH));
+    // Unattended update (stdin not a TTY under vitest) refuses to prompt, so
+    // the re-resolution must come from the shell -- which is also what makes
+    // this "a secret was written" for the creation-mode decision.
+    process.env.WEATHER_API_KEY = "exported-for-self-heal";
+    try {
+      await update([]);
+    } finally {
+      delete process.env.WEATHER_API_KEY;
+    }
+
+    const mcpConfig = JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8"));
+    expect(mcpConfig.mcpServers[SKILL].env).toEqual({ WEATHER_API_KEY: "exported-for-self-heal" });
+    expect((statSync(join(dir, MCP_CONFIG_PATH)).mode & 0o777).toString(8)).toBe("600");
+  });
 
   // ahood-cli#169 review: a bare `ahood skill update` walks EVERY locked
   // entry, so a prompt on that path is never something the caller aimed at.
