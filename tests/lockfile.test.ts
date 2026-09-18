@@ -11,6 +11,7 @@ import {
   removeLockfileEntry,
   writeLockfileEntryVerifyingChecksum,
   LockfileChecksumConflictError,
+  currentHostIdentity,
 } from "../src/lockfile.js";
 
 describe("lockfile", () => {
@@ -431,6 +432,151 @@ describe("lockfile", () => {
 
       expect(child.stdout, child.stderr).toContain("RELEASED");
       expect(existsSync(lockDir)).toBe(false);
+    });
+  });
+
+  describe("lock host identity (#157)", () => {
+    const builtLockfile = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "lockfile.js");
+
+    // A lock directory whose recorded holder has already exited by the time
+    // spawnSync returns -- the guaranteed-dead-pid shape the tests above use
+    // for a hard-killed (SIGKILL/OOM) holder -- with an optional `host` line.
+    function plantLock(pid: number | string, host: string | undefined): string {
+      const lockDir = `${lockPath}.lock`;
+      mkdirSync(lockDir, { recursive: true });
+      writeFileSync(join(lockDir, "pid"), String(pid));
+      if (host !== undefined) writeFileSync(join(lockDir, "host"), host);
+      return lockDir;
+    }
+
+    function deadPid(): number {
+      return spawnSync(process.execPath, ["-e", ""]).pid as number;
+    }
+
+    // The deadline is 5s of real time; jumping Date.now past it (the same
+    // trick the timeout-message tests below use) reaches the timeout branch
+    // without spending it.
+    function waitForLockWithStoppedClock(): Error {
+      const start = Date.now();
+      vi.spyOn(Date, "now").mockReturnValueOnce(start).mockReturnValue(start + 10_000);
+      let caught: unknown;
+      try {
+        withLock(lockPath, () => {
+          throw new Error("the critical section must not run while the lock is held");
+        });
+      } catch (error) {
+        caught = error;
+      }
+      return caught as Error;
+    }
+
+    it("records this host's identity in the lock directory while it is held", () => {
+      withLock(lockPath, () => {
+        const lockDir = `${lockPath}.lock`;
+        expect(readFileSync(join(lockDir, "host"), "utf-8")).toBe(currentHostIdentity());
+        // The pid file stays a bare decimal pid: a <=0.9.0 reader must still
+        // be able to parse a lock this version wrote.
+        expect(readFileSync(join(lockDir, "pid"), "utf-8")).toBe(String(process.pid));
+      });
+    });
+
+    it("reclaims a same-host lock with a dead pid, host line and all", () => {
+      const lockDir = plantLock(deadPid(), currentHostIdentity());
+
+      const start = Date.now();
+      writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "abc" });
+
+      // Reclaimed almost immediately, not waited out to the deadline: the
+      // host line must not turn a locally-reclaimable lock into a 5s stall.
+      expect(Date.now() - start).toBeLessThan(2000);
+      expect(readLockfile(lockPath)).toEqual({
+        "alice/my-skill": { version: "1.0.0", checksum_sha256: "abc" },
+      });
+      expect(existsSync(lockDir)).toBe(false);
+    });
+
+    it("treats a legacy <=0.9.0 lock (bare pid, no host line) as same-host and reclaims it", () => {
+      // The missing-host-means-same-host decision, pinned: a stale local lock
+      // left by an older version stays reclaimable instead of becoming
+      // unreclaimable-until-deadline behind a foreign-host verdict.
+      const lockDir = plantLock(deadPid(), undefined);
+
+      const start = Date.now();
+      writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "abc" });
+
+      expect(Date.now() - start).toBeLessThan(2000);
+      expect(readLockfile(lockPath)).toEqual({
+        "alice/my-skill": { version: "1.0.0", checksum_sha256: "abc" },
+      });
+      expect(existsSync(lockDir)).toBe(false);
+    });
+
+    it("never reclaims a lock recorded on another host, and times out naming it", () => {
+      // Machine id chosen to differ from whatever this host has, so the
+      // foreign verdict holds on machines with and without /etc/machine-id.
+      const foreignIdentity = "0123456789abcdef0123456789abcdef\nsome-other-host";
+      const pid = deadPid();
+      const lockDir = plantLock(pid, foreignIdentity);
+
+      const error = waitForLockWithStoppedClock();
+
+      expect(error.message).toContain("another host");
+      expect(error.message).toContain("some-other-host");
+      expect(error.message).toContain(lockDir);
+      // Not the generic timeout: that wording invites deleting a lock that may
+      // belong to a live process on the machine named above.
+      expect(error.message).not.toContain("delete that directory manually");
+      // Not reclaimed either: the foreign holder may still be alive where it
+      // runs, which is exactly what this host cannot check.
+      expect(existsSync(lockDir)).toBe(true);
+      expect(readFileSync(join(lockDir, "pid"), "utf-8")).toBe(String(pid));
+    });
+
+    it("never judges a lock with an unreadable pid stale, host line or not", () => {
+      // Pre-#157 behaviour, kept: a pid file that doesn't parse means "not
+      // stale" (the acquirer may be mid-way through setting the record up),
+      // and adding the host line must not change that. The lock is waited
+      // out, not reclaimed.
+      const lockDir = plantLock("not-a-pid", currentHostIdentity());
+
+      const error = waitForLockWithStoppedClock();
+
+      expect(error.message).toBe(
+        `Timed out waiting for the lock on ${lockPath} at ${lockDir}. If no other ahood process is running, delete that directory manually.`,
+      );
+      expect(existsSync(lockDir)).toBe(true);
+    });
+
+    it("still works end to end when the host line write fails (best-effort, like the pid)", () => {
+      // The pid write is best-effort and the host write inherits that: a lock
+      // whose host line never landed must acquire, run its critical section,
+      // and release cleanly -- degrading to pid-only staleness, not failing.
+      const lockDir = `${lockPath}.lock`;
+      const script = `
+        const fs = require("node:fs");
+        const realWriteFileSync = fs.writeFileSync;
+        fs.writeFileSync = (target, ...rest) => {
+          if (target === ${JSON.stringify(join(lockDir, "host"))}) {
+            const error = new Error("EACCES: permission denied, open");
+            error.code = "EACCES";
+            throw error;
+          }
+          return realWriteFileSync(target, ...rest);
+        };
+        import(${JSON.stringify(pathToFileURL(builtLockfile).href)}).then(({ withLock }) => {
+          withLock(${JSON.stringify(lockPath)}, () => {
+            if (fs.existsSync(${JSON.stringify(join(lockDir, "host"))})) throw new Error("the host file was supposed to be unwritable");
+          });
+          console.log("RELEASED");
+        });`;
+      const child = spawnSync(process.execPath, ["-e", script], { encoding: "utf8", timeout: 30_000 });
+
+      expect(child.stdout, child.stderr).toContain("RELEASED");
+      expect(existsSync(lockDir)).toBe(false);
+      // The pid-only lock it left behind is gone with it, so the next acquirer
+      // takes the lock cleanly rather than waiting it out.
+      writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "abc" });
+      expect(readLockfile(lockPath)["alice/my-skill"]).toEqual({ version: "1.0.0", checksum_sha256: "abc" });
     });
   });
 
