@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { hostname } from "node:os";
 
 // mcp_config_hash is only ever set for a kind='mcp' entry (add.ts's
 // installMcpEntry) -- a fingerprint of exactly what was written into
@@ -249,13 +250,97 @@ function readLockPid(pidFile: string): number | undefined {
   return Number.isInteger(pid) && pid > 0 ? pid : undefined;
 }
 
+// ---- the host identity a lock records alongside its pid (ahood-cli#157) ----
+//
+// process.kill(pid, 0) answers only for THIS host's pid namespace, but the
+// lock lives on a filesystem that may be shared (a bind mount, an NFS export,
+// two containers on one volume), so a live holder on another host reads as
+// ESRCH here and its lock gets reclaimed out from under it. The lock record
+// therefore carries the holder's host identity, and a lock recorded on a
+// host other than this one is never judged stale at all.
+
+type HostIdentity = { machineId?: string; hostname: string };
+
+// /etc/machine-id is the stable per-machine identifier on systemd Linux:
+// stable across reboots, distinct per machine. Hostname alone is not a
+// sufficient identity -- two containers from the same image routinely share
+// it -- so the machine id anchors the comparison wherever it exists. Read
+// errors are swallowed (macOS has no such file; a read can also fail) and
+// leave the identity to the hostname alone, the same best-effort posture the
+// pid write below already takes.
+function readMachineId(): string | undefined {
+  try {
+    const machineId = readFileSync("/etc/machine-id", "utf-8").trim();
+    return machineId.length > 0 ? machineId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// The exact string written into a lock's `host` file: first line the machine
+// id (empty when this host has none), second line the hostname. Computed once
+// and cached -- neither value can change under a running process, and the
+// retry loop below re-checks staleness every 25ms. Exported so a test can
+// plant a lock recorded by THIS host (a foreign one just writes any other
+// string), and so the format a reader must parse has exactly one definition.
+let cachedHostIdentity: string | undefined;
+export function currentHostIdentity(): string {
+  cachedHostIdentity ??= `${readMachineId() ?? ""}\n${hostname()}`;
+  return cachedHostIdentity;
+}
+
+function parseHostIdentity(text: string): HostIdentity {
+  const newline = text.indexOf("\n");
+  // No newline: tolerate hostname-only content rather than reading the whole
+  // line as a machine id that could never match.
+  if (newline === -1) return { hostname: text };
+  return { machineId: text.slice(0, newline) || undefined, hostname: text.slice(newline + 1) };
+}
+
+// A recorded identity matches this host when the machine ids agree, or -- when
+// either side has no machine id -- the hostnames do. Machine id deliberately
+// wins over hostname where both exist: the same machine-id under a different
+// hostname is the same machine (renamed), while a shared hostname over
+// different machine ids is exactly the two-containers-from-one-image case
+// hostname-only matching cannot tell apart -- the bug this exists to close.
+function isSameHost(recorded: string): boolean {
+  const ours = parseHostIdentity(currentHostIdentity());
+  const theirs = parseHostIdentity(recorded);
+  if (ours.machineId && theirs.machineId) return ours.machineId === theirs.machineId;
+  return ours.hostname === theirs.hostname;
+}
+
+// The `host` file a lock records its holder's identity in, or undefined when
+// there is no readable one: no host file at all, or contents that trim to
+// nothing. See isLockStale for what a missing host line means.
+function readLockHost(hostFile: string): string | undefined {
+  try {
+    const host = readFileSync(hostFile, "utf-8").trim();
+    return host.length > 0 ? host : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // A lock directory is stale if the pid recorded inside it belongs to a process
-// that's no longer running, per isPidDead above. No readable pid means "not
-// stale": safer to wait out a lock that may still be being set up than to
-// reclaim one that is actually held.
-function isLockStale(pidFile: string): boolean {
+// that's no longer running, per isPidDead above -- but only a lock recorded on
+// THIS host: the pid probe cannot see another host's processes, so a lock
+// whose host line names a different machine is treated as live and waited out
+// no matter what the pid probe answers (ahood-cli#157). A missing host line is
+// judged by pid alone, exactly as <=0.9.0 code judged every lock: the only
+// such locks are legacy ones and those whose best-effort host write failed,
+// and reading them as foreign instead would strand every stale local lock
+// behind a misleading "held on another host" timeout -- a regression #100's
+// reclaim exists to prevent, in exchange for keeping only the pre-#157 status
+// quo, which disappears as soon as a lock carries a host line.
+//
+// No readable pid still means "not stale": safer to wait out a lock that may
+// still be being set up than to reclaim one that is actually held.
+function isLockStale(pidFile: string, hostFile: string): boolean {
   const pid = readLockPid(pidFile);
-  return pid !== undefined && isPidDead(pid);
+  if (pid === undefined) return false;
+  const host = readLockHost(hostFile);
+  return (host === undefined || isSameHost(host)) && isPidDead(pid);
 }
 
 // Deliberately NOT the negation of isLockStale: with no readable pid at all a
@@ -263,7 +348,11 @@ function isLockStale(pidFile: string): boolean {
 // opposite answers in that case. Reclaiming needs proof the holder is dead
 // (hence isLockStale), while withLock's deadline branch needs proof that
 // someone is alive before it backs off a reclaim failure it already observed.
-function isLockHeldByLiveProcess(pidFile: string): boolean {
+// A foreign-host lock counts as held no matter what the pid probe answers:
+// that holder is exactly the process this machine cannot see (ahood-cli#157).
+function isLockHeldByLiveProcess(pidFile: string, hostFile: string): boolean {
+  const host = readLockHost(hostFile);
+  if (host !== undefined && !isSameHost(host)) return true;
   const pid = readLockPid(pidFile);
   return pid !== undefined && !isPidDead(pid);
 }
@@ -306,7 +395,7 @@ const RECLAIM_CLAIM = "reclaiming";
 //
 // Returns the error to remember for withLock's deadline branch (see
 // ahood-cli#140), or undefined when there is nothing worth remembering.
-function reclaimStaleLock(lockDir: string, pidFile: string): NodeJS.ErrnoException | undefined {
+function reclaimStaleLock(lockDir: string, pidFile: string, hostFile: string): NodeJS.ErrnoException | undefined {
   const claim = join(lockDir, RECLAIM_CLAIM);
   try {
     mkdirSync(claim);
@@ -320,7 +409,7 @@ function reclaimStaleLock(lockDir: string, pidFile: string): NodeJS.ErrnoExcepti
     if (code === "EEXIST" || code === "ENOENT") return undefined;
     return existsSync(lockDir) ? (error as NodeJS.ErrnoException) : undefined;
   }
-  if (!isLockStale(pidFile)) {
+  if (!isLockStale(pidFile, hostFile)) {
     // Not the directory that was judged stale after all -- it was reclaimed and
     // retaken while this process looked, or it belongs to a holder that hasn't
     // written its pid yet. Hand the claim back, leaving the lock exactly as it
@@ -355,11 +444,16 @@ function reclaimStaleLock(lockDir: string, pidFile: string): NodeJS.ErrnoExcepti
 // hard-killed (SIGKILL/OOM) mid-critical-section: without this, such a lock
 // is never released, and every subsequent add/remove/update in that project
 // busy-waits out the full timeout below and then fails permanently until a
-// human manually deletes the stale directory (ahood-cli#100).
+// human manually deletes the stale directory (ahood-cli#100). It also holds
+// a `host` file recording WHERE that holder ran, because a pid is only
+// meaningful on the machine it belongs to: on a shared filesystem a live
+// holder on another host reads as dead here, and reclaiming its lock puts
+// two processes inside the critical section at once (ahood-cli#157).
 export function withLock<T>(path: string, fn: () => T): T {
   mkdirSync(dirname(path), { recursive: true });
   const lockDir = `${path}.lock`;
   const pidFile = join(lockDir, "pid");
+  const hostFile = join(lockDir, "host");
   const deadline = Date.now() + 5000;
   // Set when the lock was judged stale but could not actually be removed and
   // that directory is still sitting there -- see the reclaim branch below.
@@ -379,6 +473,13 @@ export function withLock<T>(path: string, fn: () => T): T {
       try {
         writeFileSync(pidFile, String(process.pid));
         wrotePid = true;
+        // Best-effort like the pid write above, and for the same reason:
+        // mkdirSync is what actually holds the lock. A lock whose host line
+        // never landed carries no host identity and is judged exactly as
+        // pre-#157 code judged every lock -- by pid alone (see isLockStale's
+        // missing-host rule) -- so a failed write here degrades to today's
+        // behaviour rather than to something new.
+        writeFileSync(hostFile, currentHostIdentity());
       } catch {
         // non-fatal, see comment above
       }
@@ -403,16 +504,36 @@ export function withLock<T>(path: string, fn: () => T): T {
         // (inode, birthtime) deliberately isn't used for this: a removed and
         // immediately recreated directory routinely gets the same inode back,
         // so it can't tell a replacement from the original anyway.
-        if (reclaimError && existsSync(lockDir) && !isLockHeldByLiveProcess(pidFile)) {
+        if (reclaimError && existsSync(lockDir) && !isLockHeldByLiveProcess(pidFile, hostFile)) {
           throw new Error(
             `Could not reclaim the stale lock on ${path} at ${lockDir}: ${reclaimError.code ?? reclaimError.message}. The process that held it is gone, but this one cannot remove that directory -- delete it manually (it may belong to another user, e.g. left behind by a sudo/root run, or sit on a read-only filesystem).`,
+          );
+        }
+        // A lock recorded on another host never reaches the reclaim branch
+        // (isLockStale refuses to judge it stale), so its timeout lands here.
+        // Name the holder's host rather than falling through to the generic
+        // message: the pid in that lock is dead by this host's lights, so "if
+        // no other ahood process is running" reads as permission to delete a
+        // lock that may well belong to a live process this machine cannot see
+        // (ahood-cli#157).
+        const recordedHost = readLockHost(hostFile);
+        if (recordedHost !== undefined && !isSameHost(recordedHost)) {
+          const holder = parseHostIdentity(recordedHost);
+          const holderPid = readLockPid(pidFile);
+          const holderParts = [
+            `hostname "${holder.hostname}"`,
+            ...(holder.machineId ? [`machine id ${holder.machineId}`] : []),
+            ...(holderPid !== undefined ? [`pid ${holderPid}`] : []),
+          ].join(", ");
+          throw new Error(
+            `Timed out waiting for the lock on ${path} at ${lockDir}: it is held on another host (${holderParts}), which this machine cannot probe for liveness. If nothing on that host holds it any more, delete that directory.`,
           );
         }
         throw new Error(
           `Timed out waiting for the lock on ${path} at ${lockDir}. If no other ahood process is running, delete that directory manually.`,
         );
       }
-      if (isLockStale(pidFile)) {
+      if (isLockStale(pidFile, hostFile)) {
         // Reclaim it. Two very different conditions can fail that, and only
         // one of them is the race the old comment here claimed: if the
         // directory is GONE afterwards, a concurrent process reclaimed it (or
@@ -435,7 +556,7 @@ export function withLock<T>(path: string, fn: () => T): T {
         // failure. Clearing it per-iteration made the error message depend on
         // that detail, which is why it read correctly on one machine and fell
         // back to the generic timeout on another (ahood-cli#145).
-        reclaimError = reclaimStaleLock(lockDir, pidFile) ?? reclaimError;
+        reclaimError = reclaimStaleLock(lockDir, pidFile, hostFile) ?? reclaimError;
       }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
     }
