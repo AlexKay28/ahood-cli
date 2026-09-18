@@ -1,5 +1,6 @@
 import { ApiError, apiJson } from "../http.js";
 import { resolveToken } from "../credentials.js";
+import { EXIT_PROVISIONING } from "../exit-code.js";
 
 // Mirrors GET /api/v1/profile's response shape. All fields besides
 // `username` are nullable in the backend (a profile can be created before
@@ -16,21 +17,71 @@ type Profile = {
 export type WhoamiResult =
   | { authenticated: false; reason: "not_logged_in" }
   | { authenticated: false; reason: "invalid_token" }
-  | { authenticated: true; mode: "session" | "token"; profile?: Profile }
+  // profileState is set only when the registry answered definitively that
+  // there is no usable profile behind this token: "provisioning" (account
+  // created, backend setup still in flight -- ahood#340, server side
+  // ahood#337) or "missing" (no profile exists at all). Absent in every
+  // other case, including the legacy fallbacks, so older backends and
+  // transient profile-fetch failures behave exactly as before.
+  | {
+      authenticated: true;
+      mode: "session" | "token";
+      profile?: Profile;
+      profileState?: "provisioning" | "missing";
+    }
   | { authenticated: null; error: string };
+
+// Issue ahood#337 taught GET /api/v1/profile to distinguish "still
+// provisioning" from "no such profile", carrying the provisioning state
+// inside a 200 profile response. The exact field name is not discoverable
+// from this repo (no copy of the server contract is vendored here), so the
+// plausible optional fields are read defensively and the check fires only on
+// values that *positively assert* provisioning -- an unrelated "status":
+// "active"-style field, or its outright absence on older backends, must not
+// change whoami's behavior.
+function profileIndicatesProvisioning(profile: unknown): boolean {
+  if (typeof profile !== "object" || profile === null) return false;
+  const fields = profile as Record<string, unknown>;
+  for (const key of ["provisioning", "provisioning_state", "provisioning_status", "status", "state"]) {
+    const value = fields[key];
+    if (typeof value === "string" && (value === "provisioning" || value === "pending")) return true;
+    if (key.startsWith("provisioning") && value === true) return true;
+  }
+  return false;
+}
+
+type ProfileFetch =
+  | { state: "present"; profile: Profile | undefined }
+  | { state: "provisioning" }
+  | { state: "missing" }
+  | { state: "unavailable" };
 
 // Best-effort enrichment: whoami's real job is answering "does this token
 // still authenticate?", which is already settled by the time this runs.
-// A failure here (network blip, an otherwise-valid token hitting a 500 on
-// this specific route, etc.) must never turn a successful auth check into a
-// command failure -- so every error is swallowed and callers fall back to
-// the plain "Authenticated..." message instead.
-async function fetchProfile(): Promise<Profile | undefined> {
+// Only two profile answers are definitive enough to change what whoami
+// reports: a 200 whose body positively asserts provisioning, and a 404 (no
+// profile exists -- the same status exitCodeFor maps to the documented
+// not-found code 5). Everything else (network blip, an otherwise-valid token
+// hitting a 500 on this specific route, an empty body, etc.) is
+// "unavailable": swallowed, so a transient profile problem can never turn a
+// successful auth check into a command failure -- callers fall back to the
+// plain "Authenticated..." message instead.
+async function fetchProfileState(): Promise<ProfileFetch> {
   try {
-    return await apiJson<Profile>("/api/v1/profile");
-  } catch {
-    return undefined;
+    const profile = await apiJson<Profile>("/api/v1/profile");
+    if (profileIndicatesProvisioning(profile)) return { state: "provisioning" };
+    return { state: "present", profile };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return { state: "missing" };
+    return { state: "unavailable" };
   }
+}
+
+function whoamiResultFor(mode: "session" | "token", fetch: ProfileFetch): Extract<WhoamiResult, { authenticated: true }> {
+  if (fetch.state === "provisioning") return { authenticated: true, mode, profileState: "provisioning" };
+  if (fetch.state === "missing") return { authenticated: true, mode, profileState: "missing" };
+  if (fetch.state === "present") return { authenticated: true, mode, profile: fetch.profile };
+  return { authenticated: true, mode };
 }
 
 // Pure auth-status check: no console output, no process.exitCode -- callers
@@ -58,12 +109,10 @@ export async function checkAuth(): Promise<WhoamiResult> {
     await apiJson<{ tokens: unknown[] }>("/api/v1/auth/tokens");
     // A session-backed caller (only reachable if this ever runs against a
     // cookie-bearing client) -- the token list came back.
-    const profile = await fetchProfile();
-    return { authenticated: true, mode: "session", profile };
+    return whoamiResultFor("session", await fetchProfileState());
   } catch (error) {
     if (error instanceof ApiError && error.status === 403) {
-      const profile = await fetchProfile();
-      return { authenticated: true, mode: "token", profile };
+      return whoamiResultFor("token", await fetchProfileState());
     }
     if (error instanceof ApiError && error.status === 401) {
       return { authenticated: false, reason: "invalid_token" };
@@ -104,6 +153,34 @@ export async function whoami(args: string[] = []): Promise<void> {
     if (wantsJson) console.log(JSON.stringify({ authenticated: null, error: result.error }));
     else console.error(`Could not verify your token: ${result.error}`);
     process.exitCode = 1;
+    return;
+  }
+
+  if (result.profileState === "provisioning") {
+    // The token is fine -- what's missing is the profile behind it, because
+    // backend setup for a freshly created account is still in flight
+    // (ahood#340). Exit EXIT_PROVISIONING (7) so a script can tell "wait and
+    // retry" apart from every other outcome. Deliberately terminal wording:
+    // the web REFRESH_HINT copy is kept out of the API body, and "refresh
+    // this page" makes no sense here anyway.
+    if (wantsJson) console.log(JSON.stringify({ authenticated: true, mode: result.mode, state: "provisioning" }));
+    else
+      console.error(
+        "Account created -- the registry is still setting it up. This finishes on its own; try again in a minute.",
+      );
+    process.exitCode = EXIT_PROVISIONING;
+    return;
+  }
+
+  if (result.profileState === "missing") {
+    // Definitive "no profile" from the registry (404 on the profile route):
+    // a real not-found, not a transient failure, so it reuses the documented
+    // not-found exit code 5 rather than the generic 1. Distinct from 7 so a
+    // caller never mistakes "retry in a minute" for "this token has no
+    // profile at all".
+    if (wantsJson) console.log(JSON.stringify({ authenticated: true, mode: result.mode, state: "missing" }));
+    else console.error("Authenticated, but the registry has no profile for this account.");
+    process.exitCode = 5;
     return;
   }
 

@@ -1,0 +1,20 @@
+# Resolution plan for ahood issue #340, CLI half (whoami distinguishes provisioning from missing).
+
+PROGRAM issue_340_cli_whoami VERSION 1.0
+
+INPUT
+    G.goal = "Ship the CLI half of ahood issue 340 in the ahood-cli repository: GET /api/v1/profile now distinguishes still provisioning from no such profile but ahood whoami reports the same thing for both; make whoami read the profile response, print a wait-and-it-finishes-on-its-own message for the provisioning state with a distinct nonzero exit code, and a real error for a genuinely missing profile with a different exit code, using CLI-appropriate wording rather than the web REFRESH_HINT copy which is deliberately kept out of the API body, and update the command documentation so the published docs match the behavior"
+    C.scope = "src/commands/whoami.ts, src/exit-code.ts, README.md, CHANGELOG.md, tests"
+    C.behavior = "whoami against a provisioning profile prints a provisioning-aware message that never says refresh this page and exits with a dedicated exit code distinct from the not-found and generic-failure codes; whoami against a missing profile keeps or gains a clear not-found wording with its own exit code; existing happy-path whoami output and exit code are unchanged; the API response field that carries the provisioning state is read defensively so older backends without the field behave exactly as before; README and CHANGELOG document the new exit codes and wording; tests cover the three response shapes"
+
+step.frame: DO define(request = G.goal) -> G.plan
+step.locate: DO search(query = "whoami command exit-code profile endpoint response shape REFRESH_HINT tests for whoami", scope = C.scope) -> E.sites
+step.read: DO fetch(resource_refs = E.sites) -> ART.sources
+step.patch: DO solve(problem = G.plan, sources = ART.sources, constraints = C.behavior) -> ART.patch
+step.check: DO check(artifact = ART.patch, criteria = C.behavior) -> V.static
+step.test: DO test(artifact = ART.patch, suite = "repo test suite covering whoami command with mocked profile responses") -> V.tests
+step.verify: DO verify(goal = G.goal, evidence = [V.static, V.tests]) -> V.result
+
+DONE matched(V.result, "pass")
+
+RETURN ART.patch, V.tests, V.result

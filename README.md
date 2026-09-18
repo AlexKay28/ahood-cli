@@ -200,7 +200,7 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | --- | --- |
 | `ahood login` | Device-code browser login, stores a token locally. |
 | `ahood logout` | Removes the stored token. |
-| `ahood whoami [--json]` | Reports whether your stored token still authenticates. |
+| `ahood whoami [--json]` | Reports whether your stored token still authenticates, and tells an account that is still provisioning apart from one with no profile (exit codes 7 / 5). |
 | `ahood token create <name>\|list [--json]\|revoke <id> [--yes]` | Manage personal API tokens. |
 | `ahood completion <bash\|zsh\|fish>` | Print a shell completion script for the command names. |
 | `ahood mcp` | Start an MCP server exposing read-only skill commands as tools over stdio. |
@@ -267,8 +267,9 @@ Stable across releases, safe to branch on in a script:
 | `1` | General error |
 | `2` | Usage or validation error (bad arguments, or the server rejected the request as invalid) |
 | `4` | Authentication required or rejected (not logged in, or the token was refused) |
-| `5` | Not found |
+| `5` | Not found (for `ahood whoami`: your token is valid, but the registry has no profile for this account) |
 | `6` | Network/transport error, or an upstream server (5xx) error |
+| `7` | Account still provisioning (`ahood whoami` only): backend setup finishes on its own -- try again in a minute |
 
 ## Shell completion
 

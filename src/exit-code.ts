@@ -1,6 +1,14 @@
 import { ApiError, NetworkError } from "./http.js";
 import { UsageError } from "./usage-error.js";
 
+// `ahood whoami` against an account whose backend setup is still in flight
+// (ahood#340). Deliberately not 6: that code already means network/5xx, and a
+// caller branching on 7 must be able to tell "the fix is waiting a minute --
+// setup finishes on its own" apart from "the transport failed". Documented in
+// README's exit-code table next to 5, which covers the sibling
+// missing-profile case.
+export const EXIT_PROVISIONING = 7;
+
 // A hung/black-holed connection throws undici's generic TypeError("fetch
 // failed") -- http.ts wraps that into NetworkError so it gets its own exit
 // code here, distinct from a server-returned ApiError. Kept in its own

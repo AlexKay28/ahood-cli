@@ -395,7 +395,13 @@ describe("ahood mcp tools", () => {
   });
 
   it("whoami reports authenticated:true for a valid session token", async () => {
-    stubApiRoutes({ "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } } });
+    // Profile stubbed to a transient 500: a 404 now means "missing profile"
+    // (ahood#340) and would surface as profileState in the tool result -- this
+    // test pins only the auth-success shape.
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } },
+      "/api/v1/profile": { status: 500, body: { error: "database is down" } },
+    });
     const client = await connectedClient();
 
     const result = await client.callTool({ name: "whoami", arguments: {} });

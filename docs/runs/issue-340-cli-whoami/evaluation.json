@@ -1,0 +1,51 @@
+{
+  "task": "ahood issue #340, CLI half (AlexKay28/ahood issue #340, ahood-cli repo): GET /api/v1/profile now distinguishes still-provisioning from no-such-profile (server side ahood#337), but `ahood whoami` reported a bare \"Authenticated.\" for both. Make whoami read the profile response, print a wait-and-it-finishes-on-its-own message for the provisioning state with a dedicated exit code, and a real not-found error for a genuinely missing profile with a different exit code, with terminal-appropriate wording (never the web REFRESH_HINT copy, which is deliberately not in the API body), read the provisioning state defensively so older backends behave exactly as before, and document the new exit codes and wording.",
+  "run_id": "issue-340-cli-whoami",
+  "seal": "6d5dd4544e49191099f77a1fcdd8bcb35fbe2a5fbf12bcfcf6f258c8d8af9db4",
+  "terminal_status": "complete",
+  "steps_planned": 7,
+  "steps_executed": 7,
+  "steps": [
+    "Seal program.think; hash matched 6d5dd454...9db4 exactly; saved to seal.txt",
+    "Read whoami.ts, exit-code.ts, http.ts, tests/whoami.test.ts, and the checkAuth consumer src/mcp/tools.ts to mirror conventions",
+    "Search for the provisioning field name; not discoverable in this repo (only login.ts's device-flow comment), so took the defensive-shape fallback per task instructions",
+    "Implement: EXIT_PROVISIONING = 7 in exit-code.ts; fetchProfileState() in whoami.ts distinguishing present/provisioning/missing/unavailable; new wordings and exit codes in whoami()",
+    "Update tests/whoami.test.ts (three response shapes + legacy fallbacks) and the one whoami-shape test in tests/mcp-server.test.ts whose 404-profile stub now means 'missing'",
+    "Update README.md (whoami row + exit-codes table rows for 5 and 7) and create CHANGELOG.md with one ahood#340 entry",
+    "Run tests and typecheck, verify seal, commit the owned files"
+  ],
+  "acceptance": {
+    "C.behavior.provisioning_message_and_dedicated_exit_code": {
+      "status": "pass",
+      "evidence": "tests/whoami.test.ts 'reports a still-provisioning account ... with the dedicated exit code and no web-page wording' (both a status:\"provisioning\" body and a provisioning:true body) asserts the message matches /finishes on its own/ and /try again in a minute/i, asserts NOT /refresh/i, and process.exitCode === 7; --json variant asserts {authenticated:true,mode,state:\"provisioning\"} and exit 7. Exit 7 is distinct from not-found (5) and generic failure (1/2/6); 6 was already taken by network/5xx so the next free code was used, exported as EXIT_PROVISIONING."
+    },
+    "C.behavior.missing_profile_not_found_wording_and_exit_code": {
+      "status": "pass",
+      "evidence": "tests/whoami.test.ts 'reports a missing profile (404) with the not-found exit code' asserts the stderr wording /no profile for this account/ and exit 5 (reusing the existing not-found code per exitCodeFor's 404 mapping); --json variant asserts state:\"missing\" and exit 5."
+    },
+    "C.behavior.happy_path_unchanged": {
+      "status": "pass",
+      "evidence": "The happy-path branches of whoami() were not edited (prose strings, --json spread, zero exit path all byte-identical); existing whoami tests asserting 'Authenticated as alexkay (personal API token).' / 'Authenticated as alexkay.' / exact --json bodies and exit 0 pass unmodified (only profile-failure stubs were touched)."
+    },
+    "C.behavior.defensive_read_older_backends_unchanged": {
+      "status": "pass",
+      "evidence": "profileIndicatesProvisioning() fires only on positively-asserting values (\"provisioning\"/\"pending\" strings, or boolean true on provisioning* fields) across a candidate field list; tests/whoami.test.ts 'treats a profile without any state field as a normal profile (older backend)' and '...unrelated non-provisioning state value...' both assert byte-identical legacy output and exit 0. All non-404 profile errors keep the existing swallow-and-report-authenticated fallback (500/network tests unchanged in intent)."
+    },
+    "C.behavior.readme_and_changelog_documented": {
+      "status": "pass",
+      "evidence": "README.md: whoami row in the Account table names the distinction and exit codes 7/5; exit-codes table row 5 documents the whoami no-profile case and a new row 7 documents provisioning with the wait-and-retry wording. CHANGELOG.md created (repo had none) with a single Unreleased entry referencing ahood#340. No 'refresh this page' anywhere."
+    },
+    "C.behavior.tests_cover_three_response_shapes": {
+      "status": "pass",
+      "evidence": "tests/whoami.test.ts: happy (pre-existing profileBody tests, unmodified), provisioning (2 prose variants + --json), missing (prose + --json), plus legacy-shape fallbacks (no field, non-provisioning value). 17/17 pass; npx vitest run mcp-server whoami = 37/37; tsc --noEmit clean."
+    }
+  },
+  "unresolved": [
+    "The exact /api/v1/profile provisioning field name could not be discovered from this repo (no server-side contract is vendored here; grep over src/ and tests/ finds nothing). The defensive candidate list (provisioning, provisioning_state, provisioning_status, status, state with values \"provisioning\"/\"pending\" or boolean true) may need to be narrowed to the real field once the ahood server contract is pointable; until then an unrecognized spelling degrades to the old 'Authenticated.' behavior rather than erroring."
+  ],
+  "protocol_deviations": [
+    "npm ci completed but the test run then hit npm's optional-dependencies bug (rolldown native binding missing); repaired the environment with `npm i --no-save @rolldown/binding-linux-x64-gnu@1.2.6` instead of the lockfile-removing workaround, and verified via git status that package.json/package-lock.json were untouched.",
+    "Edited tests/mcp-server.test.ts (one test's profile stub) in addition to tests/whoami.test.ts: the MCP tool serializes checkAuth() verbatim, so a 404-profile stub there began surfacing profileState:\"missing\". Read under the task's tests/** grant as a test covering the whoami response shape (as surfaced through MCP); the expected object of that test is unchanged.",
+    "Full suite has 18 pre-existing failures on the pristine tree (13 in tests/index.test.ts needing a built dist/, 5 timing-sensitive fs-race failures in tests/lockfile*/add that pass in isolation) — verified by stashing these changes and re-running; none are whoami-related."
+  ]
+}

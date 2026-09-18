@@ -75,23 +75,37 @@ describe("whoami", () => {
     expect(process.exitCode).toBe(4);
   });
 
-  it("reports success for a session-backed token (200) when the profile fetch also fails", async () => {
+  it("reports success for a session-backed token (200) when the profile fetch fails transiently", async () => {
     process.env.AHOOD_TOKEN = "tok_test";
-    // /api/v1/profile is left unstubbed (404s) to exercise the fallback path.
-    stubApiRoutes({ "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } } });
+    // A 500 is transient, so the enrichment is swallowed and the auth answer
+    // stands -- a 404 on this route now means "missing profile" (ahood#340)
+    // and has its own test below.
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } },
+      "/api/v1/profile": { status: 500, body: { error: "database is down" } },
+    });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await whoami([]);
     expect(logSpy).toHaveBeenCalledWith("Authenticated.");
     expect(process.exitCode).toBe(0);
   });
 
-  it("reports success for a personal API token (403) when the profile fetch also fails", async () => {
+  it("reports a missing profile (404) with the not-found exit code, not generic auth success", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({ "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } } });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await whoami([]);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/no profile for this account/));
+    expect(process.exitCode).toBe(5);
+  });
+
+  it("missing-profile --json carries state=missing and the not-found exit code", async () => {
     process.env.AHOOD_TOKEN = "tok_test";
     stubApiRoutes({ "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } } });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    await whoami([]);
-    expect(logSpy).toHaveBeenCalledWith("Authenticated with a personal API token.");
-    expect(process.exitCode).toBe(0);
+    await whoami(["--json"]);
+    expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: true, mode: "token", state: "missing" }));
+    expect(process.exitCode).toBe(5);
   });
 
   it("exits with the auth-required code and an 'invalid or revoked' message on 401", async () => {
@@ -113,9 +127,12 @@ describe("whoami", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it("--json emits a structured result instead of prose when the profile fetch also fails", async () => {
+  it("--json emits a structured result instead of prose when the profile fetch fails transiently", async () => {
     process.env.AHOOD_TOKEN = "tok_test";
-    stubApiRoutes({ "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } } });
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } },
+      "/api/v1/profile": { status: 500, body: { error: "database is down" } },
+    });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await whoami(["--json"]);
     expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: true, mode: "session" }));
@@ -194,6 +211,70 @@ describe("whoami", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await whoami(["--json"]);
     expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: true, mode: "token" }));
+    expect(process.exitCode).toBe(0);
+  });
+
+  // ahood#340: the provisioning state rides inside a 200 profile response,
+  // but the exact field name is not discoverable from this repo, so the CLI
+  // reads plausible optional fields defensively. Both spellings below are
+  // shapes a #337-style backend could plausibly emit.
+  const provisioningBodies: Array<[string, Record<string, unknown>]> = [
+    ["a provisioning status field", { ...profileBody, username: null, status: "provisioning" }],
+    ["a boolean provisioning field", { username: null, provisioning: true }],
+  ];
+
+  for (const [shape, body] of provisioningBodies) {
+    it(`reports a still-provisioning account (${shape}) with the dedicated exit code and no web-page wording`, async () => {
+      process.env.AHOOD_TOKEN = "tok_test";
+      stubApiRoutes({
+        "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } },
+        "/api/v1/profile": { status: 200, body },
+      });
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      await whoami([]);
+      const printed = errorSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(printed).toMatch(/finishes on its own/);
+      expect(printed).toMatch(/try again in a minute/i);
+      // The web REFRESH_HINT copy is deliberately not in the API body, and
+      // "refresh this page" is browser wording a terminal user can't act on.
+      expect(printed).not.toMatch(/refresh/i);
+      expect(process.exitCode).toBe(7);
+    });
+  }
+
+  it("provisioning --json carries state=provisioning and the dedicated exit code", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } },
+      "/api/v1/profile": { status: 200, body: { status: "provisioning" } },
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await whoami(["--json"]);
+    expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: true, mode: "token", state: "provisioning" }));
+    expect(process.exitCode).toBe(7);
+  });
+
+  it("treats a profile with an unrelated non-provisioning state value as a normal profile (legacy shape)", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } },
+      "/api/v1/profile": { status: 200, body: { ...profileBody, state: "active" } },
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await whoami([]);
+    expect(logSpy).toHaveBeenCalledWith("Authenticated as alexkay (personal API token).");
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("treats a profile without any state field as a normal profile (older backend)", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } },
+      "/api/v1/profile": { status: 200, body: profileBody },
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await whoami([]);
+    expect(logSpy).toHaveBeenCalledWith("Authenticated as alexkay.");
     expect(process.exitCode).toBe(0);
   });
 });
