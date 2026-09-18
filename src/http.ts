@@ -26,6 +26,36 @@ export class NetworkError extends Error {}
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+// ahood-cli#159: 429 policy. The registry rate-limits many endpoints the CLI
+// calls directly, and every limited endpoint answers with a Retry-After. Two
+// bounded retries, then a failure that says what actually happened ("rate
+// limited", with the server's own wait) instead of a generic status message
+// that reads like a registry bug.
+const RATE_LIMIT_MAX_RETRIES = 2;
+const RATE_LIMIT_FIRST_WAIT_MS = 1_000;
+// Cap on a single backoff hop, however large the server's Retry-After is: a
+// CLI must not silently hang for minutes on one header, and the final error
+// still reports the server's uncapped ask.
+const RATE_LIMIT_MAX_WAIT_MS = 30_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Retry-After is seconds per RFC 7231 ("120"), but the same RFC also allows an
+// HTTP-date and every rate limiter is one refactor away from switching shape --
+// so parse both, defensively. Anything unparseable comes back as undefined so
+// callers fall back to their own backoff rather than trusting garbage.
+export function parseRetryAfterMs(header: string | null | undefined, now: number = Date.now()): number | undefined {
+  const value = header?.trim();
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const when = Date.parse(value);
+  if (!Number.isNaN(when)) return Math.max(0, when - now);
+  return undefined;
+}
+
 // A hung/black-holed server would otherwise stall the process indefinitely --
 // relevant since this CLI is meant to run unattended in CI and be driven by
 // agents. Callers (e.g. publish's upload) can still pass their own `signal`.
@@ -82,31 +112,56 @@ export function sanitizeErrorMessage(message: string): string {
 }
 
 export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await apiFetch(path, init);
+  // ahood-cli#159: 429 is its own case, before the generic !res.ok handling.
+  // It means "you are asking too fast", and the server tells us exactly when
+  // to come back -- surface neither as a generic error, and retry a bounded
+  // number of times first. Every other status keeps its exact previous
+  // handling below.
+  for (let attempt = 0; ; attempt++) {
+    const res = await apiFetch(path, init);
 
-  if (!res.ok) {
-    // The error body may not be valid/object JSON (proxy error pages, an
-    // empty body, a literal `null`) -- fall back to the status-only message
-    // rather than crashing on `body.error` of something that isn't an object.
-    const body: unknown = await res.json().catch(() => undefined);
-    const message =
-      body && typeof body === "object" && typeof (body as { error?: unknown }).error === "string"
-        ? sanitizeErrorMessage((body as { error: string }).error)
-        : `Request failed with status ${res.status}`;
-    throw new ApiError(res.status, message, body);
-  }
+    if (res.status === 429) {
+      // Drain the rejected body so undici releases the socket instead of
+      // keeping it checked out while we wait.
+      await res.text().catch(() => "");
+      const retryAfterMs = parseRetryAfterMs(res.headers.get("Retry-After"));
+      if (attempt < RATE_LIMIT_MAX_RETRIES) {
+        // No usable Retry-After -> exponential (1s, 2s), the same fallback
+        // shape the login poll uses. One wait never exceeds the cap.
+        const waitMs = Math.min(retryAfterMs ?? RATE_LIMIT_FIRST_WAIT_MS * 2 ** attempt, RATE_LIMIT_MAX_WAIT_MS);
+        await sleep(waitMs);
+        continue;
+      }
+      // Retries exhausted. Report the server's own ask (not our capped wait):
+      // that is the number the user needs to act on.
+      const seconds = Math.ceil((retryAfterMs ?? RATE_LIMIT_FIRST_WAIT_MS * 2 ** RATE_LIMIT_MAX_RETRIES) / 1000);
+      throw new ApiError(429, `Rate limited -- try again in ${seconds} seconds.`);
+    }
 
-  // A 204 No Content (or any 2xx with an empty body) has nothing to parse --
-  // res.json() throws on empty input, which previously surfaced as a
-  // generic "Malformed response" error even though the request succeeded
-  // (ahood-cli#103). Callers that don't need response data (e.g. token
-  // revoke, which awaits this without using the result) get `undefined`
-  // back instead of a spurious failure.
-  const text = await res.text();
-  if (text === "") return undefined as T;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error(`Malformed response from ${getApiUrl()}${path}: expected JSON.`);
+    if (!res.ok) {
+      // The error body may not be valid/object JSON (proxy error pages, an
+      // empty body, a literal `null`) -- fall back to the status-only message
+      // rather than crashing on `body.error` of something that isn't an object.
+      const body: unknown = await res.json().catch(() => undefined);
+      const message =
+        body && typeof body === "object" && typeof (body as { error?: unknown }).error === "string"
+          ? sanitizeErrorMessage((body as { error: string }).error)
+          : `Request failed with status ${res.status}`;
+      throw new ApiError(res.status, message, body);
+    }
+
+    // A 204 No Content (or any 2xx with an empty body) has nothing to parse --
+    // res.json() throws on empty input, which previously surfaced as a
+    // generic "Malformed response" error even though the request succeeded
+    // (ahood-cli#103). Callers that don't need response data (e.g. token
+    // revoke, which awaits this without using the result) get `undefined`
+    // back instead of a spurious failure.
+    const text = await res.text();
+    if (text === "") return undefined as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new Error(`Malformed response from ${getApiUrl()}${path}: expected JSON.`);
+    }
   }
 }

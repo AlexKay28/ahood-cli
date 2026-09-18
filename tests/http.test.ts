@@ -198,3 +198,138 @@ describe("NetworkError message sanitization (ahood-cli#129)", () => {
     expect(error.message.length).toBeLessThan(500);
   });
 });
+
+// ahood-cli#159: the registry rate-limits many endpoints the CLI calls and
+// sends Retry-After on every one of them. apiJson must wait that out, retry a
+// bounded number of times, and only then fail -- with a message that names
+// the server's ask -- instead of surfacing a generic status error. All waits
+// below run on fake timers, so the timings are asserted exactly.
+describe("apiJson 429 handling (ahood-cli#159)", () => {
+  useStubbedApi();
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("waits out a 429's Retry-After and retries, instead of failing the request", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "slow down" }), { status: 429, headers: { "Retry-After": "3" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = expect(apiJson("/x")).resolves.toEqual({ ok: true });
+    await vi.advanceTimersByTimeAsync(2_999); // still inside the 3s the server asked for
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await outcome;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to exponential backoff (1s, then 2s) when Retry-After is absent", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 429 }))
+      .mockResolvedValueOnce(new Response(null, { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = expect(apiJson("/x")).resolves.toEqual({ ok: 1 });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // first backoff is 1s
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // second backoff doubled to 2s
+    await vi.advanceTimersByTimeAsync(1);
+    await outcome;
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("never sleeps more than 30s in one hop, however large the server's Retry-After is", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 429, headers: { "Retry-After": "120" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = expect(apiJson("/x")).resolves.toEqual({ ok: 1 });
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // a 120s ask is capped at a 30s wait
+    await vi.advanceTimersByTimeAsync(1);
+    await outcome;
+  });
+
+  it("tolerates an HTTP-date Retry-After by converting it to a wait from now", async () => {
+    vi.useFakeTimers();
+    // toUTCString truncates milliseconds, so the wait the code computes from
+    // this header is 9_001..10_000ms; derive the exact expectation from the
+    // same fake clock the code reads, and assert the timing precisely.
+    const at = new Date(Date.now() + 10_000).toUTCString();
+    const expectedWaitMs = Date.parse(at) - Date.now();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 429, headers: { "Retry-After": at } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = expect(apiJson("/x")).resolves.toEqual({ ok: 1 });
+    await vi.advanceTimersByTimeAsync(expectedWaitMs - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // date form honored, to the millisecond
+    await vi.advanceTimersByTimeAsync(1);
+    await outcome;
+  });
+
+  it("ignores an unparseable Retry-After and uses its own backoff instead", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 429, headers: { "Retry-After": "not-a-date" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = expect(apiJson("/x")).resolves.toEqual({ ok: 1 });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // fell back to the 1s exponential first hop
+    await vi.advanceTimersByTimeAsync(1);
+    await outcome;
+  });
+
+  it("after two exhausted retries fails with a rate-limit message naming the server's seconds", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "slow down" }), { status: 429, headers: { "Retry-After": "7" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Handlers attached before any timer runs, so a rejection mid-advance is
+    // never unhandled.
+    const outcome = apiJson("/x").then(
+      () => {
+        throw new Error("expected apiJson to reject");
+      },
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(60_000); // covers both 7s backoffs with room to spare
+
+    const caught = (await outcome) as ApiError;
+    expect(caught).toBeInstanceOf(ApiError);
+    expect(caught.status).toBe(429);
+    expect(caught.message).toMatch(/rate limited/i);
+    expect(caught.message).toMatch(/try again in 7 seconds/);
+    // The original request plus two bounded retries -- then give up and say so.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("leaves 401/403/404/410 handling untouched -- no retry, body error passed through", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: "This token's scopes do not include 'publish'" }), { status: 403 })),
+    );
+    // Same single-call, immediate-rejection behavior the 403 test above pins;
+    // asserted here against 429's neighbors so a regression in the retry loop
+    // can't swallow non-429 statuses.
+    await expect(apiJson("/x")).rejects.toThrow("This token's scopes do not include 'publish'");
+  });
+});
