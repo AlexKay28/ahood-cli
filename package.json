@@ -28,6 +28,7 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/index.js",
     "prepublishOnly": "npm run build",
+    "pretest": "npm run build",
     "test": "vitest run",
     "sync-readme": "node scripts/sync-readme.mjs"
   },
