@@ -1,4 +1,4 @@
-import { apiJson } from "../http.js";
+import { apiJson, parseRetryAfterMs } from "../http.js";
 import { getApiUrl } from "../config.js";
 import { writeCredentials } from "../credentials.js";
 
@@ -7,6 +7,11 @@ type PollResponse = { status: "pending" | "approved"; token?: string };
 
 const DEFAULT_EXPIRES_IN_SECONDS = 600; // 10 minutes, matching the previous timeout loop's real-world duration
 const POLL_TIMEOUT_MS = 10_000;
+const POLL_INTERVAL_MS = 2_000;
+// ahood-cli#159: cap on a single 429 backoff hop, same policy as apiJson's
+// rate-limit retry -- however large the server's Retry-After, one wait stays
+// bounded, and the deadline check below keeps the loop inside expires_in.
+const RATE_LIMIT_MAX_BACKOFF_MS = 30_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -32,8 +37,29 @@ export async function login(): Promise<void> {
   const seconds = Number.isFinite(expires_in) && expires_in > 0 ? expires_in : DEFAULT_EXPIRES_IN_SECONDS;
   const deadline = Date.now() + seconds * 1000;
 
+  // ahood-cli#159: when the registry rate-limits the poll, `backoffMs` carries
+  // the wait for the NEXT poll -- 429 must not `continue` on the normal
+  // cadence, which is the retry-storm shape: the client answers "you are
+  // asking too often" by asking again on the same schedule, against an
+  // endpoint that can least afford it.
+  let backoffMs: number | undefined;
+  let consecutive429s = 0;
+  // Whether the loop ever saw a 429 -- the timeout message below can then say
+  // why the window ran out instead of blaming the user's pace.
+  let wasRateLimited = false;
+
   while (Date.now() < deadline) {
-    await sleep(2000);
+    let waitMs = POLL_INTERVAL_MS;
+    if (backoffMs !== undefined) {
+      waitMs = backoffMs;
+      backoffMs = undefined;
+      // The 429 backoff counts against the login deadline like every other
+      // wait: a server that keeps answering "wait 60s" must not stretch the
+      // loop past expires_in -- and past expiry the device code is dead, so
+      // polling after the wait would be pointless anyway.
+      if (Date.now() + waitMs >= deadline) break;
+    }
+    await sleep(waitMs);
     let res: Response;
     try {
       // Poll against the CONFIGURED API host (getApiUrl()), not a URL derived
@@ -70,6 +96,22 @@ export async function login(): Promise<void> {
     if (res.status === 410 || res.status === 404) {
       throw new Error("This login was cancelled or expired. Run `ahood login` again.");
     }
+    if (res.status === 429) {
+      // ahood-cli#159: the registry has said stop. Back off by Retry-After
+      // (exponentially, 1s doubling, when the header is absent/unparseable)
+      // instead of polling on -- and let the deadline check at the top of the
+      // loop bound the total time, so rate limiting cannot extend the window.
+      wasRateLimited = true;
+      consecutive429s++;
+      // Drain the rejected body so the socket is released while we wait.
+      await res.text().catch(() => "");
+      const retryAfterMs = parseRetryAfterMs(res.headers.get("Retry-After"));
+      const wait = Math.min(retryAfterMs ?? 1_000 * 2 ** (consecutive429s - 1), RATE_LIMIT_MAX_BACKOFF_MS);
+      backoffMs = wait;
+      console.error(`Rate limited while polling; waiting ${Math.ceil(wait / 1000)}s before trying again...`);
+      continue;
+    }
+    consecutive429s = 0;
     let body: PollResponse;
     try {
       body = (await res.json()) as PollResponse;
@@ -88,7 +130,11 @@ export async function login(): Promise<void> {
     }
     // status === "pending" -- keep polling.
   }
-  throw new Error("Login timed out. Run `ahood login` again.");
+  throw new Error(
+    wasRateLimited
+      ? "Login timed out -- the registry kept rate limiting the poll. Wait a bit and run `ahood login` again."
+      : "Login timed out. Run `ahood login` again.",
+  );
 }
 
 // Not apiJson: a non-2xx poll response ("pending", still-provisioning, etc.)
