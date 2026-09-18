@@ -97,6 +97,47 @@ describe("apiJson error sanitization", () => {
   });
 });
 
+describe("ApiError.body (reopened #162)", () => {
+  useStubbedApi();
+
+  async function apiErrorFrom(res: Response): Promise<ApiError> {
+    vi.stubGlobal("fetch", vi.fn(async () => res));
+    const caught: unknown = await apiJson("/x").catch((e: unknown) => e);
+    expect(caught).toBeInstanceOf(ApiError);
+    return caught as ApiError;
+  }
+
+  it("stores the parsed JSON error body so callers can read fields beyond the flattened .error string", async () => {
+    const error = await apiErrorFrom(
+      new Response(JSON.stringify({ error: "profile not found yet", provisioning: true }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(error.status).toBe(404);
+    expect(error.body).toEqual({ error: "profile not found yet", provisioning: true });
+  });
+
+  it("leaves .body undefined for a non-JSON error body (parse swallowed, best-effort)", async () => {
+    const error = await apiErrorFrom(
+      new Response("<html>gateway timeout</html>", { status: 502, headers: { "Content-Type": "text/html" } }),
+    );
+    expect(error.body).toBeUndefined();
+  });
+
+  it("leaves .body undefined when a JSON-content-type body fails to parse", async () => {
+    const error = await apiErrorFrom(
+      new Response("{not json", { status: 404, headers: { "Content-Type": "application/json" } }),
+    );
+    expect(error.body).toBeUndefined();
+  });
+
+  it("leaves .body undefined for an empty error body", async () => {
+    const error = await apiErrorFrom(new Response(null, { status: 500 }));
+    expect(error.body).toBeUndefined();
+  });
+});
+
 describe("sanitizeErrorMessage control characters (ahood-cli#127)", () => {
   it("replaces ANSI escape sequences with spaces instead of returning them verbatim", () => {
     expect(sanitizeErrorMessage("Not found\x1b[2K\x1b[1Ggotcha")).toBe("Not found [2K [1Ggotcha");

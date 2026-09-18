@@ -77,8 +77,12 @@ describe("whoami", () => {
 
   it("reports success for a session-backed token (200) when the profile fetch also fails", async () => {
     process.env.AHOOD_TOKEN = "tok_test";
-    // /api/v1/profile is left unstubbed (404s) to exercise the fallback path.
-    stubApiRoutes({ "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } } });
+    // The profile route fails with a 500 (transient/unavailable), NOT a 404 --
+    // a bare 404 is definitive now (reopened #162) and gets its own branch below.
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } },
+      "/api/v1/profile": { status: 500, body: { error: "database is down" } },
+    });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await whoami([]);
     expect(logSpy).toHaveBeenCalledWith("Authenticated.");
@@ -87,7 +91,10 @@ describe("whoami", () => {
 
   it("reports success for a personal API token (403) when the profile fetch also fails", async () => {
     process.env.AHOOD_TOKEN = "tok_test";
-    stubApiRoutes({ "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } } });
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } },
+      "/api/v1/profile": { status: 500, body: { error: "database is down" } },
+    });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await whoami([]);
     expect(logSpy).toHaveBeenCalledWith("Authenticated with a personal API token.");
@@ -115,7 +122,10 @@ describe("whoami", () => {
 
   it("--json emits a structured result instead of prose when the profile fetch also fails", async () => {
     process.env.AHOOD_TOKEN = "tok_test";
-    stubApiRoutes({ "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } } });
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } },
+      "/api/v1/profile": { status: 500, body: { error: "database is down" } },
+    });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await whoami(["--json"]);
     expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: true, mode: "session" }));
@@ -195,5 +205,86 @@ describe("whoami", () => {
     await whoami(["--json"]);
     expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: true, mode: "token" }));
     expect(process.exitCode).toBe(0);
+  });
+
+  // reopened #162: the backend tags the expected, self-resolving post-signup
+  // window with provisioning:true on the profile 404's JSON body.
+  const provisioning404 = { status: 404, body: { error: "profile not found yet", provisioning: true } };
+
+  it("still provisioning: exits 0 with the issue's wording on a profile 404 tagged provisioning:true", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } },
+      "/api/v1/profile": provisioning404,
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await whoami([]);
+    expect(logSpy).toHaveBeenCalledWith(
+      "Your account is still being set up -- this finishes on its own and needs nothing from you. Run `ahood whoami` again in a bit...",
+    );
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("still provisioning: --json carries profileStatus:'provisioning' and exits 0 (session mode)", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } },
+      "/api/v1/profile": provisioning404,
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await whoami(["--json"]);
+    expect(logSpy).toHaveBeenCalledWith(
+      JSON.stringify({ authenticated: true, mode: "session", profileStatus: "provisioning" }),
+    );
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("still provisioning: a non-404 failure carrying provisioning:true does NOT take the provisioning branch", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } },
+      "/api/v1/profile": { status: 500, body: { error: "database is down", provisioning: true } },
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await whoami([]);
+    expect(logSpy).toHaveBeenCalledWith("Authenticated with a personal API token.");
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("genuinely missing: a bare profile 404 gets a distinct error message and exits 5 (the ApiError-404 code)", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } },
+      "/api/v1/profile": { status: 404, body: { error: "no such profile" } },
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await whoami([]);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/no profile exists for your account/));
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringMatching(/still being set up/));
+    expect(process.exitCode).toBe(5);
+  });
+
+  it("genuinely missing: --json carries profileStatus:'not_found'", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } },
+      "/api/v1/profile": { status: 404, body: { error: "no such profile" } },
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await whoami(["--json"]);
+    expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: true, mode: "token", profileStatus: "not_found" }));
+    expect(process.exitCode).toBe(5);
+  });
+
+  it("genuinely missing: a profile 404 whose provisioning flag is not exactly true takes the missing branch", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } },
+      "/api/v1/profile": { status: 404, body: { error: "no such profile", provisioning: false } },
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await whoami([]);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/no profile exists for your account/));
+    expect(process.exitCode).toBe(5);
   });
 });

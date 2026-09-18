@@ -16,21 +16,70 @@ type Profile = {
 export type WhoamiResult =
   | { authenticated: false; reason: "not_logged_in" }
   | { authenticated: false; reason: "invalid_token" }
-  | { authenticated: true; mode: "session" | "token"; profile?: Profile }
+  // profileStatus is set only when the registry answered the profile fetch
+  // definitively: "provisioning" (profile 404 whose JSON body carries
+  // `provisioning: true` -- the expected, self-resolving window right after
+  // signup, backend half of ahood#340) or "not_found" (a bare 404 -- no
+  // profile exists and it is not the provisioning window). Absent in every
+  // other case, including profile-fetch failures that aren't 404s, so older
+  // backends and transient profile-fetch failures behave exactly as before.
+  | {
+      authenticated: true;
+      mode: "session" | "token";
+      profile?: Profile;
+      profileStatus?: "provisioning" | "not_found";
+    }
   | { authenticated: null; error: string };
 
+type ProfileFetch =
+  | { state: "present"; profile: Profile }
+  | { state: "provisioning" }
+  | { state: "not_found" }
+  | { state: "unavailable" };
+
+// The flag must positively assert provisioning -- `provisioning: false`, an
+// absent flag, or any other shape means "genuinely missing" on a 404.
+function bodyFlagsProvisioning(body: unknown): boolean {
+  return (body as { provisioning?: unknown } | null | undefined)?.provisioning === true;
+}
+
 // Best-effort enrichment: whoami's real job is answering "does this token
-// still authenticate?", which is already settled by the time this runs.
-// A failure here (network blip, an otherwise-valid token hitting a 500 on
-// this specific route, etc.) must never turn a successful auth check into a
-// command failure -- so every error is swallowed and callers fall back to
-// the plain "Authenticated..." message instead.
-async function fetchProfile(): Promise<Profile | undefined> {
+// still authenticate?", which is already settled by the time this runs. Only
+// the profile 404 is definitive enough to change what whoami reports -- the
+// backend tags the expected post-signup window with `provisioning: true` on
+// that 404's JSON body (read off ApiError.body), and a bare 404 means no
+// profile exists at all (reopened #162; supersedes the earlier exit-7
+// design). Everything else (network blip, an otherwise-valid token hitting a
+// 500 on this specific route, an unparseable body) is "unavailable": swallowed,
+// so a transient profile problem can never turn a successful auth check into
+// a command failure -- callers fall back to the plain "Authenticated..."
+// message instead.
+async function fetchProfileState(): Promise<ProfileFetch> {
   try {
-    return await apiJson<Profile>("/api/v1/profile");
-  } catch {
-    return undefined;
+    const profile = await apiJson<Profile>("/api/v1/profile");
+    return { state: "present", profile };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      if (bodyFlagsProvisioning(error.body)) return { state: "provisioning" };
+      return { state: "not_found" };
+    }
+    return { state: "unavailable" };
   }
+}
+
+// Maps a profile fetch onto the optional fields of the authenticated:true
+// result: a present profile spreads as `profile`, a definitive 404 answer as
+// `profileStatus`, and "unavailable" as neither (the legacy fallback).
+async function profileFields(): Promise<{
+  profile?: Profile;
+  profileStatus?: "provisioning" | "not_found";
+}> {
+  const fetched = await fetchProfileState();
+  if (fetched.state === "present") return { profile: fetched.profile };
+  if (fetched.state === "provisioning" || fetched.state === "not_found") {
+    return { profileStatus: fetched.state };
+  }
+  return {};
 }
 
 // Pure auth-status check: no console output, no process.exitCode -- callers
@@ -58,12 +107,10 @@ export async function checkAuth(): Promise<WhoamiResult> {
     await apiJson<{ tokens: unknown[] }>("/api/v1/auth/tokens");
     // A session-backed caller (only reachable if this ever runs against a
     // cookie-bearing client) -- the token list came back.
-    const profile = await fetchProfile();
-    return { authenticated: true, mode: "session", profile };
+    return { authenticated: true, mode: "session", ...(await profileFields()) };
   } catch (error) {
     if (error instanceof ApiError && error.status === 403) {
-      const profile = await fetchProfile();
-      return { authenticated: true, mode: "token", profile };
+      return { authenticated: true, mode: "token", ...(await profileFields()) };
     }
     if (error instanceof ApiError && error.status === 401) {
       return { authenticated: false, reason: "invalid_token" };
@@ -104,6 +151,38 @@ export async function whoami(args: string[] = []): Promise<void> {
     if (wantsJson) console.log(JSON.stringify({ authenticated: null, error: result.error }));
     else console.error(`Could not verify your token: ${result.error}`);
     process.exitCode = 1;
+    return;
+  }
+
+  // Still provisioning (profile 404 tagged provisioning:true): the token
+  // itself authenticated, and this is the expected, self-resolving window
+  // right after signup -- NOT a failure, so exit stays 0 and no new exit
+  // code is introduced (reopened #162). Wording is CLI-appropriate, not the
+  // web's "refresh this page" copy.
+  if (result.profileStatus === "provisioning") {
+    if (wantsJson) {
+      console.log(JSON.stringify({ authenticated: true, mode: result.mode, profileStatus: "provisioning" }));
+    } else {
+      console.log(
+        "Your account is still being set up -- this finishes on its own and needs nothing from you. Run `ahood whoami` again in a bit...",
+      );
+    }
+    return;
+  }
+
+  // Genuinely missing (bare profile 404, no provisioning flag): distinct
+  // from the provisioning window and a failure for scripts -- exit 5, the
+  // code exitCodeFor() already maps an ApiError 404 to elsewhere
+  // (src/exit-code.ts), not a new constant.
+  if (result.profileStatus === "not_found") {
+    if (wantsJson) {
+      console.log(JSON.stringify({ authenticated: true, mode: result.mode, profileStatus: "not_found" }));
+    } else {
+      console.error(
+        "Authenticated, but no profile exists for your account on the registry (404) -- and this is not the normal post-signup provisioning window, so something may be wrong. Check AHOOD_API_URL or re-run `ahood login`.",
+      );
+    }
+    process.exitCode = 5;
     return;
   }
 

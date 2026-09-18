@@ -395,12 +395,51 @@ describe("ahood mcp tools", () => {
   });
 
   it("whoami reports authenticated:true for a valid session token", async () => {
-    stubApiRoutes({ "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } } });
+    // The profile route fails with a 500 (transient/unavailable), NOT a 404 --
+    // a bare 404 is definitive now (reopened #162) and gets its own branch below.
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } },
+      "/api/v1/profile": { status: 500, body: { error: "database is down" } },
+    });
     const client = await connectedClient();
 
     const result = await client.callTool({ name: "whoami", arguments: {} });
 
     expect(result.isError).toBeFalsy();
     expect(firstTextBody(result.content)).toEqual({ authenticated: true, mode: "session" });
+  });
+
+  it("whoami tool carries profileStatus:'provisioning' on a profile 404 tagged provisioning:true", async () => {
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } },
+      "/api/v1/profile": { status: 404, body: { error: "profile not found yet", provisioning: true } },
+    });
+    const client = await connectedClient();
+
+    const result = await client.callTool({ name: "whoami", arguments: {} });
+
+    expect(result.isError).toBeFalsy();
+    expect(firstTextBody(result.content)).toEqual({
+      authenticated: true,
+      mode: "token",
+      profileStatus: "provisioning",
+    });
+  });
+
+  it("whoami tool carries profileStatus:'not_found' on a bare profile 404", async () => {
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } },
+      "/api/v1/profile": { status: 404, body: { error: "no such profile" } },
+    });
+    const client = await connectedClient();
+
+    const result = await client.callTool({ name: "whoami", arguments: {} });
+
+    expect(result.isError).toBeFalsy();
+    expect(firstTextBody(result.content)).toEqual({
+      authenticated: true,
+      mode: "session",
+      profileStatus: "not_found",
+    });
   });
 });

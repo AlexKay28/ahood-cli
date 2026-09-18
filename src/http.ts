@@ -4,7 +4,19 @@ import { sanitizeForTerminal } from "./terminal-safe.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  // Best-effort parsed JSON body of the error response: lets callers read
+  // structured fields beyond the flattened `error` string folded into
+  // `message` -- e.g. the profile 404's `provisioning: true` flag that
+  // distinguishes the expected post-signup window from a genuinely missing
+  // profile (reopened #162). Undefined when the body isn't JSON or doesn't
+  // parse; never throws (see apiJson, the sole response-driven construction
+  // site -- add.ts's download path has no JSON body to parse and passes
+  // nothing).
+  constructor(
+    public status: number,
+    message: string,
+    public body?: unknown,
+  ) {
     super(message);
   }
 }
@@ -78,12 +90,18 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
     // The error body may not be valid/object JSON (proxy error pages, an
     // empty body, a literal `null`) -- fall back to the status-only message
     // rather than crashing on `body.error` of something that isn't an object.
+    // The same best-effort parse feeds ApiError.body, so callers get the raw
+    // parsed object (or undefined) instead of having to re-fetch anything.
+    // No content-type gate: undici's res.json() parses regardless of the
+    // header, and several servers/tests send JSON error bodies without one
+    // -- a strict gate would silently drop those messages (ahood-cli#31/#127
+    // coverage relies on this).
     const body: unknown = await res.json().catch(() => undefined);
     const message =
       body && typeof body === "object" && typeof (body as { error?: unknown }).error === "string"
         ? sanitizeErrorMessage((body as { error: string }).error)
         : `Request failed with status ${res.status}`;
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body);
   }
 
   // A 204 No Content (or any 2xx with an empty body) has nothing to parse --
