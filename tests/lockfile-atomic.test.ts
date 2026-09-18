@@ -139,6 +139,49 @@ describe("writeJsonFileAtomic", () => {
     expect(statSync(target).mode & 0o777).toBe(statSync(reference).mode & 0o777);
   });
 
+  // ahood-cli#158: the caller can request the creation mode of a destination
+  // that doesn't exist yet -- installMcpEntry passes 0600 when the payload it
+  // just resolved holds a credential. The request governs CREATION only; an
+  // existing destination's mode stays #119's preserve, whatever is asked for.
+  describe("requested creation mode (#158)", () => {
+    it("creates a brand-new file at the requested mode", () => {
+      writeJsonFileAtomic(target, { mcpServers: { demo: { env: { API_KEY: "s3cret" } } } }, 0o600);
+
+      expect((statSync(target).mode & 0o777).toString(8)).toBe("600");
+    });
+
+    it("ignores the request when the destination already exists, preserving its mode (#119)", () => {
+      writeFileSync(target, "{}\n");
+      chmodSync(target, 0o644);
+
+      writeJsonFileAtomic(target, { mcpServers: { demo: { env: { API_KEY: "s3cret" } } } }, 0o600);
+
+      // The tightening applies to creation, never to an existing file another
+      // tool may rely on reading -- the exact regression #119 pinned.
+      expect((statSync(target).mode & 0o777).toString(8)).toBe("644");
+    });
+
+    it("never widens an existing tight file even when the request would", () => {
+      writeFileSync(target, "{}\n");
+      chmodSync(target, 0o600);
+
+      writeJsonFileAtomic(target, { mcpServers: {} }, 0o644);
+
+      expect((statSync(target).mode & 0o777).toString(8)).toBe("600");
+    });
+
+    it("applies the request through a dangling symlink's target too", () => {
+      const real = join(dir, "real.json");
+      symlinkSync(real, target);
+
+      writeJsonFileAtomic(target, { mcpServers: { demo: { env: { API_KEY: "s3cret" } } } }, 0o600);
+
+      expect(JSON.parse(readFileSync(real, "utf-8"))).toEqual({ mcpServers: { demo: { env: { API_KEY: "s3cret" } } } });
+      expect(lstatSync(target).isSymbolicLink()).toBe(true);
+      expect((statSync(real).mode & 0o777).toString(8)).toBe("600");
+    });
+  });
+
   describe("stale temp file sweep (#125)", () => {
     // A process that has already exited by the time spawnSync returns -- its
     // pid is dead (barring immediate pid reuse), standing in for an ahood run

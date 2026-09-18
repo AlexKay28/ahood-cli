@@ -150,7 +150,21 @@ function resolveWriteTarget(path: string): string {
 // .mcp.json merge, which sits right next to the lockfile and can hold other
 // servers' secrets) get the same crash-safety guarantee instead of a bare
 // writeFileSync that risks truncating the file on interruption.
-export function writeJsonFileAtomic(path: string, data: unknown): void {
+//
+// `mode` (ahood-cli#158) lets a caller decide the mode of a file this write
+// CREATES: installMcpEntry requests 0600 when the payload it just resolved
+// holds a credential, because only the caller knows whether the data is a
+// secret store or a shared config. It never applies to an existing
+// destination -- that file's mode is its owner's (or another tool's) choice,
+// and preserving it is #119's whole point -- so an existing file is untouched
+// no matter what is requested, and the caller learns about a loose existing
+// file some other way (the warning in add.ts). Omitted, the fallback stays
+// exactly what a plain writeFileSync would have produced. An explicitly
+// requested mode is applied exactly, via the post-rename chmod below, rather
+// than umask-masked at creation: a caller making a security decision about a
+// file it is creating must get what it asked for regardless of the ambient
+// umask.
+export function writeJsonFileAtomic(path: string, data: unknown, mode?: number): void {
   // Resolved before the mkdir so the directory that actually gets created is
   // the resolved target's, not the link's -- a link set up ahead of the first
   // install can point somewhere that doesn't exist yet -- and so that every
@@ -173,9 +187,11 @@ export function writeJsonFileAtomic(path: string, data: unknown): void {
   // permissions matters because .mcp.json is a project-shared config other MCP
   // clients read: whether it should be 0644 or tighter is its own decision
   // (ahood#169), not something this write path gets to change as a side effect
-  // of the 0600 temp file below (ahood-cli#119). With no destination yet there
-  // is nothing to preserve, so fall back to what a plain writeFileSync would
-  // have produced -- 0666 masked by the process umask.
+  // of the 0600 temp file below (ahood-cli#119) -- and that is true even when
+  // the caller passed `mode`, which therefore only ever governs creation. With
+  // no destination yet there is nothing to preserve: an explicit request wins
+  // (see the comment above), and without one the fallback is what a plain
+  // writeFileSync would have produced -- 0666 masked by the process umask.
   //
   // lstatSync rather than statSync even though `dest` is by construction never
   // a symlink (resolveWriteTarget walked until it wasn't): the two agree here,
@@ -185,7 +201,7 @@ export function writeJsonFileAtomic(path: string, data: unknown): void {
   try {
     finalMode = lstatSync(dest).mode & 0o777;
   } catch {
-    finalMode = 0o666 & ~process.umask();
+    finalMode = mode !== undefined ? mode & 0o777 : 0o666 & ~process.umask();
   }
   try {
     // 0600 from the moment of creation: for .mcp.json this temp file holds
