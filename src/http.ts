@@ -4,7 +4,17 @@ import { sanitizeForTerminal } from "./terminal-safe.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  // The parsed JSON error body, when there was one and it parsed as an
+  // object -- not just the `.error` string already folded into `message`.
+  // whoami.ts needs this to read the `provisioning` flag GET /api/v1/profile
+  // sets on a 404 for "row not provisioned yet" and tell it apart from a 404
+  // that means something else, which `message` alone can't do once it's been
+  // through sanitizeErrorMessage.
+  constructor(
+    public status: number,
+    message: string,
+    public body?: unknown,
+  ) {
     super(message);
   }
 }
@@ -83,7 +93,7 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
       body && typeof body === "object" && typeof (body as { error?: unknown }).error === "string"
         ? sanitizeErrorMessage((body as { error: string }).error)
         : `Request failed with status ${res.status}`;
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body);
   }
 
   // A 204 No Content (or any 2xx with an empty body) has nothing to parse --

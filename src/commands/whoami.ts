@@ -13,23 +13,41 @@ type Profile = {
   github_username: string | null;
 };
 
+// The two ways "no profile came back" can happen, per GET /api/v1/profile
+// (ahood#336, ahood#340): `provisioning` is the expected, self-resolving
+// window between a Clerk signup and the webhook (or reconcile cron) creating
+// the `profiles` row -- nothing is wrong and nothing is required of the user.
+// `not_found` is a 404 the server did NOT tag `provisioning: true`, i.e. a
+// missing profile for some other reason. The two are worded and exited
+// differently below; conflating them (as this used to) meant a 30-second-old
+// account and a genuinely broken one printed the same generic message.
+type ProfileOutcome = { profile?: Profile; profileStatus?: "provisioning" | "not_found" };
+
 export type WhoamiResult =
   | { authenticated: false; reason: "not_logged_in" }
   | { authenticated: false; reason: "invalid_token" }
-  | { authenticated: true; mode: "session" | "token"; profile?: Profile }
+  | ({ authenticated: true; mode: "session" | "token" } & ProfileOutcome)
   | { authenticated: null; error: string };
 
 // Best-effort enrichment: whoami's real job is answering "does this token
 // still authenticate?", which is already settled by the time this runs.
 // A failure here (network blip, an otherwise-valid token hitting a 500 on
 // this specific route, etc.) must never turn a successful auth check into a
-// command failure -- so every error is swallowed and callers fall back to
-// the plain "Authenticated..." message instead.
-async function fetchProfile(): Promise<Profile | undefined> {
+// command failure -- so most errors are swallowed and callers fall back to
+// the plain "Authenticated..." message instead. The one exception is a 404,
+// which carries a `provisioning` flag worth reading rather than discarding:
+// see ProfileOutcome above.
+async function fetchProfile(): Promise<ProfileOutcome> {
   try {
-    return await apiJson<Profile>("/api/v1/profile");
-  } catch {
-    return undefined;
+    const profile = await apiJson<Profile>("/api/v1/profile");
+    return { profile };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      const body = error.body;
+      const provisioning = !!body && typeof body === "object" && (body as { provisioning?: unknown }).provisioning === true;
+      return { profileStatus: provisioning ? "provisioning" : "not_found" };
+    }
+    return {};
   }
 }
 
@@ -58,12 +76,12 @@ export async function checkAuth(): Promise<WhoamiResult> {
     await apiJson<{ tokens: unknown[] }>("/api/v1/auth/tokens");
     // A session-backed caller (only reachable if this ever runs against a
     // cookie-bearing client) -- the token list came back.
-    const profile = await fetchProfile();
-    return { authenticated: true, mode: "session", profile };
+    const profileOutcome = await fetchProfile();
+    return { authenticated: true, mode: "session", ...profileOutcome };
   } catch (error) {
     if (error instanceof ApiError && error.status === 403) {
-      const profile = await fetchProfile();
-      return { authenticated: true, mode: "token", profile };
+      const profileOutcome = await fetchProfile();
+      return { authenticated: true, mode: "token", ...profileOutcome };
     }
     if (error instanceof ApiError && error.status === 401) {
       return { authenticated: false, reason: "invalid_token" };
@@ -104,6 +122,44 @@ export async function whoami(args: string[] = []): Promise<void> {
     if (wantsJson) console.log(JSON.stringify({ authenticated: null, error: result.error }));
     else console.error(`Could not verify your token: ${result.error}`);
     process.exitCode = 1;
+    return;
+  }
+
+  const asToken = result.mode === "token";
+
+  if (result.profileStatus === "not_found") {
+    // Distinct from "provisioning" below: the server saw a 404 for this
+    // caller's profile and did NOT flag it as the expected provisioning
+    // window (ahood#340) -- authentication is genuinely fine (we got this
+    // far), but something about the account's profile is actually wrong
+    // rather than merely not-created-yet. Exit 5 ("Not found"), the same
+    // code exitCodeFor() already gives an ApiError 404 elsewhere -- this is
+    // that same class of failure, just decided locally since checkAuth()
+    // never throws.
+    if (wantsJson) console.log(JSON.stringify({ authenticated: true, mode: result.mode, profileStatus: "not_found" }));
+    else {
+      console.error(
+        `Authenticated${asToken ? " with a personal API token" : ""}, but no profile was found for this account -- ` +
+          "this is not the usual just-signed-up delay, so something is actually wrong. Try `ahood login` again, and " +
+          "if it keeps happening, contact support.",
+      );
+    }
+    process.exitCode = 5;
+    return;
+  }
+
+  if (result.profileStatus === "provisioning") {
+    // The expected, self-resolving window between signup and the profile
+    // row being created (ahood#336, ahood#340) -- not a failure of any kind,
+    // so this stays exit 0. "Refresh this page" (the web copy's hint) makes
+    // no sense here; re-running the command is the CLI-native equivalent.
+    if (wantsJson) console.log(JSON.stringify({ authenticated: true, mode: result.mode, profileStatus: "provisioning" }));
+    else {
+      console.log(
+        `Authenticated${asToken ? " with a personal API token" : ""}. Your account is still being set up -- ` +
+          "this finishes on its own and needs nothing from you. Run `ahood whoami` again in a bit to see your profile.",
+      );
+    }
     return;
   }
 

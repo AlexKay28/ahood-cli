@@ -75,22 +75,45 @@ describe("whoami", () => {
     expect(process.exitCode).toBe(4);
   });
 
-  it("reports success for a session-backed token (200) when the profile fetch also fails", async () => {
+  // ahood#340: a 404 from GET /api/v1/profile is ambiguous unless it's read
+  // all the way down to the `provisioning` flag. A 404 WITHOUT that flag is
+  // NOT the usual just-signed-up delay, so it's treated as a real, hard
+  // failure (its own exit code) instead of silently falling back to a
+  // generic success message -- unlike the 500/network cases further down,
+  // which are genuinely transient and still swallow into plain success.
+  it("treats a session-backed token (200) whose profile 404s without `provisioning` as a hard not-found", async () => {
     process.env.AHOOD_TOKEN = "tok_test";
-    // /api/v1/profile is left unstubbed (404s) to exercise the fallback path.
+    // /api/v1/profile is left unstubbed, which stubApiRoutes answers with a
+    // plain `{ error: "not found" }` 404 -- no `provisioning` flag.
     stubApiRoutes({ "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } } });
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     await whoami([]);
-    expect(logSpy).toHaveBeenCalledWith("Authenticated.");
-    expect(process.exitCode).toBe(0);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/no profile was found/));
+    expect(process.exitCode).toBe(5);
   });
 
-  it("reports success for a personal API token (403) when the profile fetch also fails", async () => {
+  it("treats a personal API token (403) whose profile 404s without `provisioning` as a hard not-found", async () => {
     process.env.AHOOD_TOKEN = "tok_test";
     stubApiRoutes({ "/api/v1/auth/tokens": { status: 403, body: { error: "session required" } } });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await whoami([]);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/no profile was found/));
+    expect(process.exitCode).toBe(5);
+  });
+
+  it("reports the provisioning state -- not a failure -- when the profile 404s with provisioning: true", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } },
+      "/api/v1/profile": { status: 404, body: { error: "Your account is still being set up.", provisioning: true } },
+    });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await whoami([]);
-    expect(logSpy).toHaveBeenCalledWith("Authenticated with a personal API token.");
+    expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/still being set up/));
+    // CLI-appropriate wording, not a reprint of the web copy's "Refresh this
+    // page" hint (ahood#340) -- that string is never sent to the CLI in the
+    // first place, but nothing in this command should invent an equivalent.
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringMatching(/[Rr]efresh/));
     expect(process.exitCode).toBe(0);
   });
 
@@ -113,12 +136,25 @@ describe("whoami", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it("--json emits a structured result instead of prose when the profile fetch also fails", async () => {
+  it("--json emits profileStatus: not_found (and exit 5) when the profile 404 isn't flagged as provisioning", async () => {
     process.env.AHOOD_TOKEN = "tok_test";
     stubApiRoutes({ "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } } });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await whoami(["--json"]);
-    expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: true, mode: "session" }));
+    expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: true, mode: "session", profileStatus: "not_found" }));
+    expect(process.exitCode).toBe(5);
+  });
+
+  it("--json emits profileStatus: provisioning (and exit 0) when the profile 404s with provisioning: true", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({
+      "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } },
+      "/api/v1/profile": { status: 404, body: { error: "Your account is still being set up.", provisioning: true } },
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await whoami(["--json"]);
+    expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: true, mode: "session", profileStatus: "provisioning" }));
+    expect(process.exitCode).toBe(0);
   });
 
   const profileBody = {

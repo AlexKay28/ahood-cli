@@ -395,12 +395,16 @@ describe("ahood mcp tools", () => {
   });
 
   it("whoami reports authenticated:true for a valid session token", async () => {
+    // /api/v1/profile is left unstubbed, which answers with a plain 404 (no
+    // `provisioning` flag) -- checkAuth() now surfaces that as
+    // profileStatus: "not_found" rather than swallowing it (ahood#340), so
+    // the MCP tool's raw pass-through of checkAuth()'s result carries it too.
     stubApiRoutes({ "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } } });
     const client = await connectedClient();
 
     const result = await client.callTool({ name: "whoami", arguments: {} });
 
     expect(result.isError).toBeFalsy();
-    expect(firstTextBody(result.content)).toEqual({ authenticated: true, mode: "session" });
+    expect(firstTextBody(result.content)).toEqual({ authenticated: true, mode: "session", profileStatus: "not_found" });
   });
 });
