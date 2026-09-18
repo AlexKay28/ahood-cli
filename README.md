@@ -30,6 +30,7 @@ Installed alice/pdf-tools@1.4.0 to .claude/skills/alice@pdf-tools
 - [Usage examples](#usage-examples)
 - [Commands](#commands)
 - [Exit codes](#exit-codes)
+- [Compatibility](#compatibility)
 - [Shell completion](#shell-completion)
 - [Using ahood from an AI agent](#using-ahood-from-an-ai-agent)
 - [Development](#development)
@@ -269,6 +270,12 @@ Stable across releases, safe to branch on in a script:
 | `4` | Authentication required or rejected (not logged in, or the token was refused) |
 | `5` | Not found |
 | `6` | Network/transport error, or an upstream server (5xx) error |
+
+## Compatibility
+
+Surfaces that are stable across releases on purpose, because something outside this codebase depends on their exact shape:
+
+- **`User-Agent` header.** Every request sends `User-Agent: @ahood/cli/<version>` (e.g. `@ahood/cli/0.9.0`), built in `src/http.ts` from this package's own `name` and `version` in `package.json`. This is deliberately a plain, stable, parseable string rather than an opaque one, because it is exactly what a WAF/firewall allowlist rule needs to scope a rate limit or block rule to browser page traffic without also catching the CLI. **Changing this header's shape (its format, delimiter, or what it's derived from) is a breaking change** for anyone who has written a rule against it, even though nothing in this CLI's own test suite would fail — treat it with the same care as the [exit codes](#exit-codes) below. If it ever needs to carry more than name/version (for example OS or Node version, to make a spoofed string easier to tell apart from a real one), that's a deliberate compatibility change too and belongs in this same section, documented to match exactly what the code sends.
 
 ## Shell completion
 

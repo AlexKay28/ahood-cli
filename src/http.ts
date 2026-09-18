@@ -111,6 +111,25 @@ export function sanitizeErrorMessage(message: string): string {
   return `Request failed with an unexpected, oversized, or HTML-shaped error response (${message.length} bytes) -- this usually means an upstream proxy/WAF failure, not a problem with your request.`;
 }
 
+// ahood-cli#159 (finding 5): during an outage the registry answered a request
+// with 402 and an HTML body -- a client expecting JSON got a parse-shaped
+// failure ("Request failed with status 402") that named none of what actually
+// happened. These are the statuses that plausibly mean "the whole registry is
+// down or blocked" rather than "your specific request was rejected": the 5xx
+// family, plus 402 (this incident's status -- a billing/quota gate in front of
+// the registry is exactly the kind of thing that fails open with an infra page
+// rather than a JSON error).
+//
+// Deliberately NOT extended to 401/403/404/410/429: those already have their
+// own well-understood meanings elsewhere in this CLI (see exit-code.ts,
+// login.ts's device-code polling, whoami.ts's provisioning check) and, unlike
+// a 5xx or a paywall, a body-less/non-JSON response on one of them is far more
+// likely to be "this particular endpoint just doesn't send a body on this
+// status" than "the registry is down". Treating those as an outage too would
+// overfit this one incident's status code into a much broader claim than the
+// evidence supports.
+const LIKELY_OUTAGE_STATUSES = new Set([402, 500, 502, 503, 504]);
+
 export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   // ahood-cli#159: 429 is its own case, before the generic !res.ok handling.
   // It means "you are asking too fast", and the server tells us exactly when
@@ -143,9 +162,11 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
       // empty body, a literal `null`) -- fall back to the status-only message
       // rather than crashing on `body.error` of something that isn't an object.
       const body: unknown = await res.json().catch(() => undefined);
-      const message =
-        body && typeof body === "object" && typeof (body as { error?: unknown }).error === "string"
-          ? sanitizeErrorMessage((body as { error: string }).error)
+      const hasStructuredError = body && typeof body === "object" && typeof (body as { error?: unknown }).error === "string";
+      const message = hasStructuredError
+        ? sanitizeErrorMessage((body as { error: string }).error)
+        : LIKELY_OUTAGE_STATUSES.has(res.status)
+          ? `The registry appears to be unavailable (HTTP ${res.status}).`
           : `Request failed with status ${res.status}`;
       throw new ApiError(res.status, message, body);
     }
