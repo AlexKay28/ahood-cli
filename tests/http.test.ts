@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { apiFetch, apiJson, ApiError, NetworkError, sanitizeErrorMessage } from "../src/http.js";
+import { CLI_NAME, CLI_VERSION } from "../src/version.js";
 
 const API_URL = "http://ahood.test";
 
@@ -19,6 +20,25 @@ function useStubbedApi(): void {
     else process.env.AHOOD_API_URL = originalApiUrl;
   });
 }
+
+// ahood-cli#159 (finding 4): the README now documents this header's exact
+// shape as a compatibility surface a WAF/firewall allowlist rule may be
+// scoped against, so a silent change to its format is worse here than in
+// most strings this CLI sends -- pin it so that claim stays true.
+describe("User-Agent header (ahood-cli#159)", () => {
+  useStubbedApi();
+
+  it("sends '<name>/<version>', matching what the README documents as a stable compatibility surface", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await apiFetch("/x");
+
+    const [, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(requestInit.headers);
+    expect(headers.get("User-Agent")).toBe(`${CLI_NAME}/${CLI_VERSION}`);
+  });
+});
 
 describe("apiJson error sanitization", () => {
   useStubbedApi();
@@ -94,6 +114,60 @@ describe("apiJson error sanitization", () => {
 
     expect(caught).toBeInstanceOf(ApiError);
     expect((caught as ApiError).message).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+  });
+});
+
+// ahood-cli#159 (finding 5): a non-JSON error body on a status that plausibly
+// means the whole registry is down (402, or a 5xx) should say so, rather than
+// failing on the parse with a generic status message that names none of what
+// actually happened. Scoped to a fixed set of "looks systemic" statuses --
+// asserted here alongside a status NOT in that set, so a regression can't
+// widen it into every 4xx just because a body happened to be missing.
+describe("apiJson outage detection on a non-JSON error body (ahood-cli#159)", () => {
+  useStubbedApi();
+
+  it("reports an outage for a 402 with an HTML body, instead of failing on the parse", async () => {
+    const html = "<html><body>Payment gateway unavailable</body></html>";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(html, { status: 402, headers: { "content-type": "text/html" } })));
+
+    let caught: unknown;
+    try {
+      await apiJson("/x");
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).message).toBe("The registry appears to be unavailable (HTTP 402).");
+  });
+
+  it("reports an outage for a 402 with no body at all", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 402 })));
+
+    await expect(apiJson("/x")).rejects.toThrow("The registry appears to be unavailable (HTTP 402).");
+  });
+
+  it.each([500, 502, 503, 504])("reports an outage for a %i with a non-JSON body", async (status) => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("upstream connect error", { status })));
+
+    await expect(apiJson("/x")).rejects.toThrow(`The registry appears to be unavailable (HTTP ${status}).`);
+  });
+
+  it("still uses the structured error, not the outage message, when a systemic-status body does parse as JSON with .error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Specific validation failure" }), { status: 500 })));
+
+    await expect(apiJson("/x")).rejects.toThrow("Specific validation failure");
+  });
+
+  it("does NOT treat a body-less 404 as an outage -- only the fixed systemic-status set gets the new message", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 404 })));
+
+    await expect(apiJson("/x")).rejects.toThrow("Request failed with status 404");
+  });
+
+  it("does NOT treat a non-JSON 401 body as an outage", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("not json", { status: 401 })));
+
+    await expect(apiJson("/x")).rejects.toThrow("Request failed with status 401");
   });
 });
 
