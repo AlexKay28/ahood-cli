@@ -55,4 +55,40 @@ describe("safeTool", () => {
     const body = JSON.parse((result.content[0] as { type: "text"; text: string }).text);
     expect(body).toEqual({ error: "Usage: ahood skill search <query>", error_code: "usage_error" });
   });
+
+  it("appends the actionable login hint to a 401 auth_error, verbatim from the CLI surface", async () => {
+    const wrapped = safeTool(async () => {
+      throw new ApiError(401, "Unauthorized");
+    });
+
+    const result = await wrapped({});
+
+    expect(result.isError).toBe(true);
+    const body = JSON.parse((result.content[0] as { type: "text"; text: string }).text);
+    expect(body.error_code).toBe("auth_error");
+    expect(body.error).toBe("Unauthorized Run `ahood login` first (or set AHOOD_TOKEN).");
+  });
+
+  it("appends the same hint to a 403 auth_error, matching exit-code.ts's merged 401/403 taxonomy", async () => {
+    const wrapped = safeTool(async () => {
+      throw new ApiError(403, "Forbidden");
+    });
+
+    const result = await wrapped({});
+
+    const body = JSON.parse((result.content[0] as { type: "text"; text: string }).text);
+    expect(body.error_code).toBe("auth_error");
+    expect(body.error).toBe("Forbidden Run `ahood login` first (or set AHOOD_TOKEN).");
+  });
+
+  it("leaves non-auth errors untouched", async () => {
+    const wrapped = safeTool(async () => {
+      throw new ApiError(404, "not found");
+    });
+
+    const result = await wrapped({});
+
+    const body = JSON.parse((result.content[0] as { type: "text"; text: string }).text);
+    expect(body.error).toBe("not found");
+  });
 });

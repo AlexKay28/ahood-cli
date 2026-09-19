@@ -39,8 +39,19 @@ export function safeTool<TInput>(
       // keeps `text` a string no matter what `fn` returns.
       return { content: [{ type: "text", text: JSON.stringify(result ?? null) }] };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const body = { error: message, error_code: errorCodeFor(error) };
+      const code = errorCodeFor(error);
+      let message = error instanceof Error ? error.message : String(error);
+      // ahood-cli#159 / ahood#313 Phase 5. The registry's 401 body is always
+      // the byte-identical `{ error: "Unauthorized" }` (lib/api-auth.ts) --
+      // correct, but not actionable: an MCP client here is a coding agent
+      // reading this JSON, and "Unauthorized" names no remedy. The CLI's own
+      // top-level handler already prints the fix (src/index.ts: "Run `ahood
+      // login` first (or set AHOOD_TOKEN)."); append the same sentence here
+      // verbatim so both surfaces say the same thing rather than two
+      // near-copies drifting apart. Only auth_error: usage/not-found/network
+      // errors carry their own already-actionable text.
+      if (code === "auth_error") message += " Run `ahood login` first (or set AHOOD_TOKEN).";
+      const body = { error: message, error_code: code };
       return { content: [{ type: "text", text: JSON.stringify(body) }], isError: true };
     }
   };
