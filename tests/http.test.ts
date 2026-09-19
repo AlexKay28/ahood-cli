@@ -1,4 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { apiFetch, apiJson, ApiError, NetworkError, sanitizeErrorMessage } from "../src/http.js";
 import { CLI_NAME, CLI_VERSION } from "../src/version.js";
 
@@ -394,6 +397,80 @@ describe("apiJson 429 handling (ahood-cli#159)", () => {
     expect(caught.message).toMatch(/try again in 7 seconds/);
     // The original request plus two bounded retries -- then give up and say so.
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  // ahood-cli#159 finding 3: an IP-keyed limit is shared by every
+  // unauthenticated caller behind that address. This CLI can't change how
+  // the registry buckets requests, but it can tell an anonymous caller,
+  // right when they feel it, that logging in might get them off the shared
+  // bucket -- so the exhausted-retries message grows a login hint, but only
+  // when this specific request had no token attached.
+  describe("login hint on an anonymous 429 (ahood-cli#159 finding 3)", () => {
+    const originalToken = process.env.AHOOD_TOKEN;
+    const originalHome = process.env.HOME;
+    const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
+    let dir: string;
+
+    beforeEach(() => {
+      // resolveToken() falls back to ~/.config/ahood/credentials.json when
+      // AHOOD_TOKEN is unset (see tests/whoami.test.ts) -- point HOME at an
+      // empty temp dir so "no token" here can't accidentally pick up a real
+      // logged-in developer's credentials file on the machine running this
+      // suite.
+      dir = mkdtempSync(join(tmpdir(), "ahood-http-429-test-"));
+      process.env.HOME = dir;
+      delete process.env.XDG_CONFIG_HOME;
+    });
+
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true });
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+      if (originalToken === undefined) delete process.env.AHOOD_TOKEN;
+      else process.env.AHOOD_TOKEN = originalToken;
+    });
+
+    it("appends a login hint when the request had no token", async () => {
+      delete process.env.AHOOD_TOKEN;
+      vi.useFakeTimers();
+      const fetchMock = vi.fn(async () => new Response(null, { status: 429, headers: { "Retry-After": "7" } }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const outcome = apiJson("/x").then(
+        () => {
+          throw new Error("expected apiJson to reject");
+        },
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      const caught = (await outcome) as ApiError;
+      expect(caught.message).toMatch(/try again in 7 seconds/);
+      expect(caught.message).toMatch(/not logged in/i);
+      expect(caught.message).toContain("ahood login");
+    });
+
+    it("omits the login hint when the request already carried a token", async () => {
+      process.env.AHOOD_TOKEN = "ahd_already_logged_in";
+      vi.useFakeTimers();
+      const fetchMock = vi.fn(async () => new Response(null, { status: 429, headers: { "Retry-After": "7" } }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const outcome = apiJson("/x").then(
+        () => {
+          throw new Error("expected apiJson to reject");
+        },
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      const caught = (await outcome) as ApiError;
+      expect(caught.message).toMatch(/try again in 7 seconds/);
+      expect(caught.message).not.toMatch(/not logged in/i);
+      expect(caught.message).not.toContain("ahood login");
+    });
   });
 
   it("leaves 401/403/404/410 handling untouched -- no retry, body error passed through", async () => {

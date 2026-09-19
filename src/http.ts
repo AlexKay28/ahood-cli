@@ -154,7 +154,23 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
       // Retries exhausted. Report the server's own ask (not our capped wait):
       // that is the number the user needs to act on.
       const seconds = Math.ceil((retryAfterMs ?? RATE_LIMIT_FIRST_WAIT_MS * 2 ** RATE_LIMIT_MAX_RETRIES) / 1000);
-      throw new ApiError(429, `Rate limited -- try again in ${seconds} seconds.`);
+      // ahood-cli#159 (finding 3): an IP-keyed limit is shared by every
+      // unauthenticated caller behind that address -- a CI runner, a
+      // corporate NAT, a university network. This CLI has no say over how
+      // the registry buckets requests (that's server policy, out of this
+      // repo's reach), but it DOES know, right here, that the caller making
+      // this specific request has no token attached -- the one fact that
+      // makes the hint worth showing now rather than always. Logged-in
+      // callers get nothing extra: they already did the one thing this
+      // message would suggest, and repeating it at them would just be noise
+      // on top of a real rate limit. Worded as "may" -- this CLI cannot
+      // confirm the registry actually keys authenticated requests
+      // differently, only that it's a plausible reason this specific 429
+      // landed on an anonymous caller.
+      const loginHint = resolveToken()
+        ? ""
+        : " You're not logged in, so this request shares a rate limit with every other anonymous caller on your network -- `ahood login` may get you your own.";
+      throw new ApiError(429, `Rate limited -- try again in ${seconds} seconds.${loginHint}`);
     }
 
     if (!res.ok) {
