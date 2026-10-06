@@ -28,6 +28,7 @@ Installed alice/pdf-tools@1.4.0 to .claude/skills/alice@pdf-tools
 - [Why ahood](#why-ahood)
 - [Configuration](#configuration)
 - [Usage examples](#usage-examples)
+- [Kinds: skills, agents, and MCP servers](#kinds-skills-agents-and-mcp-servers)
 - [Commands](#commands)
 - [Exit codes](#exit-codes)
 - [Compatibility](#compatibility)
@@ -188,6 +189,35 @@ Shared alice/pdf-tools with design-team.
 Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private visibility, it just makes it visible to everyone in `design-team` too. On the other side, whoever received the link runs `ahood group join <the link>` to join.
 </details>
 
+## Kinds: skills, agents, and MCP servers
+
+The registry holds three kinds of artifact this CLI works with, each with its own command group. All three take the same verbs (`search`, `list`, `view`/`show`, `read`, `versions`, `diff`, `add`, `update`, `outdated`, `remove`, `edit`, `unpublish`, `star`, `unstar`, `share`, `unshare`, `init`, `publish`), run by the same code:
+
+| Kind | Root file | `add` installs to | Group |
+| --- | --- | --- | --- |
+| skill | `SKILL.md` | `.claude/skills/<owner>@<skill>/` | `ahood skill <verb>` |
+| agent | `AGENT.md` | `.claude/agents/<owner>@<agent>.md` | `ahood agent <verb>` |
+| mcp | `server.json` | an entry merged into `.mcp.json` | `ahood mcp <verb>` |
+
+```
+$ ahood agent search review
+$ ahood agent init code-reviewer        # ./code-reviewer/AGENT.md
+$ ahood agent publish alice/code-reviewer@1.0.0 --path code-reviewer --name "Code Reviewer"
+$ ahood mcp init github-server          # ./github-server/server.json, a safe placeholder starter
+$ ahood mcp add alice/github-server
+$ ahood agent add alice/pdf-tools
+alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood skill add alice/pdf-tools` instead.
+```
+
+- **`ahood agent` and `ahood mcp` are strict.** A target of another kind is refused -- exit code `2`, naming the kind it found -- before anything is downloaded, prompted for, written, or sent. That covers `add`, `update`, `remove`, `edit`, `unpublish`, `share`/`unshare`, `star`/`unstar`, and `publish` (an existing entry of another kind is refused before anything is packed or uploaded); the read-only verbs refuse too, rather than show the wrong kind. `search` asks the registry for that kind only, `list` keeps only that kind of your own entries, and `update`/`outdated` with no argument consider only installed pins of that kind. `agent publish`/`mcp publish` imply their kind and reject a contradictory `--kind`.
+- **Missing or unexpected kind metadata is refused, never guessed.** If the registry's answer carries no kind (or one this CLI doesn't handle), a kind-scoped command stops with exit `1` and points at the legacy form. `remove` reads the kind from the project's own files (the skill directory, the agent file, or the mcp fingerprint in the lockfile) and asks the registry only when those can't tell; if neither can, nothing is removed.
+- **`ahood skill` is legacy and cross-kind in this release.** `ahood skill search` and `ahood skill list` include every kind, and `ahood skill add`/`update`/`remove`/... act on whatever kind the target is, exactly as before -- including `--json` output and exit codes -- so existing scripts keep working. Add `--kind skill|agent|mcp` to any `ahood skill` verb (except `publish`, whose `--kind` keeps its original meaning) to scope it, or `--kind all` to spell out the cross-kind behavior.
+- **Not in scope: `doc`.** The registry also has a `doc` kind (documentation pages); this CLI has no `ahood doc` group. Kind dispatch is table-driven (`src/kind-info.ts`), so adding one is an entry there plus its help and `init` template.
+
+**Migration plan for a strict `ahood skill`.** A future major version will make `ahood skill <verb>` skills-only by default, matching `agent` and `mcp`. Until then: (1) this release adds the strict groups and `--kind`, and labels `ahood skill` as legacy in `--help`; (2) a following minor release prints a stderr deprecation note when an `ahood skill` command actually touches a non-skill entry (stdout and `--json` unchanged); (3) the major release flips the default, keeping `ahood skill <verb> --kind all` as the explicit cross-kind escape hatch. Scripts that want today's behavior forever can pass `--kind all` now.
+
+**`ahood mcp` has two meanings.** With no arguments, or as `ahood mcp serve` (the preferred spelling), it starts this CLI's local, read-only MCP server over stdio -- unchanged, so existing MCP host configurations keep working with no edits. With a registry verb it manages MCP server manifests. Anything else (`ahood mcp srve`, `ahood mcp --flag`) fails with usage and a suggestion instead of starting a server. Neither is the hosted registry MCP endpoint at `https://ahood.vercel.app/api/mcp`.
+
 ## Commands
 
 <!-- Generated from src/help.ts's COMMANDS_HELP by scripts/sync-readme.mjs --
@@ -204,9 +234,9 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | `ahood whoami [--json]` | Reports whether your stored token still authenticates. |
 | `ahood token create <name>\|list [--json]\|revoke <id> [--yes]` | Manage personal API tokens. |
 | `ahood completion <bash\|zsh\|fish>` | Print a shell completion script for the command names. |
-| `ahood mcp` | Start an MCP server exposing read-only skill commands as tools over stdio. |
+| `ahood help useme` | Print the bundled ahood SKILL.md for an AI agent -- raw, offline, no login needed. |
 
-### Skill
+### Skill (legacy, cross-kind)
 
 | Command | What it does |
 | --- | --- |
@@ -228,6 +258,54 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | `ahood skill unshare <owner>/<skill> --group <group>` | Stop sharing a skill you own with a group. |
 | `ahood skill init [name]` | Scaffold a new skill folder with a minimal, valid SKILL.md. |
 | `ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill\|agent\|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of a skill, agent, or mcp server manifest from a folder containing SKILL.md, AGENT.md, or server.json, creating the skill first if it doesn't already exist. |
+
+### Agent
+
+| Command | What it does |
+| --- | --- |
+| `ahood agent search <query> [--json] [--limit <n>]` | Search published agents. |
+| `ahood agent view\|show <owner>/<agent> [--json] [--web]` | Show a single agent's details without installing it (alias: ahood agent show). |
+| `ahood agent read <owner>/<agent> [--json]` | Print a published agent's AGENT.md, without installing it. |
+| `ahood agent versions <owner>/<agent> [--json]` | List a agent's published-version history. |
+| `ahood agent diff <owner>/<agent> <versionA> <versionB> [--json]` | Show what changed between two published versions of an agent. |
+| `ahood agent list [--json]` | List your own agents, public and private. |
+| `ahood agent add <owner>/<agent>[@version]` | Install an agent into .claude/agents/<owner>@<agent>.md, pinned in the lockfile. |
+| `ahood agent update [<owner>/<agent> ...] [--dry-run] [--json]` | Move agent pins forward to the latest version. |
+| `ahood agent outdated [<owner>/<agent> ...] [--json]` | Read-only staleness check for installed agents. |
+| `ahood agent remove <owner>/<agent> [--yes]` | Uninstall and unpin an agent (local only, prompts unless --yes is passed). |
+| `ahood agent edit <owner>/<agent> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update an agent you own, changing only the flags you pass. |
+| `ahood agent unpublish <owner>/<agent>[@version] [--yes]` | Delete an agent from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
+| `ahood agent star <owner>/<agent>` | Star an agent. |
+| `ahood agent unstar <owner>/<agent>` | Remove your star from an agent. |
+| `ahood agent share <owner>/<agent> --group <group>` | Share an agent you own with a group, without changing its visibility. |
+| `ahood agent unshare <owner>/<agent> --group <group>` | Stop sharing an agent you own with a group. |
+| `ahood agent init [name]` | Scaffold a new agent folder with a minimal, valid AGENT.md. |
+| `ahood agent publish <owner>/<agent>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of an agent from a folder containing AGENT.md, creating it first if it doesn't exist yet. |
+
+### MCP (local server and server manifests)
+
+| Command | What it does |
+| --- | --- |
+| `ahood mcp serve` | Start the local, read-only ahood MCP server over stdio (preferred spelling). |
+| `ahood mcp` | Same as `ahood mcp serve`, kept byte-for-byte so existing MCP host configs keep working. |
+| `ahood mcp search <query> [--json] [--limit <n>]` | Search published MCP server manifests. |
+| `ahood mcp view\|show <owner>/<server> [--json] [--web]` | Show a single MCP server manifest's details without installing it (alias: ahood mcp show). |
+| `ahood mcp read <owner>/<server> [--json]` | Print a published MCP server manifest's server.json, without installing it. |
+| `ahood mcp versions <owner>/<server> [--json]` | List a MCP server manifest's published-version history. |
+| `ahood mcp diff <owner>/<server> <versionA> <versionB> [--json]` | Show what changed between two published versions of an MCP server manifest. |
+| `ahood mcp list [--json]` | List your own MCP server manifests, public and private. |
+| `ahood mcp add <owner>/<server>[@version]` | Install an MCP server manifest into an entry in .mcp.json, pinned in the lockfile. |
+| `ahood mcp update [<owner>/<server> ...] [--dry-run] [--json]` | Move MCP server manifest pins forward to the latest version. |
+| `ahood mcp outdated [<owner>/<server> ...] [--json]` | Read-only staleness check for installed MCP server manifests. |
+| `ahood mcp remove <owner>/<server> [--yes]` | Uninstall and unpin an MCP server manifest (local only, prompts unless --yes is passed). |
+| `ahood mcp edit <owner>/<server> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update an MCP server manifest you own, changing only the flags you pass. |
+| `ahood mcp unpublish <owner>/<server>[@version] [--yes]` | Delete an MCP server manifest from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
+| `ahood mcp star <owner>/<server>` | Star an MCP server manifest. |
+| `ahood mcp unstar <owner>/<server>` | Remove your star from an MCP server manifest. |
+| `ahood mcp share <owner>/<server> --group <group>` | Share an MCP server manifest you own with a group, without changing its visibility. |
+| `ahood mcp unshare <owner>/<server> --group <group>` | Stop sharing an MCP server manifest you own with a group. |
+| `ahood mcp init [name]` | Scaffold a new MCP server manifest folder with a minimal, valid server.json. |
+| `ahood mcp publish <owner>/<server>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of an MCP server manifest from a folder containing server.json, creating it first if it doesn't exist yet. |
 
 ### Group
 
@@ -256,7 +334,7 @@ Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private 
 | `ahood snap tags <id> [tag ...] [--clear] [--json]` | Print a snap's tags, or replace them with the tags given. |
 <!-- COMMANDS_TABLE_END -->
 
-Run `ahood --help`, `ahood skill --help`, `ahood group --help`, `ahood snap --help`, or `ahood <command> --help` (also `ahood help <command>` / `ahood help skill <verb>` / `ahood help group <verb>` / `ahood help snap <verb>`) for the same reference — including per-command flags and examples — directly in your terminal. `ahood --version` prints the installed CLI version.
+Run `ahood --help`, `ahood skill --help`, `ahood agent --help`, `ahood mcp --help`, `ahood group --help`, `ahood snap --help`, or `ahood <command> --help` (also `ahood help <command>` / `ahood help <skill|agent|mcp|group|snap> <verb>`) for the same reference — including per-command flags and examples — directly in your terminal. `ahood --version` prints the installed CLI version.
 
 ## Exit codes
 
@@ -297,8 +375,9 @@ ahood completion fish > ~/.config/fish/completions/ahood.fish
 - **No interactive login required.** Set `AHOOD_TOKEN` once (a personal API token from `ahood token create <name>`) and every command works non-interactively.
 - **Structured output everywhere.** `--json` is available on every read command and on `publish`/`update`, so an agent never has to scrape human-formatted text.
 - **Predictable failure.** A stable, documented [exit code](#exit-codes) per failure class, and error messages that never leak raw upstream infrastructure details — safe to surface directly to an agent's reasoning loop.
-- **A real "start here."** `ahood skill init <name>` scaffolds a valid `SKILL.md` an agent can extend, rather than requiring it to know the frontmatter format up front.
-- **A native MCP server, for agents that prefer tool calls to subprocess parsing.** `ahood mcp` starts a Model Context Protocol server over stdio, exposing `skill_search`, `skill_view`, `skill_read`, `skill_versions`, `skill_list`, and `whoami` as typed tools -- the same data the `--json` flags above already return, reachable as structured tool calls instead. Configure your MCP-aware agent host to run `ahood mcp` (or `npx @ahood/cli@latest mcp`) as a stdio server.
+- **A built-in guide for the agent itself.** `ahood help useme` prints a complete `SKILL.md` teaching an agent when and how to use ahood -- kinds, search -> read -> add -> update, publishing, `--json`, exit codes, `AHOOD_TOKEN`, the MCP options, and which commands are destructive. It is bundled with the installed CLI version, so it needs no login, no network, and writes nothing: stdout is the raw file and nothing else (diagnostics go to stderr), ready to paste into an agent's context or for an agent with a shell to read directly (`ahood help useme > ahood-SKILL.md` saves it). That is separate from `ahood skill add alexkay/ahood`, which optionally installs the registry-published ahood skill into a project as its own pinned skill.
+- **A real "start here."** `ahood skill init <name>`, `ahood agent init <name>`, and `ahood mcp init <name>` scaffold a `SKILL.md`, `AGENT.md`, or `server.json` that passes the registry's publish validation, rather than requiring an agent to know each format up front.
+- **A native MCP server, for agents that prefer tool calls to subprocess parsing.** `ahood mcp serve` (or bare `ahood mcp`, unchanged for existing configs) starts a Model Context Protocol server over stdio, exposing `skill_search`, `skill_view`, `skill_read`, `skill_versions`, `skill_list`, `skill_outdated`, and `whoami` as typed, read-only tools -- the same data the `--json` flags above already return, reachable as structured tool calls instead. Configure your MCP-aware agent host to run `ahood mcp serve` (or `npx @ahood/cli@latest mcp serve`) as a stdio server, e.g. `claude mcp add ahood -- ahood mcp serve`.
 
 ## Development
 

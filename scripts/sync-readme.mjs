@@ -31,8 +31,15 @@ execFileSync(existsSync(tscBin) ? tscBin : "npx", existsSync(tscBin) ? ["-p", "t
   stdio: "inherit",
 });
 
-const { TOP_LEVEL_COMMANDS_HELP, SKILL_COMMANDS_HELP, GROUP_COMMANDS_HELP, SNAP_COMMANDS_HELP, usageWithAliases } =
-  await import(path.join(rootDir, "dist", "help.js"));
+const {
+  TOP_LEVEL_COMMANDS_HELP,
+  SKILL_COMMANDS_HELP,
+  AGENT_COMMANDS_HELP,
+  MCP_COMMANDS_HELP,
+  GROUP_COMMANDS_HELP,
+  SNAP_COMMANDS_HELP,
+  usageWithAliases,
+} = await import(path.join(rootDir, "dist", "help.js"));
 
 // Markdown table cells split on every unescaped `|`, even inside a code
 // span, so any `|` in a usage string (e.g. "view|show" aliases, or
@@ -48,19 +55,29 @@ function renderTable(entries) {
   return ["| Command | What it does |", "| --- | --- |", ...rows].join("\n");
 }
 
-// Four tables, gh-style: account-scoped commands (login/logout/whoami/
-// token/completion) stay flat; skill-entity commands are reached as
-// `ahood skill <verb>`; group-entity commands as `ahood group <verb>`;
-// snap-entity commands as `ahood snap <verb>`.
+// One table per noun, gh-style: account-scoped commands (login/logout/
+// whoami/token/completion/help) stay flat; registry commands are reached as
+// `ahood skill <verb>` (legacy, cross-kind), `ahood agent <verb>`, and
+// `ahood mcp <verb>` (which also holds the local MCP server, ahood-cli#172);
+// group-entity commands as `ahood group <verb>`; snap-entity commands as
+// `ahood snap <verb>`.
 function renderTables() {
   return [
     "### Account",
     "",
     renderTable(TOP_LEVEL_COMMANDS_HELP),
     "",
-    "### Skill",
+    "### Skill (legacy, cross-kind)",
     "",
     renderTable(SKILL_COMMANDS_HELP),
+    "",
+    "### Agent",
+    "",
+    renderTable(AGENT_COMMANDS_HELP),
+    "",
+    "### MCP (local server and server manifests)",
+    "",
+    renderTable(MCP_COMMANDS_HELP),
     "",
     "### Group",
     "",
