@@ -2,6 +2,7 @@ import { createPatch } from "diff";
 import { fetchVersionMeta, downloadVerifiedArchive, extractSingleFileContent, type VersionMeta } from "./add.js";
 import { parseOwnerSkill, SEMVER_RE } from "../spec.js";
 import { UsageError } from "../usage-error.js";
+import { assertKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill diff <owner>/<skill> <versionA> <versionB> [--json]";
 
@@ -56,7 +57,7 @@ function diffManifests(
   return { added, removed, changed };
 }
 
-export async function diff(args: string[]): Promise<void> {
+export async function diff(args: string[], scope?: KindScope): Promise<void> {
   const jsonOutput = args.includes("--json");
   const positional = args.filter((a) => !a.startsWith("--"));
   const [spec, versionA, versionB] = positional;
@@ -70,6 +71,8 @@ export async function diff(args: string[]): Promise<void> {
     fetchVersionMeta(owner, skill, versionA),
     fetchVersionMeta(owner, skill, versionB),
   ]);
+  // Both version responses carry the entry's kind; checked before either archive is downloaded.
+  assertKind(scope, `${owner}/${skill}`, metaA.kind, "diff", "diff");
 
   const [contentA, contentB] = await Promise.all([
     fetchSkillMdContent(owner, skill, metaA),

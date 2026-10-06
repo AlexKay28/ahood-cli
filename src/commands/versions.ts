@@ -1,6 +1,7 @@
 import { apiJson } from "../http.js";
 import { parseOwnerSkill } from "../spec.js";
 import { UsageError } from "../usage-error.js";
+import { ensureRemoteKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill versions <owner>/<skill> [--json]";
 
@@ -45,12 +46,13 @@ export async function listSkillVersions(owner: string, skill: string): Promise<S
   return versions ?? [];
 }
 
-export async function versions(args: string[]): Promise<void> {
+export async function versions(args: string[], scope?: KindScope): Promise<void> {
   const jsonOutput = args.includes("--json");
   const spec = args.find((a) => !a.startsWith("--"));
   if (!spec) throw new UsageError(USAGE);
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
 
+  await ensureRemoteKind(scope, owner, skill, "versions", "list the versions of");
   const list = await listSkillVersions(owner, skill);
 
   if (jsonOutput) {

@@ -2,6 +2,7 @@ import { apiJson } from "../http.js";
 import { flagValue } from "../flags.js";
 import { parseOwnerSkill, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
+import { ensureRemoteKind, type KindScope } from "../kinds.js";
 
 type UpdateResponse = {
   slug: string;
@@ -27,7 +28,7 @@ const USAGE =
 // explicitly passed a flag for is included in the body, so an omitted flag
 // never clobbers an existing value (the route only validates/writes keys
 // that are present on the body at all).
-export async function edit(args: string[]): Promise<void> {
+export async function edit(args: string[], scope?: KindScope): Promise<void> {
   const spec = args[0];
   if (!spec || spec.startsWith("--")) throw new UsageError(USAGE);
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
@@ -63,6 +64,7 @@ export async function edit(args: string[]): Promise<void> {
     );
   }
 
+  await ensureRemoteKind(scope, owner, skill, "edit", "edit");
   const updated = await apiJson<UpdateResponse>(
     `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`,
     {
