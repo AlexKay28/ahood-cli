@@ -21,18 +21,24 @@ describe("validateSegment", () => {
     expect(() => validateSegment("..", "owner", "../demo")).toThrow(UsageError);
   });
 
-  // Owner max length (32) matches the backend's MAX_USERNAME_LENGTH
-  // (app/api/v1/profile/route.ts). Skill max length (64) matches the
-  // backend's createSkill slug cap (lib/skills/mutations.ts). ahood-cli#38.
-  it("accepts an owner segment at exactly the max length (32)", () => {
-    const owner = "a".repeat(32);
+  // Owner max length (256) matches the backend's MAX_USERNAME_LOOKUP_LENGTH
+  // (ahood#628): provisioned usernames can exceed the 32-char cap on CHOSEN
+  // usernames. Skill max length (64) matches the backend's createSkill slug
+  // cap (lib/skills/mutations.ts). ahood-cli#38.
+  it("accepts a 40-character provisioned-style owner (above the old 32 cap, ahood#628)", () => {
+    const owner = "firstname.lastname.engineering.team1234";
+    expect(() => validateSegment(owner, "owner", `${owner}/demo`)).not.toThrow();
+  });
+
+  it("accepts an owner segment at exactly the max length (256)", () => {
+    const owner = "a".repeat(256);
     expect(() => validateSegment(owner, "owner", `${owner}/demo`)).not.toThrow();
   });
 
   it("rejects an owner segment one character over the max length", () => {
-    const owner = "a".repeat(33);
+    const owner = "a".repeat(257);
     expect(() => validateSegment(owner, "owner", `${owner}/demo`)).toThrow(
-      /owner segment is too long \(33 characters; must be at most 32\)/,
+      /owner segment is too long \(257 characters; must be at most 256\)/,
     );
   });
 
@@ -62,7 +68,7 @@ describe("parseOwnerSkill", () => {
   });
 
   it("rejects an oversized owner segment", () => {
-    const owner = "a".repeat(33);
+    const owner = "a".repeat(257);
     expect(() => parseOwnerSkill(`${owner}/demo`, USAGE)).toThrow(/too long/);
   });
 

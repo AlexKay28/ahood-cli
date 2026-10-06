@@ -8,16 +8,19 @@ import { UsageError } from "./usage-error.js";
 const SEGMENT_RE = /^[a-z0-9][a-z0-9._-]*$/i;
 export const SEMVER_RE = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
-// The backend enforces these same caps on write (app/api/v1/profile/route.ts's
-// MAX_USERNAME_LENGTH for owner usernames; lib/skills/mutations.ts's
-// createSkill 3-64 check for skill slugs), so a segment over these lengths
-// can never match a real owner/skill anyway. Rejecting it here -- before any
+// Owner: the backend's MAX_USERNAME_LOOKUP_LENGTH (256, ahood#628), NOT the
+// 32-character cap on usernames a user CHOOSES. Provisioned usernames (an
+// email local part up to 64, a Clerk id, plus a collision suffix) can exceed
+// 32, and those users must still be able to publish and manage their own
+// skills -- the server accepts them since #628, so this client cap had to
+// follow. Skill: lib/skills/mutations.ts's createSkill 3-64 slug cap. A
+// segment over these lengths can never match a real owner/skill anyway. Rejecting it here -- before any
 // request is built -- turns a validly-charset-formatted but absurdly long
 // segment into a clean local error instead of a network round trip that, at
 // a truly pathological length (thousands of characters), hits a raw infra/
 // CDN-layer URL-length limit and 502s before the backend's own routing ever
 // runs (ahood-cli#38).
-const MAX_SEGMENT_LENGTH: Record<"owner" | "skill", number> = { owner: 32, skill: 64 };
+const MAX_SEGMENT_LENGTH: Record<"owner" | "skill", number> = { owner: 256, skill: 64 };
 
 export function validateSegment(value: string, kind: "owner" | "skill", spec: string): void {
   if (!SEGMENT_RE.test(value) || value === "." || value === "..") {
