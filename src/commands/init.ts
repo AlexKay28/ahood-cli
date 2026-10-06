@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { UsageError } from "../usage-error.js";
+import { CLI_KINDS, KINDS, strictKind, type CliKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill init [name]";
 
@@ -61,16 +62,81 @@ TODO: describe, step by step, what Claude should do when this skill is invoked.
 `;
 }
 
+// AGENT.md, for `ahood agent init` (ahood-cli#172). The backend's publish
+// validator (lib/publish/parse-agent-frontmatter.ts in the ahood repo) is a
+// hand-rolled flat `key: value` reader, not YAML: it requires the file to
+// START with a `---` line, a closing `---` line followed by a newline, and
+// non-empty `name` and `description`; an optional `skills: [owner/slug, ...]`
+// flow list must hold owner/slug entries. Claude Code's own subagent loader
+// reads the same frontmatter (name, description, and optionally tools and
+// model). So: no leading comment above the opening `---` (that alone fails
+// publish), and the optional keys are left as commented-out examples, with
+// no colon in any prose comment, so neither reader can mistake a comment for
+// a key.
+function buildAgentMd(name: string): string {
+  return `---
+name: ${name}
+description: TODO -- describe what this agent does and when Claude should delegate to it.
+# Optional. Uncomment to restrict the tools this agent may use (omit to inherit all).
+# tools: Read, Grep, Glob
+# Optional. Uncomment to pin a model for this agent.
+# model: sonnet
+---
+
+TODO -- write the system prompt for this agent. Say what it is responsible for,
+the steps it should take, and what it should hand back when it is done.
+`;
+}
+
+// server.json, for `ahood mcp init` (ahood-cli#172). Mirrors exactly what the
+// backend's publish validator (lib/publish/parse-server-manifest.ts in the
+// ahood repo) accepts: a JSON object with non-empty `name` and `description`
+// and exactly one of `packages` (one npm/npx entry) or `remotes` (one http(s)
+// url). The starter uses `remotes`, pointed at a reserved example.com host
+// (RFC 2606), deliberately: a `packages` placeholder would name an npm
+// package that `ahood mcp add` turns into `npx -y <identifier>@<version>` --
+// an install of whatever someone later publishes under that name if the
+// starter were ever published unedited. A reserved host can never resolve to
+// anyone's server. JSON has no comments, so the editing guidance is printed
+// by init instead.
+function buildServerJson(name: string): string {
+  const manifest = {
+    name,
+    description: "TODO -- describe what this MCP server does and when an agent should use it.",
+    remotes: [{ url: "https://mcp.example.com/mcp" }],
+  };
+  return `${JSON.stringify(manifest, null, 2)}
+`;
+}
+
+const TEMPLATES: Record<CliKind, (name: string) => string> = {
+  skill: buildSkillMd,
+  agent: buildAgentMd,
+  mcp: buildServerJson,
+};
+
+const NEXT_STEPS: Record<CliKind, string[]> = {
+  skill: ["Fill in the description, then flesh out the ## Instructions section."],
+  agent: ["Fill in the description, then write the agent's system prompt below the frontmatter."],
+  mcp: [
+    "Fill in the description and point remotes[0].url at your server's https endpoint, or replace",
+    '"remotes" with one npm package: "packages": [{"registry_type": "npm", "runtime_hint": "npx",',
+    '"identifier": "<npm-package>", "version": "<x.y.z>"}] (plus optional "environment_variables").',
+  ],
+};
+
 // Falls back to "my-skill" when the directory name itself isn't usable as a
 // bare YAML scalar (empty, or starting with a character like "-" or "@" that
 // would need quoting) -- e.g. running `ahood skill init` with no name directly in
 // "/" (basename "") or in a directory whose name starts with punctuation.
-function skillNameFor(dirPath: string): string {
+function skillNameFor(dirPath: string, fallback = "my-skill"): string {
   const base = basename(dirPath);
-  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(base) ? base : "my-skill";
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(base) ? base : fallback;
 }
 
-export async function init(args: string[]): Promise<void> {
+export async function init(args: string[], scope?: KindScope): Promise<void> {
+  const strict = strictKind(scope);
+  const kind: CliKind = strict ?? "skill";
   let name = args[0];
   if (name !== undefined && name.startsWith("-")) throw new UsageError(USAGE);
 
@@ -105,16 +171,34 @@ export async function init(args: string[]): Promise<void> {
   }
 
   const targetDir = name ? resolve(name) : process.cwd();
-  const skillMdPath = join(targetDir, "SKILL.md");
+  const rootDoc = KINDS[kind].rootDoc;
+  const docPath = join(targetDir, rootDoc);
 
-  if (existsSync(skillMdPath)) {
-    throw new Error(`SKILL.md already exists at ${skillMdPath} -- refusing to overwrite it.`);
+  if (existsSync(docPath)) {
+    throw new Error(`${rootDoc} already exists at ${docPath} -- refusing to overwrite it.`);
+  }
+  // A kind-scoped init also refuses a folder that already holds ANOTHER
+  // kind's root document: one folder is one artifact, and a second root doc
+  // makes a plain `ahood skill publish` of that folder ambiguous. The legacy
+  // `ahood skill init` keeps its exact pre-#172 behavior.
+  if (strict !== undefined) {
+    for (const other of CLI_KINDS) {
+      if (other === kind) continue;
+      const otherPath = join(targetDir, KINDS[other].rootDoc);
+      if (existsSync(otherPath)) {
+        throw new Error(
+          `${otherPath} already exists -- that folder is already ${KINDS[other].article} ${KINDS[other].label}. ` +
+            `Refusing to add ${rootDoc} next to it; pick another name.`,
+        );
+      }
+    }
   }
 
   mkdirSync(targetDir, { recursive: true });
-  writeFileSync(skillMdPath, buildSkillMd(name ?? skillNameFor(targetDir)));
+  writeFileSync(docPath, TEMPLATES[kind](name ?? skillNameFor(targetDir, `my-${kind}`)));
 
-  console.log(`Created ${skillMdPath}`);
-  console.log("Fill in the description, then flesh out the ## Instructions section.");
-  console.log(`Run \`ahood skill publish <owner>/<skill>@<version>${name ? ` --path ${name}` : ""}\` when ready.`);
+  console.log(`Created ${docPath}`);
+  for (const line of NEXT_STEPS[kind]) console.log(line);
+  const placeholder = kind === "skill" ? "<skill>" : kind === "agent" ? "<agent>" : "<server>";
+  console.log(`Run \`ahood ${strict ?? "skill"} publish <owner>/${placeholder}@<version>${name ? ` --path ${name}` : ""}\` when ready.`);
 }

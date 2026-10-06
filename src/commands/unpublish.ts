@@ -3,6 +3,7 @@ import { confirm } from "../confirm.js";
 import { parseOwnerSkill, parseOwnerSkillVersion } from "../spec.js";
 import { fetchVersionMeta } from "./add.js";
 import { UsageError } from "../usage-error.js";
+import { ensureRemoteKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill unpublish <owner>/<skill>[@version] [--yes]";
 
@@ -23,13 +24,15 @@ function isVersioned(spec: string): boolean {
   return spec.lastIndexOf("@") > 0;
 }
 
-export async function unpublish(args: string[]): Promise<void> {
+export async function unpublish(args: string[], scope?: KindScope): Promise<void> {
   const yes = args.includes("--yes");
   const spec = args.find((a) => !a.startsWith("--"));
   if (!spec) throw new UsageError(USAGE);
 
   if (isVersioned(spec)) {
     const { owner, skill, version: parsedVersion } = parseOwnerSkillVersion(spec, USAGE);
+    // Before resolving "latest", before the prompt, before the DELETE.
+    await ensureRemoteKind(scope, owner, skill, "unpublish", "yank a version of");
 
     // parseOwnerSkillVersion only validates *syntax* -- an omitted "@version"
     // or an explicit "@latest" both parse to the literal string "latest".
@@ -93,6 +96,7 @@ export async function unpublish(args: string[]): Promise<void> {
 
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
   const key = `${owner}/${skill}`;
+  await ensureRemoteKind(scope, owner, skill, "unpublish", "unpublish");
 
   // --yes bypasses the prompt for scripts/CI; otherwise a closed stdin (no
   // TTY, no piped answer either) now throws via confirm()'s "close" handling

@@ -1,13 +1,48 @@
 import { existsSync, rmSync } from "node:fs";
 import { confirm } from "../confirm.js";
-import { readLockfile, removeLockfileEntry, withLock, writeJsonFileAtomic } from "../lockfile.js";
+import { readLockfile, removeLockfileEntry, withLock, writeJsonFileAtomic, type LockEntry } from "../lockfile.js";
 import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, MCP_CONFIG_PATH } from "../spec.js";
 import { readMcpConfig, matchesMcpConfigHash } from "./add.js";
 import { UsageError } from "../usage-error.js";
+import {
+  assertKind,
+  ensureRemoteKind,
+  KindMismatchError,
+  describeKind,
+  localInstalledKind,
+  strictKind,
+  type KindScope,
+} from "../kinds.js";
+
+// `ahood agent remove` / `ahood mcp remove` (ahood-cli#172): decide whether
+// this install really is the scope's kind BEFORE the prompt and every delete
+// below. Local evidence first -- remove has always worked offline, and the
+// footprint answers it for every install made by a current CLI. Only a pin
+// whose footprint is ambiguous (a pre-fingerprint mcp pin, or a skill whose
+// directory was deleted by hand) asks the registry, and if that can't answer
+// either, nothing is removed.
+async function assertInstalledKind(scope: KindScope, owner: string, skill: string, lockEntry: LockEntry | undefined): Promise<void> {
+  const key = `${owner}/${skill}`;
+  const local = localInstalledKind(owner, skill, lockEntry);
+  if (local !== undefined) {
+    assertKind(scope, key, local, "remove", "remove");
+    return;
+  }
+  try {
+    await ensureRemoteKind(scope, owner, skill, "remove", "remove");
+  } catch (error) {
+    if (error instanceof KindMismatchError) throw error;
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Could not confirm that ${key} is installed as ${describeKind(strictKind(scope)!)}: its local files don't say, and the registry lookup failed (${reason}). ` +
+        `Nothing was removed. Use \`ahood skill remove ${key}\` (legacy, any kind) to remove it anyway.`,
+    );
+  }
+}
 
 const USAGE = "Usage: ahood skill remove <owner>/<skill> [--yes]";
 
-export async function remove(args: string[]): Promise<void> {
+export async function remove(args: string[], scope?: KindScope): Promise<void> {
   const spec = args[0];
   if (!spec) throw new UsageError(USAGE);
   const yes = args.includes("--yes");
@@ -38,6 +73,8 @@ export async function remove(args: string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
+
+  if (scope && strictKind(scope) !== undefined) await assertInstalledKind(scope, owner, skill, lockEntry);
 
   // Matches unpublish.ts/group.ts's confirm-before-destroy pattern (CLAUDE.md:
   // "Destructive commands ... prompt for confirmation unless --yes is passed").

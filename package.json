@@ -26,7 +26,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/index.js",
+    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/index.js && mkdir -p dist/useme && cp src/useme/SKILL.md dist/useme/SKILL.md",
     "prepublishOnly": "npm run build",
     "pretest": "npm run build",
     "test": "vitest run",

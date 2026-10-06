@@ -1,5 +1,6 @@
 import { apiJson } from "../http.js";
 import { parseOwnerSkill } from "../spec.js";
+import { ensureRemoteKind, type KindScope } from "../kinds.js";
 
 type StarResponse = { starred: boolean };
 
@@ -8,20 +9,22 @@ type StarResponse = { starred: boolean };
 // unique(skill_id, user_id) constraint with ignoreDuplicates, DELETE just
 // deletes any matching row), so starring an already-starred skill or
 // unstarring one you never starred is a no-op 200, not an error.
-export async function star(args: string[]): Promise<void> {
+export async function star(args: string[], scope?: KindScope): Promise<void> {
   const USAGE = "Usage: ahood skill star <owner>/<skill>";
   const { owner, skill } = parseOwnerSkill(args[0] ?? "", USAGE);
 
+  await ensureRemoteKind(scope, owner, skill, "star", "star");
   await apiJson<StarResponse>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/star`, {
     method: "POST",
   });
   console.log(`Starred ${owner}/${skill}.`);
 }
 
-export async function unstar(args: string[]): Promise<void> {
+export async function unstar(args: string[], scope?: KindScope): Promise<void> {
   const USAGE = "Usage: ahood skill unstar <owner>/<skill>";
   const { owner, skill } = parseOwnerSkill(args[0] ?? "", USAGE);
 
+  await ensureRemoteKind(scope, owner, skill, "unstar", "unstar");
   await apiJson<StarResponse>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/star`, {
     method: "DELETE",
   });

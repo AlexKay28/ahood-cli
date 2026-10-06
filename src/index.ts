@@ -20,6 +20,9 @@ import { versions } from "./commands/versions.js";
 import { diff } from "./commands/diff.js";
 import { completion } from "./commands/completion.js";
 import { mcp } from "./commands/mcp.js";
+import { extractKindFlag, resolveScope, type CliKind, type KindScope } from "./kinds.js";
+import { readUseme } from "./useme.js";
+import { UsageError } from "./usage-error.js";
 import { init } from "./commands/init.js";
 import {
   createGroup,
@@ -41,14 +44,20 @@ import {
   unshareSnap,
   tagsSnap,
 } from "./commands/snap.js";
-import { formatHelp, formatSkillHelp, formatGroupHelp, formatSnapHelp, formatCommandHelp, findCommandHelp } from "./help.js";
+import { formatHelp, formatKindHelp, formatGroupHelp, formatSnapHelp, formatCommandHelp, findCommandHelp } from "./help.js";
 import { ApiError } from "./http.js";
 import { exitCodeFor } from "./exit-code.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
 
-// Every skill-entity verb, reached only as `ahood skill <verb>` -- see
-// dispatchSkill() below. "show" is an alias for "view" (issue #30).
-const SKILL_COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
+// Every registry verb, reached as `ahood skill <verb>`, `ahood agent <verb>`,
+// or `ahood mcp <verb>` -- one handler per verb shared by all three nouns
+// (see dispatchRegistry() below), never a copy per kind. "show" is an alias
+// for "view" (issue #30). A handler gets a second, KindScope argument only
+// when the verb runs kind-scoped; the legacy `ahood skill <verb>` call is
+// exactly `handler(args)`, as it was before ahood-cli#172.
+type RegistryHandler = (args: string[], scope?: KindScope) => Promise<void>;
+
+const SKILL_COMMANDS: Record<string, RegistryHandler> = {
   search,
   view,
   show: view,
@@ -63,7 +72,7 @@ const SKILL_COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   // can never accidentally move a pin forward. Reuses update()'s existing
   // "no targets = every installed skill, explicit targets = just those"
   // behavior as-is; no new logic.
-  outdated: (args) => update([...args, "--dry-run"]),
+  outdated: (args, scope) => (scope ? update([...args, "--dry-run"], scope) : update([...args, "--dry-run"])),
   remove,
   edit,
   unpublish,
@@ -114,8 +123,9 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   whoami,
   token,
   completion,
-  mcp,
+  mcp: dispatchMcp,
   skill: dispatchSkill,
+  agent: dispatchAgent,
   group: dispatchGroup,
   snap: dispatchSnap,
 };
@@ -128,7 +138,8 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
 // here just means "a command that owns its own sub-verb dispatch", the same
 // sense "skill" already used before "group" (the entity) existed. "snap"
 // joins this set for the exact same reason (ahood-cli#107).
-const GROUP_COMMANDS = new Set(["skill", "group", "snap"]);
+// "agent" and "mcp" join it as registry nouns (ahood-cli#172).
+const GROUP_COMMANDS = new Set(["skill", "agent", "mcp", "group", "snap"]);
 
 function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
@@ -171,34 +182,102 @@ function closestSnapVerb(input: string): string | undefined {
   return closestOf(input, Object.keys(SNAP_VERBS));
 }
 
-// `ahood skill <verb> [...]` -- owns its own help handling at both the
-// group level (`ahood skill` / `ahood skill --help`) and the per-verb level
-// (`ahood skill <verb> --help`), since neither should fall through to
-// main()'s generic top-level --help interception (see GROUP_COMMANDS).
-async function dispatchSkill(args: string[]): Promise<void> {
+// `ahood <noun> <verb> [...]` for every registry noun (skill, agent, mcp) --
+// owns its own help handling at both the noun level (`ahood agent` /
+// `ahood agent --help`) and the per-verb level (`ahood agent <verb> --help`),
+// since neither should fall through to main()'s generic top-level --help
+// interception (see GROUP_COMMANDS).
+//
+// Scope (ahood-cli#172): `--kind <k|all>` is consumed here, never by a
+// handler, and resolved by resolveScope(): agent/mcp are strict for their own
+// kind (a contradictory --kind is a usage error), while skill stays legacy
+// cross-kind unless --kind narrows it. `ahood skill publish` is the one
+// exception: its --kind has always been publish's own "what kind of artifact
+// is this folder" flag, so it is passed through untouched.
+async function dispatchRegistry(noun: CliKind, args: string[]): Promise<void> {
   const [sub, ...rest] = args;
 
   if (!sub || sub === "--help" || sub === "-h") {
-    console.log(formatSkillHelp());
+    console.log(formatKindHelp(noun));
     return;
   }
 
   const handler = SKILL_COMMANDS[sub];
   if (!handler) {
-    console.error(`Unknown skill command: ${sub}`);
-    const suggestion = closestSkillCommand(sub);
+    console.error(`Unknown ${noun} command: ${sub}`);
+    const suggestion = closestOf(sub, noun === "mcp" ? ["serve", ...Object.keys(SKILL_COMMANDS)] : Object.keys(SKILL_COMMANDS));
     if (suggestion) console.error(`Did you mean '${suggestion}'?`);
-    console.error("Run `ahood skill --help` for a list of commands.");
+    console.error(`Run \`ahood ${noun} --help\` for a list of commands.`);
+    if (noun === "mcp") {
+      console.error("To start the local MCP server, run `ahood mcp serve` (or `ahood mcp` with no arguments).");
+    }
     process.exit(2);
   }
 
   if (rest.includes("--help") || rest.includes("-h")) {
-    const entry = findCommandHelp("skill", sub);
-    console.log(entry ? formatCommandHelp(entry) : formatSkillHelp());
+    const entry = findCommandHelp(noun, sub);
+    console.log(entry ? formatCommandHelp(entry) : formatKindHelp(noun));
     return;
   }
 
-  await handler(rest);
+  if (noun === "skill" && sub === "publish") {
+    await handler(rest);
+    return;
+  }
+
+  const { kind, rest: handlerArgs } = extractKindFlag(rest);
+  const scope = resolveScope(noun, kind);
+  if (scope.kind === "all") {
+    // Legacy: the exact pre-#172 call, minus an explicit `--kind all`.
+    await handler(kind === undefined ? rest : handlerArgs);
+    return;
+  }
+  try {
+    await handler(handlerArgs, scope);
+  } catch (error) {
+    // Handlers phrase their usage lines as `ahood skill <verb>`; under another
+    // noun, say the command the user actually typed.
+    if (error instanceof UsageError && noun !== "skill") {
+      error.message = error.message.replace(/(Usage: |or: )ahood skill /g, `$1ahood ${noun} `);
+    }
+    throw error;
+  }
+}
+
+async function dispatchSkill(args: string[]): Promise<void> {
+  await dispatchRegistry("skill", args);
+}
+
+async function dispatchAgent(args: string[]): Promise<void> {
+  await dispatchRegistry("agent", args);
+}
+
+// `ahood mcp` keeps its original contract byte-for-byte: with NO arguments it
+// is the local stdio MCP server that existing host configs launch -- nothing
+// is printed and nothing else runs first. `ahood mcp serve` is the same
+// server under an explicit, documented name. Every other first word is a
+// registry verb for mcp-kind entries, help, or an error: an unrecognized one
+// fails with usage (dispatchRegistry) rather than silently starting a
+// long-lived server that a typo would otherwise leave hanging.
+async function dispatchMcp(args: string[]): Promise<void> {
+  if (args.length === 0) {
+    await mcp(args);
+    return;
+  }
+  const [sub, ...rest] = args;
+  if (sub === "serve") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      const entry = findCommandHelp("mcp", "serve");
+      console.log(entry ? formatCommandHelp(entry) : formatKindHelp("mcp"));
+      return;
+    }
+    if (rest.length > 0) {
+      throw new UsageError(`\`ahood mcp serve\` takes no arguments (got: ${rest.join(" ")}).\nUsage: ahood mcp serve`);
+    }
+    await mcp([]);
+    return;
+  }
+  await dispatchRegistry("mcp", args);
 }
 
 // `ahood group <verb> [...]` -- owns its own help handling at both the
@@ -270,10 +349,25 @@ async function main() {
 
   if (command === "help") {
     const sub = args[0];
-    if (sub === "skill") {
+    // `ahood help useme` (ahood-cli#172): the bundled self-skill, as raw
+    // bytes on stdout and nothing else -- no banner, no trailing newline of
+    // our own -- so the output IS the SKILL.md. No network, no credentials,
+    // no project writes.
+    if (sub === "useme") {
+      let content: Buffer;
+      try {
+        content = readUseme();
+      } catch (error) {
+        console.error(`Could not read the bundled ahood SKILL.md: ${error instanceof Error ? error.message : String(error)}`);
+        process.exit(1);
+      }
+      process.stdout.write(content);
+      return;
+    }
+    if (sub === "skill" || sub === "agent" || sub === "mcp") {
       const verb = args[1];
-      const entry = verb ? findCommandHelp("skill", verb) : undefined;
-      console.log(entry ? formatCommandHelp(entry) : formatSkillHelp());
+      const entry = verb ? findCommandHelp(sub, verb) : undefined;
+      console.log(entry ? formatCommandHelp(entry) : formatKindHelp(sub));
       return;
     }
     if (sub === "group") {
@@ -356,4 +450,4 @@ if (isEntrypoint) {
 }
 
 // Exported for tests only -- the CLI itself only ever calls main() above.
-export { main, dispatchSkill, dispatchGroup, dispatchSnap, COMMANDS, SKILL_COMMANDS, GROUP_VERBS, SNAP_VERBS };
+export { main, dispatchSkill, dispatchAgent, dispatchMcp, dispatchRegistry, dispatchGroup, dispatchSnap, COMMANDS, SKILL_COMMANDS, GROUP_VERBS, SNAP_VERBS };

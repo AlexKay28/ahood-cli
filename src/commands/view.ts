@@ -3,6 +3,7 @@ import { apiJson } from "../http.js";
 import { getApiUrl } from "../config.js";
 import { parseOwnerSkill } from "../spec.js";
 import { UsageError } from "../usage-error.js";
+import { assertKind, ensureRemoteKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill view <owner>/<skill> [--json] [--web]";
 
@@ -25,6 +26,7 @@ type SkillDetail = {
   created_at: string;
   updated_at: string;
   owner: string;
+  kind?: string;
   is_starred: boolean | null;
   skill_versions: {
     version: string;
@@ -55,7 +57,7 @@ export async function viewSkill(owner: string, skill: string): Promise<SkillDeta
   return apiJson<SkillDetail>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`);
 }
 
-export async function view(args: string[]): Promise<void> {
+export async function view(args: string[], scope?: KindScope): Promise<void> {
   const jsonOutput = args.includes("--json");
   const web = args.includes("--web");
   const spec = args.find((a) => !a.startsWith("--"));
@@ -64,11 +66,13 @@ export async function view(args: string[]): Promise<void> {
 
   const url = `${getApiUrl()}/${owner}/${skill}`;
   if (web) {
+    await ensureRemoteKind(scope, owner, skill, "view", "open");
     openBrowser(url);
     return;
   }
 
   const detail = await viewSkill(owner, skill);
+  assertKind(scope, `${owner}/${skill}`, detail.kind, "view", "show");
 
   if (jsonOutput) {
     console.log(JSON.stringify(detail));

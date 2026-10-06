@@ -2,6 +2,7 @@ import { LOCKFILE_PATH, parseOwnerSkill } from "../spec.js";
 import { readLockfile } from "../lockfile.js";
 import { add, fetchVersionMeta, readMcpConfig, updateMcpEntry } from "./add.js";
 import { UsageError } from "../usage-error.js";
+import { assertKind, isCliKind, KINDS, localInstalledKind, strictKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]";
 
@@ -22,9 +23,7 @@ type UpdatePreview = {
   changelog_md: string | null;
 };
 
-async function previewSkill(ownerSlashSkill: string, currentVersion: string | null): Promise<UpdatePreview> {
-  const { owner, skill } = parseOwnerSkill(ownerSlashSkill, USAGE);
-  const meta = await fetchVersionMeta(owner, skill, "latest");
+function toPreview(ownerSlashSkill: string, currentVersion: string | null, meta: { version: string; changelog_md?: string | null }): UpdatePreview {
   const upToDate = currentVersion === meta.version;
   return {
     skill: ownerSlashSkill,
@@ -76,7 +75,7 @@ function padRow(cells: string[], widths: number[]): string {
 // Prints a side-by-side current/latest table for every previewed skill, then
 // -- for only the skills that actually have an update available -- the
 // changelog for the version they'd move to. Nothing here touches disk or the
-// network beyond the read-only resolution already done in previewSkill().
+// network beyond the read-only resolution already done by the caller before toPreview().
 function printDryRunTable(previews: UpdatePreview[]): void {
   const header = ["SKILL", "CURRENT", "LATEST", "STATUS"];
   const rows = previews.map((p) => [
@@ -100,7 +99,30 @@ function printDryRunTable(previews: UpdatePreview[]): void {
   }
 }
 
-export async function update(args: string[]): Promise<void> {
+// Kind scoping for update/outdated (ahood-cli#172). Returns true when `key`
+// should be skipped as out of scope, throws when it must be refused, and
+// returns false when it is in scope.
+//
+//   explicit target, wrong kind -> refused (counts as that entry's failure)
+//   no-arg run, wrong kind      -> silently out of scope: `ahood agent update`
+//                                  only ever considers installed agents
+//   no-arg run, kind unknown    -> skipped with a warning rather than guessed
+//                                  into (or out of) the run
+function outOfScope(scope: KindScope | undefined, key: string, actual: unknown, implicit: boolean): boolean {
+  const kind = strictKind(scope);
+  if (kind === undefined || actual === kind) return false;
+  if (!implicit) {
+    assertKind(scope, key, actual, "update", "update");
+    return false; // unreachable: assertKind throws for every actual !== kind
+  }
+  if (!isCliKind(actual)) {
+    console.warn(`WARNING: skipping ${key} -- the registry did not report a kind ahood can match against ${KINDS[kind].plural}.`);
+  }
+  return true;
+}
+
+export async function update(args: string[], scope?: KindScope): Promise<void> {
+  const kind = strictKind(scope);
   const dryRun = args.includes("--dry-run");
   const jsonOutput = args.includes("--json");
   if (jsonOutput && !dryRun) {
@@ -109,9 +131,22 @@ export async function update(args: string[]): Promise<void> {
   const targets = args.filter((a) => a !== "--dry-run" && a !== "--json");
 
   const lockfile = readLockfile(LOCKFILE_PATH);
-  const skillKeys = targets.length > 0 ? targets : Object.keys(lockfile);
+  const implicit = targets.length === 0;
+  let skillKeys = implicit ? Object.keys(lockfile) : targets;
+  if (implicit && kind) {
+    // A cheap local pre-filter so a pin this project's own files already
+    // show to be another kind costs no request (and can't fail the run).
+    // Unknown footprints stay in and are settled by the registry's answer.
+    skillKeys = skillKeys.filter((key) => {
+      const parts = key.split("/");
+      if (parts.length !== 2) return true; // let the loop report the bad key as before
+      const local = localInstalledKind(parts[0], parts[1], lockfile[key]);
+      return local === undefined || local === kind;
+    });
+  }
+  const noneMessage = kind ? `No installed ${KINDS[kind].plural} to update.` : "No installed skills to update.";
   if (skillKeys.length === 0) {
-    console.log("No installed skills to update.");
+    console.log(noneMessage);
     return;
   }
 
@@ -123,7 +158,10 @@ export async function update(args: string[]): Promise<void> {
     const failures: string[] = [];
     for (const key of skillKeys) {
       try {
-        previews.push(await previewSkill(key, lockfile[key]?.version ?? null));
+        const { owner, skill } = parseOwnerSkill(key, USAGE);
+        const meta = await fetchVersionMeta(owner, skill, "latest");
+        if (outOfScope(scope, key, meta.kind, implicit)) continue;
+        previews.push(toPreview(key, lockfile[key]?.version ?? null, meta));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`Failed to resolve latest version for ${key}: ${message}`);
@@ -145,6 +183,7 @@ export async function update(args: string[]): Promise<void> {
   }
 
   const failures: string[] = [];
+  let inScope = 0;
   for (const ownerSlashSkill of skillKeys) {
     if (!lockfile[ownerSlashSkill]) {
       // Reachable two ways: an explicitly-named skill that was never
@@ -166,6 +205,8 @@ export async function update(args: string[]): Promise<void> {
       // mcp-update support) instead.
       const { owner, skill } = parseOwnerSkill(ownerSlashSkill, USAGE);
       const meta = await fetchVersionMeta(owner, skill, "latest");
+      if (outOfScope(scope, ownerSlashSkill, meta.kind, implicit)) continue;
+      inScope++;
       if (meta.kind === "mcp") {
         const currentEntry = lockfile[ownerSlashSkill];
         if (currentEntry && currentEntry.version === meta.version && mcpEntryIsIntact(skill)) {
@@ -193,7 +234,10 @@ export async function update(args: string[]): Promise<void> {
         await updateMcpEntry(owner, skill, meta, currentEntry);
         continue;
       }
-      await add([ownerSlashSkill]); // no @version -- resolves to latest again
+      // no @version -- resolves to latest again. A strict scope is passed on so
+      // add() re-checks the kind it resolves itself before writing anything.
+      if (kind) await add([ownerSlashSkill], scope);
+      else await add([ownerSlashSkill]);
     } catch (error) {
       // One skill being removed/yanked/unreachable must not stop every other
       // skill in the batch from updating.
@@ -201,6 +245,10 @@ export async function update(args: string[]): Promise<void> {
       console.error(`Failed to update ${ownerSlashSkill}: ${message}`);
       failures.push(ownerSlashSkill);
     }
+  }
+
+  if (implicit && kind && inScope === 0 && failures.length === 0) {
+    console.log(noneMessage);
   }
 
   if (failures.length > 0) {

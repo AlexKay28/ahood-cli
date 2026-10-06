@@ -16,6 +16,7 @@ import {
 import { promptSecret } from "../secret-prompt.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
+import { assertKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill add <owner>/<skill>[@version]";
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB compressed
@@ -973,13 +974,17 @@ export async function downloadVerifiedArchive(owner: string, skill: string, meta
   return buffer;
 }
 
-export async function add(args: string[]): Promise<void> {
+export async function add(args: string[], scope?: KindScope): Promise<void> {
   const spec = args[0];
   if (!spec) throw new UsageError(USAGE);
   const { owner, skill, version: requestedVersion } = parseOwnerSkillVersion(spec, USAGE);
   const key = `${owner}/${skill}`;
 
   const meta = await fetchVersionMeta(owner, skill, requestedVersion);
+  // Kind-scoped install (`ahood agent add`, `ahood mcp add`, ahood-cli#172):
+  // refused here, before the download, the lockfile and every write below.
+  // Both metadata routes report the entry's kind, so this costs no request.
+  assertKind(scope, key, meta.kind, "add", "install");
 
   // A lockfile entry records the checksum this exact version was installed
   // with; if a later fetch of the "same" version disagrees, either the

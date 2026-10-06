@@ -6,6 +6,25 @@ import { apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
 import { flagValue } from "../flags.js";
 import { parseOwnerSkill, SEMVER_RE, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
+import { assertKind, strictKind, type CliKind, type KindScope } from "../kinds.js";
+
+// `ahood agent publish` / `ahood mcp publish` (ahood-cli#172): an existing
+// entry of another kind must be refused before anything is packed, created,
+// or uploaded. The upload would fail server-side anyway -- the processing
+// workflow validates the archive against the entry's stored kind -- but only
+// after a version row was created and a full upload spent. A 404 is the
+// "doesn't exist yet" case publish already handles by creating the entry,
+// now with the scope's kind.
+async function assertPublishTargetKind(scope: KindScope, owner: string, skill: string): Promise<void> {
+  let detail: { kind?: unknown };
+  try {
+    detail = await apiJson<{ kind?: unknown }>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return;
+    throw error;
+  }
+  assertKind(scope, `${owner}/${skill}`, detail.kind, "publish", "publish a new version of");
+}
 
 type InitResponse = { upload_url: string; storage_path: string; version_id: string };
 type CreateResponse = { id: string; slug: string; owner: string };
@@ -390,11 +409,18 @@ async function initVersion(
 // validation, network, or a rejected publish -- still yields exactly one
 // JSON object (`{error}`) rather than a human message, while still
 // rethrowing so index.ts's exit-code mapping (exitCodeFor) is unaffected.
-export async function publish(args: string[]): Promise<void> {
+export async function publish(args: string[], scope?: KindScope): Promise<void> {
   const jsonOutput = args.includes("--json");
   try {
-    const { owner, skill, version, path, name, tagline, tags, license, homepage, repository, kind, changelog } =
-      parsePublishArgs(args);
+    const parsed = parsePublishArgs(args);
+    const { owner, skill, version, path, name, tagline, tags, license, homepage, repository, changelog } = parsed;
+    // A kind-scoped publish implies its kind. The dispatcher has already
+    // refused a contradictory --kind before this runs, so the flag (when the
+    // legacy `ahood skill publish` passes one through) and the scope can't
+    // disagree here.
+    const scopedKind: CliKind | undefined = strictKind(scope);
+    const kind = scopedKind ?? parsed.kind;
+    const via = scopedKind ? `ahood ${scope!.noun} publish` : `publish --kind ${kind}`;
 
     const skillMdPath = join(path, "SKILL.md");
     const agentMdPath = join(path, "AGENT.md");
@@ -405,11 +431,11 @@ export async function publish(args: string[]): Promise<void> {
 
     let resolvedKind = kind;
     if (kind === "agent") {
-      if (!hasAgentMd) throw new Error(`No AGENT.md found at ${agentMdPath} -- publish --kind agent must point at a folder containing AGENT.md.`);
+      if (!hasAgentMd) throw new Error(`No AGENT.md found at ${agentMdPath} -- ${via} must point at a folder containing AGENT.md.`);
     } else if (kind === "skill") {
-      if (!hasSkillMd) throw new Error(`No SKILL.md found at ${skillMdPath} -- publish --kind skill must point at a folder containing SKILL.md.`);
+      if (!hasSkillMd) throw new Error(`No SKILL.md found at ${skillMdPath} -- ${via} must point at a folder containing SKILL.md.`);
     } else if (kind === "mcp") {
-      if (!hasServerJson) throw new Error(`No server.json found at ${serverJsonPath} -- publish --kind mcp must point at a folder containing server.json.`);
+      if (!hasServerJson) throw new Error(`No server.json found at ${serverJsonPath} -- ${via} must point at a folder containing server.json.`);
     } else {
       // kind === undefined -- infer from whichever root file(s) are actually present
       const present = [hasSkillMd && "SKILL.md", hasAgentMd && "AGENT.md", hasServerJson && "server.json"].filter(
@@ -439,6 +465,8 @@ export async function publish(args: string[]): Promise<void> {
     if (resolvedKind === "skill" || (resolvedKind === undefined && hasSkillMd)) {
       warnAboutSkillDescription(skillMdPath);
     }
+
+    if (scopedKind !== undefined) await assertPublishTargetKind(scope!, owner, skill);
 
     const archive = await tarGzDirectory(path);
 

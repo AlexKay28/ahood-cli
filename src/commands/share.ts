@@ -2,6 +2,7 @@ import { apiJson } from "../http.js";
 import { flagValue } from "../flags.js";
 import { parseOwnerSkill } from "../spec.js";
 import { UsageError } from "../usage-error.js";
+import { ensureRemoteKind, type KindScope } from "../kinds.js";
 
 // These are skill-entity verbs (reached as `ahood skill share`/`ahood skill
 // unshare`, registered in SKILL_COMMANDS in index.ts), not group verbs --
@@ -18,12 +19,13 @@ type ShareResponse = { shared: boolean };
 // first (before any flags), since --group takes a value and a "first
 // non---flag token" scan would misidentify the --group value as the spec
 // if --group happened to come first.
-export async function share(args: string[]): Promise<void> {
+export async function share(args: string[], scope?: KindScope): Promise<void> {
   const spec = args[0];
   if (!spec || spec.startsWith("--")) throw new UsageError(SHARE_USAGE);
   const { owner, skill } = parseOwnerSkill(spec, SHARE_USAGE);
   const groupSlug = flagValue(args, "--group");
   if (!groupSlug) throw new UsageError(SHARE_USAGE);
+  await ensureRemoteKind(scope, owner, skill, "share", "share");
 
   await apiJson<ShareResponse>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/share`, {
     method: "POST",
@@ -33,12 +35,13 @@ export async function share(args: string[]): Promise<void> {
   console.log(`Shared ${owner}/${skill} with ${groupSlug}.`);
 }
 
-export async function unshare(args: string[]): Promise<void> {
+export async function unshare(args: string[], scope?: KindScope): Promise<void> {
   const spec = args[0];
   if (!spec || spec.startsWith("--")) throw new UsageError(UNSHARE_USAGE);
   const { owner, skill } = parseOwnerSkill(spec, UNSHARE_USAGE);
   const groupSlug = flagValue(args, "--group");
   if (!groupSlug) throw new UsageError(UNSHARE_USAGE);
+  await ensureRemoteKind(scope, owner, skill, "unshare", "unshare");
 
   await apiJson<ShareResponse>(
     `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/share/${encodeURIComponent(groupSlug)}`,

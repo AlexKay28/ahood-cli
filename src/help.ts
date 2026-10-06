@@ -9,15 +9,20 @@
 //   - TOP_LEVEL_COMMANDS_HELP: account/auth-scoped commands that stay flat
 //     (login, logout, whoami, token, completion) -- same reasoning
 //     `gh auth login` isn't `gh account login`.
-//   - SKILL_COMMANDS_HELP: everything that operates on skills, all reached
-//     as `ahood skill <verb>`. Future entities (e.g. "personality",
-//     "protocols") get their own COMMANDS_HELP array alongside this one.
+//   - SKILL_COMMANDS_HELP: every registry verb, reached as `ahood skill
+//     <verb>` -- legacy and cross-kind in this release (ahood-cli#172).
+//   - AGENT_COMMANDS_HELP / MCP_COMMANDS_HELP: the same verbs, kind-scoped,
+//     generated from one template (registryCommandsHelp); MCP's list also
+//     carries `ahood mcp` / `ahood mcp serve`, the local stdio server.
+//   - GROUP_COMMANDS_HELP / SNAP_COMMANDS_HELP: the other entity nouns.
 //
 // `summary` is a genuinely one-sentence blurb used only by the top-level
 // `ahood --help` / `ahood skill --help` listings. `desc` is the full
 // (possibly multi-sentence) description rendered in full by `ahood help
 // <command>` / `ahood skill <verb> --help`. Keep `summary` self-contained --
 // it must not depend on the reader having also seen `desc`.
+import { KINDS, type CliKind } from "./kind-info.js";
+
 export type CommandHelp = { usage: string; summary: string; desc: string; flags?: string[]; examples?: string[] };
 
 export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
@@ -50,13 +55,16 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     examples: ["ahood completion bash >> ~/.bashrc"],
   },
   {
-    usage: "ahood mcp",
-    summary: "Start an MCP server exposing read-only skill commands as tools over stdio.",
+    usage: "ahood help useme",
+    summary: "Print the bundled ahood SKILL.md for an AI agent -- raw, offline, no login needed.",
     desc:
-      "Start a Model Context Protocol server over stdio, exposing skill_search, skill_view, skill_read, " +
-      "skill_versions, skill_list, skill_outdated, and whoami as MCP tools -- the same data ahood's --json " +
-      "commands already return, reachable as typed tool calls instead of parsed CLI output. Meant to be " +
-      "launched by an MCP-aware agent host (e.g. Claude Code's MCP server configuration), not run interactively.",
+      "Print the ahood self-skill bundled with this exact CLI version: a complete SKILL.md teaching an AI agent " +
+      "(or a human) when and how to use ahood. Stdout is the raw file and nothing else -- no banner, no colors -- " +
+      "so it can be pasted into an agent's context, redirected into a file, or read directly by an agent with " +
+      "shell access. Works offline and without credentials, and never writes to your project. It is not the " +
+      "same as `ahood skill add alexkay/ahood`, which installs the registry-published copy as a separate, " +
+      "pinned project skill.",
+    examples: ["ahood help useme", "ahood help useme > ahood-SKILL.md"],
   },
 ];
 
@@ -247,6 +255,195 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
   },
 ];
 
+// Kind-scoped registry verbs (ahood-cli#172): `ahood agent <verb>` and
+// `ahood mcp <verb>` take the same verbs as `ahood skill <verb>`, run by the
+// same handlers, but strictly for their own kind -- a target of another kind
+// is refused before any side effect. Generated from one template per verb
+// rather than hand-copied twice, so the two lists can't drift from each other.
+// SKILL_COMMANDS_HELP above stays hand-written: it documents the legacy,
+// cross-kind behavior `ahood skill` keeps in this release.
+function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
+  const info = KINDS[kind];
+  const n = kind === "agent" ? "<agent>" : "<server>";
+  const p = `ahood ${kind}`;
+  const label = info.label;
+  const a = info.article;
+  const plural = info.plural;
+  const doc = info.rootDoc;
+  const ex = kind === "agent" ? "alice/code-reviewer" : "alice/github-server";
+  const kindRefusal = `Refused, before anything else happens, when the target is not ${a} ${label}.`;
+  return [
+    {
+      usage: `${p} search <query> [--json] [--limit <n>]`,
+      summary: `Search published ${plural}.`,
+      desc: `Search published ${plural} only (the registry's ?kind=${kind} filter). Same output and --json shape as \`ahood skill search\`.`,
+      flags: ["--json        Emit the raw result objects instead of formatted lines.", "--limit <n>   Cap the number of results."],
+      examples: [`${p} search github`],
+    },
+    {
+      usage: `${p} view <owner>/${n} [--json] [--web]`,
+      summary: `Show a single ${label}'s details without installing it (alias: ${p} show).`,
+      desc: `Show a single ${label}'s details without installing it. Alias: ${p} show. ${kindRefusal}`,
+      flags: ["--json   Emit the raw object instead of formatted lines.", "--web    Open its page in your browser instead of printing."],
+    },
+    {
+      usage: `${p} read <owner>/${n} [--json]`,
+      summary: `Print a published ${label}'s ${doc}, without installing it.`,
+      desc: `Print the ${doc} of a published ${label} verbatim, without installing it -- read it before you add it. ${kindRefusal}`,
+      flags: ["--json    Emit {version, content} as a single line instead of the raw content."],
+      examples: [`${p} read ${ex}`],
+    },
+    {
+      usage: `${p} versions <owner>/${n} [--json]`,
+      summary: `List a ${label}'s published-version history.`,
+      desc: `List a ${label}'s published-version history: version, changelog, size, and publish date. ${kindRefusal}`,
+      flags: ["--json    Emit the raw version objects instead of formatted text."],
+    },
+    {
+      usage: `${p} diff <owner>/${n} <versionA> <versionB> [--json]`,
+      summary: `Show what changed between two published versions of ${a} ${label}.`,
+      desc: `Show what changed between two published versions, exactly like \`ahood skill diff\`. Both versions must be explicit semver. ${kindRefusal}`,
+      flags: ["--json    Emit {skillmd_diff, manifest: {added, removed, changed}} instead of formatted text."],
+    },
+    {
+      usage: `${p} list [--json]`,
+      summary: `List your own ${plural}, public and private.`,
+      desc:
+        `List your own ${plural}, public and private. The registry returns every entry you own; this keeps only the ${kind} ones ` +
+        "(an entry with no kind in the response is left out, with a warning on stderr). --json keeps `ahood skill list --json`'s shape.",
+      flags: ["--json    Emit the raw objects instead of formatted lines."],
+    },
+    {
+      usage: `${p} add <owner>/${n}[@version]`,
+      summary: `Install ${a} ${label} into ${info.installsTo}, pinned in the lockfile.`,
+      desc:
+        `Install ${a} ${label} into ${info.installsTo}, pinned in .claude/skills.lock.json. ` +
+        (kind === "mcp" ? "Prompts for any secret environment variables its server.json declares that aren't already set. " : "") +
+        `Refused before anything is downloaded or written when the target is not ${a} ${label}.`,
+      examples: [`${p} add ${ex}`, `${p} add ${ex}@1.2.0`],
+    },
+    {
+      usage: `${p} update [<owner>/${n} ...] [--dry-run] [--json]`,
+      summary: `Move ${label} pins forward to the latest version.`,
+      desc:
+        `Move lockfile pins forward to the latest version. With no argument, considers only the installed ${plural} ` +
+        `in this project -- other kinds' pins are left alone. A named target that is not ${a} ${label} is refused and counted as a failure.`,
+      flags: [
+        "--dry-run   Preview current vs. latest version (and the changelog) without installing anything.",
+        "--json      With --dry-run, emit structured preview objects instead of a formatted table.",
+      ],
+    },
+    {
+      usage: `${p} outdated [<owner>/${n} ...] [--json]`,
+      summary: `Read-only staleness check for installed ${plural}.`,
+      desc: `Read-only staleness check -- equivalent to \`${p} update --dry-run\`. With no argument, checks only the installed ${plural}.`,
+      flags: ["--json    Emit structured preview objects instead of a formatted table."],
+    },
+    {
+      usage: `${p} remove <owner>/${n} [--yes]`,
+      summary: `Uninstall and unpin ${a} ${label} (local only, prompts unless --yes is passed).`,
+      desc:
+        `Uninstall and unpin ${a} ${label} from this project (local only). Refused, before the prompt and before anything is deleted, ` +
+        `when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.`,
+      flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+    },
+    {
+      usage: `${p} edit <owner>/${n} [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]`,
+      summary: `Update ${a} ${label} you own, changing only the flags you pass.`,
+      desc: `Update ${a} ${label} you own; same flags as \`ahood skill edit\`. ${kindRefusal}`,
+      flags: [
+        "--tagline <text>              Short one-line description.",
+        "--tags <comma,separated>      Replaces the tag list.",
+        "--license <id>                An SPDX license identifier, e.g. MIT.",
+        "--visibility public|private   Who can see and install it.",
+        "--homepage <url>              Homepage URL.",
+        "--repository <url>            Source repository URL.",
+      ],
+    },
+    {
+      usage: `${p} unpublish <owner>/${n}[@version] [--yes]`,
+      summary: `Delete ${a} ${label} from the registry for every consumer, or yank one version (prompts unless --yes is passed).`,
+      desc:
+        `Without @version: delete ${a} ${label} from the registry for every consumer. With @version: yank that version. ` +
+        `Refused before the prompt when the target is not ${a} ${label}.`,
+      flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+    },
+    { usage: `${p} star <owner>/${n}`, summary: `Star ${a} ${label}.`, desc: `Star ${a} ${label}. ${kindRefusal}` },
+    { usage: `${p} unstar <owner>/${n}`, summary: `Remove your star from ${a} ${label}.`, desc: `Remove your star from ${a} ${label}. ${kindRefusal}` },
+    {
+      usage: `${p} share <owner>/${n} --group <group>`,
+      summary: `Share ${a} ${label} you own with a group, without changing its visibility.`,
+      desc: `Share ${a} ${label} you own with a group you belong to. ${kindRefusal}`,
+      flags: ["--group <group>   The group's slug (from `ahood group list`)."],
+    },
+    {
+      usage: `${p} unshare <owner>/${n} --group <group>`,
+      summary: `Stop sharing ${a} ${label} you own with a group.`,
+      desc: `Stop sharing ${a} ${label} you own with a group. ${kindRefusal}`,
+      flags: ["--group <group>   The group's slug."],
+    },
+    {
+      usage: `${p} init [name]`,
+      summary: `Scaffold a new ${label} folder with a minimal, valid ${doc}.`,
+      desc:
+        `Scaffold a minimal ${doc} that passes the registry's publish validation: ./<name>/${doc} with a name, or ./${doc} without. ` +
+        (kind === "mcp"
+          ? "The starter points at a reserved example.com URL, so it can never install anyone's real server until you edit it. "
+          : "") +
+        `Refuses to overwrite an existing ${doc}, or to add one to a folder that already holds another kind's root document. ` +
+        "Names are slug-normalized and must stay inside the current directory.",
+      examples: [`${p} init ${ex.split("/")[1]}`, `${p} init`],
+    },
+    {
+      usage: `${p} publish <owner>/${n}@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]`,
+      summary: `Publish a new version of ${a} ${label} from a folder containing ${doc}, creating it first if it doesn't exist yet.`,
+      desc:
+        `Publish a new version from a folder containing ${doc}; the kind is implied, and a contradictory --kind is refused. ` +
+        `If the entry already exists as another kind, this stops before anything is packed or uploaded. ` +
+        "If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`.",
+      flags: [
+        "--path <dir>                  Folder to publish (default: the current directory).",
+        "--name <text>                 Required only when creating the entry on this publish.",
+        "--changelog <text>            What changed in this version.",
+        "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure).",
+      ],
+      examples: [`${p} publish ${ex}@1.0.0 --name "${kind === "agent" ? "Code Reviewer" : "GitHub Server"}"`],
+    },
+  ];
+}
+
+export const AGENT_COMMANDS_HELP: CommandHelp[] = registryCommandsHelp("agent");
+
+// `ahood mcp` is two things (ADR 0007 in the ahood repo separates the hosted
+// registry MCP endpoint from this CLI's local one): with no verb, or with
+// `serve`, it is the local, read-only stdio MCP server that MCP hosts spawn;
+// with a registry verb it manages mcp-kind registry entries (server.json
+// manifests). Both are listed here so `ahood mcp --help` explains both.
+export const MCP_SERVE_HELP: CommandHelp[] = [
+  {
+    usage: "ahood mcp serve",
+    summary: "Start the local, read-only ahood MCP server over stdio (preferred spelling).",
+    desc:
+      "Start a Model Context Protocol server over stdio, exposing skill_search, skill_view, skill_read, " +
+      "skill_versions, skill_list, skill_outdated, and whoami as MCP tools -- the same data ahood's --json " +
+      "commands already return, reachable as typed tool calls instead of parsed CLI output. Meant to be " +
+      "launched by an MCP-aware agent host (e.g. Claude Code's MCP server configuration), not run interactively. " +
+      "Read-only by design. This is not the hosted registry MCP endpoint (https://ahood.vercel.app/api/mcp), which " +
+      "is a separate server with write tools.",
+    examples: ['claude mcp add ahood -- ahood mcp serve', "npx @ahood/cli@latest mcp serve"],
+  },
+  {
+    usage: "ahood mcp",
+    summary: "Same as `ahood mcp serve`, kept byte-for-byte so existing MCP host configs keep working.",
+    desc:
+      "With no arguments at all, `ahood mcp` starts the same stdio server as `ahood mcp serve` -- nothing is printed " +
+      "to stdout before the protocol starts, and no login or network is needed to start it. Any other first word must " +
+      "be `serve`, `--help`, or a registry verb below; anything unrecognized fails with usage instead of starting a server.",
+  },
+];
+
+export const MCP_COMMANDS_HELP: CommandHelp[] = [...MCP_SERVE_HELP, ...registryCommandsHelp("mcp")];
+
 // Every group-entity verb, all reached as `ahood group <verb>` -- mirrors
 // SKILL_COMMANDS_HELP above, just for the "Groups" feature: private groups,
 // shareable invite links, and sharing your own skills with a group without
@@ -436,6 +633,8 @@ export const COMMAND_ALIASES: Record<string, string> = { show: "view" };
 // only has to be added here once, not re-special-cased in both places.
 const ENTITY_COMMANDS_HELP: Record<string, CommandHelp[]> = {
   skill: SKILL_COMMANDS_HELP,
+  agent: AGENT_COMMANDS_HELP,
+  mcp: MCP_COMMANDS_HELP,
   group: GROUP_COMMANDS_HELP,
   snap: SNAP_COMMANDS_HELP,
 };
@@ -563,11 +762,69 @@ export function formatSkillHelp(): string {
   return [
     "ahood skill -- manage skills in the ahood registry",
     "",
+    "Legacy, cross-kind: in this release `ahood skill <verb>` still acts on any registry kind",
+    "(skills, agents, MCP server manifests) -- `skill list`/`skill search` include every kind, and",
+    "`skill add`/`skill update` install whatever kind they resolve. Scripts relying on that keep",
+    "working. For one kind only, use `ahood agent <verb>` / `ahood mcp <verb>`, or add",
+    "`--kind skill|agent|mcp` to any verb below (`--kind all` spells out the legacy behavior).",
+    "A future major version will make `ahood skill` skills-only.",
+    "",
     "Commands:",
     ...lines,
     "",
     "Run `ahood skill <command> --help` for a single command's flags and examples.",
   ].join("\n");
+}
+
+// `ahood agent --help` / `ahood mcp --help` -- kind-scoped registry verbs.
+function formatRegistryKindHelp(header: string, intro: string[], entries: CommandHelp[], noun: string): string {
+  const lines = formatCommandTable(entries.map((c) => ({ usage: usageWithAliases(c), summary: c.summary })));
+  return [
+    header,
+    "",
+    ...intro,
+    "",
+    "Commands:",
+    ...lines,
+    "",
+    `Run \`ahood ${noun} <command> --help\` for a single command's flags and examples.`,
+  ].join("\n");
+}
+
+export function formatAgentHelp(): string {
+  return formatRegistryKindHelp(
+    "ahood agent -- manage agent definitions (AGENT.md) in the ahood registry",
+    [
+      "Every verb here acts on agents only: a target of another kind is refused before anything",
+      "is downloaded, prompted for, written, or sent. Installs land in .claude/agents/<owner>@<agent>.md.",
+    ],
+    AGENT_COMMANDS_HELP,
+    "agent",
+  );
+}
+
+export function formatMcpHelp(): string {
+  return formatRegistryKindHelp(
+    "ahood mcp -- the local MCP server, and MCP server manifests (server.json) in the ahood registry",
+    [
+      "Two meanings, told apart by the first word:",
+      "  ahood mcp / ahood mcp serve   start this CLI's local, read-only MCP server over stdio",
+      "                                (what MCP host configs launch; `serve` is the preferred spelling)",
+      "  ahood mcp <verb>              manage mcp-kind registry entries (installs merge into .mcp.json)",
+      "Neither is the hosted registry MCP endpoint, https://ahood.vercel.app/api/mcp.",
+      "Registry verbs act on MCP server manifests only; another kind is refused before any side effect.",
+    ],
+    MCP_COMMANDS_HELP,
+    "mcp",
+  );
+}
+
+// One entry point for every registry noun's group help, so dispatch and
+// `ahood help <noun>` can't disagree about which listing a noun gets.
+export function formatKindHelp(noun: CliKind): string {
+  if (noun === "agent") return formatAgentHelp();
+  if (noun === "mcp") return formatMcpHelp();
+  return formatSkillHelp();
 }
 
 // `ahood group --help` -- the group-level listing for every group verb.
@@ -602,7 +859,13 @@ export function formatSnapHelp(): string {
 // entity command lists.
 export function formatHelp(): string {
   const skillGroupUsage = "ahood skill <command>";
-  const skillGroupSummary = "Search, install, and publish skills -- run `ahood skill --help` for the full list.";
+  const skillGroupSummary =
+    "Search, install, and publish skills (legacy: also any other kind) -- run `ahood skill --help` for the full list.";
+  const agentGroupUsage = "ahood agent <command>";
+  const agentGroupSummary = "The same verbs, for agent definitions only -- run `ahood agent --help` for the full list.";
+  const mcpGroupUsage = "ahood mcp <command>";
+  const mcpGroupSummary =
+    "The same verbs, for MCP server manifests only; bare `ahood mcp` or `ahood mcp serve` starts the local MCP server.";
   const groupGroupUsage = "ahood group <command>";
   const groupGroupSummary =
     "Create private groups and share skills with them -- run `ahood group --help` for the full list.";
@@ -612,6 +875,8 @@ export function formatHelp(): string {
   const lines = formatCommandTable([
     ...TOP_LEVEL_COMMANDS_HELP.map((c) => ({ usage: usageWithAliases(c), summary: c.summary })),
     { usage: skillGroupUsage, summary: skillGroupSummary },
+    { usage: agentGroupUsage, summary: agentGroupSummary },
+    { usage: mcpGroupUsage, summary: mcpGroupSummary },
     { usage: groupGroupUsage, summary: groupGroupSummary },
     { usage: snapGroupUsage, summary: snapGroupSummary },
   ]);
@@ -623,11 +888,17 @@ export function formatHelp(): string {
     "  ahood skill search <something>",
     "  ahood skill add <owner>/<skill>",
     "",
+    "Use ahood with an AI agent:",
+    "  ahood help useme    Print a complete SKILL.md teaching an agent how to use ahood.",
+    "                      Raw stdout, offline, no login -- paste it to an agent, or let an",
+    "                      agent with a shell run it.",
+    "",
     "Commands:",
     ...lines,
     "",
     "Run `ahood <command> --help` (or `ahood help <command>`) for a single command's flags and examples.",
     "Run `ahood skill --help` for the full list of skill commands.",
+    "Run `ahood agent --help` / `ahood mcp --help` for the kind-scoped agent and MCP commands.",
     "Run `ahood group --help` for the full list of group commands.",
     "Run `ahood snap --help` for the full list of snap commands.",
     "Run `ahood --version` to print the installed CLI version.",

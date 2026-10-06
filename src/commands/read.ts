@@ -2,6 +2,7 @@ import { apiJson } from "../http.js";
 import { parseOwnerSkill } from "../spec.js";
 import { sanitizeDocumentForTerminal, sanitizeForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
+import { ensureRemoteKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill read <owner>/<skill> [--json]";
 
@@ -72,12 +73,13 @@ export async function readSkillMd(
   };
 }
 
-export async function read(args: string[]): Promise<void> {
+export async function read(args: string[], scope?: KindScope): Promise<void> {
   const jsonOutput = args.includes("--json");
   const spec = args.find((a) => !a.startsWith("--"));
   if (!spec) throw new UsageError(USAGE);
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
 
+  await ensureRemoteKind(scope, owner, skill, "read", "read");
   const { version, content } = await readSkillMd(owner, skill);
 
   if (jsonOutput) {
