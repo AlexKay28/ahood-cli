@@ -196,3 +196,28 @@ describe("findCommandHelp", () => {
     expect(findCommandHelp("group", "nonexistent")).toBeUndefined();
   });
 });
+
+describe("kind-scoped help (ahood-cli#172)", () => {
+  it("agent and mcp offer every registry verb skill has, with one-sentence summaries", async () => {
+    const { AGENT_COMMANDS_HELP, MCP_COMMANDS_HELP } = await import("../src/help.js");
+    const verbs = (list: typeof SKILL_COMMANDS_HELP) => list.map((c) => c.usage.split(" ")[2]).filter(Boolean);
+    expect(verbs(AGENT_COMMANDS_HELP)).toEqual(verbs(SKILL_COMMANDS_HELP));
+    expect(verbs(MCP_COMMANDS_HELP)).toEqual(["serve", ...verbs(SKILL_COMMANDS_HELP)]);
+    for (const { usage, summary } of [...AGENT_COMMANDS_HELP, ...MCP_COMMANDS_HELP]) {
+      expect(summary, `${usage} summary should not embed a second sentence`).not.toContain(". ");
+      expect(summary, `${usage} summary should end with exactly one period`).toMatch(/[^.]\.$/);
+    }
+  });
+
+  it("finds agent/mcp verbs, the show alias, and `mcp serve` via the two-token form", () => {
+    expect(findCommandHelp("agent", "add")?.usage).toMatch(/^ahood agent add <owner>\/<agent>/);
+    expect(findCommandHelp("agent", "show")?.usage).toMatch(/^ahood agent view /);
+    expect(findCommandHelp("mcp", "serve")?.usage).toBe("ahood mcp serve");
+    expect(findCommandHelp("mcp", "init")?.usage).toBe("ahood mcp init [name]");
+  });
+
+  it("`ahood help useme` is a top-level help entry; bare `ahood mcp` is no longer an account command", () => {
+    expect(findCommandHelp("help")?.usage).toBe("ahood help useme");
+    expect(TOP_LEVEL_COMMANDS_HELP.some((c) => c.usage === "ahood mcp")).toBe(false);
+  });
+});

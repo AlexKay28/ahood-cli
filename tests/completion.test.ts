@@ -64,4 +64,16 @@ describe("completion", () => {
     expect(skillLines.some((l) => l.includes('-a "publish"'))).toBe(true);
     expect(skillLines.some((l) => l.includes('-a "show"'))).toBe(true);
   });
+
+  it("zsh and fish complete the agent/mcp groups (incl. `mcp serve`) and `help useme` (ahood-cli#172)", async () => {
+    const zsh = await captured("zsh");
+    expect(zsh).toMatch(/^agent_cmds=\(.*\bpublish\b.*\)$/m);
+    expect(zsh).toMatch(/^mcp_cmds=\(serve .*\binit\b.*\)$/m);
+    expect(zsh).toMatch(/^help_cmds=\(useme /m);
+    const fish = await captured("fish");
+    expect(fish).toContain('complete -c ahood -n "__fish_seen_subcommand_from mcp" -a "serve"');
+    expect(fish).toContain('complete -c ahood -n "__fish_seen_subcommand_from agent" -a "show"');
+    expect(fish).toContain('complete -c ahood -n "__fish_seen_subcommand_from help" -a "useme"');
+    expect(fish).toContain('complete -c ahood -n "__fish_use_subcommand" -a "agent"');
+  });
 });
