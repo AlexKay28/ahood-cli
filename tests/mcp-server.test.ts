@@ -143,7 +143,7 @@ describe("ahood mcp tools", () => {
 
     const result = await client.callTool({
       name: "skill_view",
-      arguments: { owner: "a".repeat(200), skill: "demo" },
+      arguments: { owner: "a".repeat(257), skill: "demo" },
     });
 
     expect(result.isError).toBe(true);
