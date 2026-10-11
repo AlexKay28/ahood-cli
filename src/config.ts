@@ -1,6 +1,11 @@
 import { UsageError } from "./usage-error.js";
 
-const DEFAULT_API_URL = "https://ahood.vercel.app";
+// www.ahood.dev since ahood#661: production Clerk only accepts ahood.dev
+// origins, so web pages on the old host redirect here. The API still answers on
+// https://ahood.vercel.app (CLIs <= 0.10.0 default to it), so an override naming
+// that legacy host is official too and isn't warned about.
+const DEFAULT_API_URL = "https://www.ahood.dev";
+const LEGACY_API_URL = "https://ahood.vercel.app";
 
 let warnedAboutOverride = false;
 
@@ -34,7 +39,7 @@ export function getApiUrl(): string {
       `AHOOD_API_URL must use https:// (http:// is only allowed for localhost/test hosts); got "${configured}".`,
     );
   }
-  if (trimmed !== DEFAULT_API_URL && !warnedAboutOverride) {
+  if (trimmed !== DEFAULT_API_URL && trimmed !== LEGACY_API_URL && !warnedAboutOverride) {
     console.error(`warning: using non-default API endpoint from AHOOD_API_URL: ${trimmed}`);
     warnedAboutOverride = true;
   }
