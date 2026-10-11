@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
 import { add, extractTarGz, downloadVerifiedArchive, hashMcpServerConfig, matchesMcpConfigHash, readMcpConfig, resolveMcpServerConfig } from "../src/commands/add.js";
-import { agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
+import { LOCKFILE_PATH, agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { ApiError } from "../src/http.js";
 import { writeLockfileEntry } from "../src/lockfile.js";
 
@@ -351,6 +351,19 @@ describe("add", () => {
     // Must fail before anything is written to disk.
     expect(existsSync(join(dir, ".claude", "agents"))).toBe(false);
     expect(existsSync(join(dir, ".claude", "skills.lock.json"))).toBe(false);
+  });
+
+  // ahood-cli#175: a doc has no install target. Legacy `ahood skill add`
+  // used to extract it into .claude/skills/<owner>@<slug>/ with no SKILL.md.
+  it("refuses a doc on the legacy path, before any download, lockfile or write (ahood-cli#175)", async () => {
+    const archive = await tarGz({ "README.md": "# a doc\n" });
+    const calls = stubApi(archive, sha256(archive), [{ path: "README.md" }], VERSION, "doc");
+
+    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/is a doc .*no local install target.*ahood skill read/);
+
+    expect(calls.some((c) => c.includes("/download"))).toBe(false);
+    expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
+    expect(existsSync(join(dir, LOCKFILE_PATH))).toBe(false);
   });
 
   it("installs an agent through the 'latest' resolution path (GET .../skills/{owner}/{skill}), reading kind from the TOP level of the response, not nested inside skill_versions", async () => {

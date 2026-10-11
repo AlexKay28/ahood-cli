@@ -35,7 +35,7 @@ export type VersionMeta = {
   checksum_sha256: string;
   yanked_at: string | null;
   changelog_md?: string | null;
-  kind?: "skill" | "agent" | "mcp";
+  kind?: "skill" | "agent" | "mcp" | "doc";
 };
 
 // Shared wording for the checksum-pin tamper-detection guard, used both by
@@ -67,7 +67,7 @@ export async function fetchVersionMeta(owner: string, skill: string, version: st
     // no error anywhere (ahood-cli final review finding #1).
     const { skill_versions, kind } = await apiJson<{
       skill_versions: Omit<VersionMeta, "yanked_at" | "kind"> | null;
-      kind?: "skill" | "agent" | "mcp";
+      kind?: "skill" | "agent" | "mcp" | "doc";
     }>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`);
     if (!skill_versions) throw new Error(`${owner}/${skill} has no published version`);
     return { ...skill_versions, kind, yanked_at: null };
@@ -985,6 +985,19 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
   // refused here, before the download, the lockfile and every write below.
   // Both metadata routes report the entry's kind, so this costs no request.
   assertKind(scope, key, meta.kind, "add", "install");
+  // A doc has no local install target (ahood-cli#175): only skill, agent and
+  // mcp entries map to a place on disk. Legacy cross-kind `ahood skill add`
+  // used to fall through to the skill path and extract a doc into
+  // .claude/skills/<owner>@<slug>/ with no SKILL.md -- not a working skill,
+  // with nothing telling the user. Refused here, on every path, before the
+  // download, the lockfile and any write. Entries with NO kind keep the
+  // legacy skill behaviour.
+  if (meta.kind === "doc") {
+    throw new UsageError(
+      `${key} is a doc (a documentation page), which has no local install target. ` +
+        `Read it with \`ahood skill read ${key}\`, or open it with \`ahood skill view ${key} --web\`.`,
+    );
+  }
 
   // A lockfile entry records the checksum this exact version was installed
   // with; if a later fetch of the "same" version disagrees, either the
