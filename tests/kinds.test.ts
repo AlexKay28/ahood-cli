@@ -88,7 +88,11 @@ function fakeRegistry(entries: Record<string, Entry>, mine: unknown[] = []) {
           created.add(`alice/${slug}`);
           return json({ id: "id", slug, owner: "alice" }, 201);
         }
-        if (u.searchParams.get("mine") === "true") return json({ skills: mine });
+        if (u.searchParams.get("mine") === "true") {
+          // Like the registry since ahood#657: ?kind= filters the owner's rows.
+          const k = u.searchParams.get("kind");
+          return json({ skills: k ? mine.filter((r) => (r as { kind?: string }).kind === k) : mine });
+        }
         return json({ skills: [{ slug: "found", name: "Found", tagline: null, downloads_count: 1, profiles: { username: "alice" } }] });
       }
       const key = `${parts[0]}/${parts[1]}`;
@@ -314,21 +318,21 @@ describe("kind-scoped registry verbs", () => {
       expect(qs[2].get("kind")).toBe("mcp");
     });
 
-    it("mcp list keeps only owned mcp entries (same --json shape); legacy skill list keeps every kind", async () => {
+    it("mcp list asks the registry for ?kind=mcp (same --json shape); legacy skill list sends no kind", async () => {
       const rows = [
         { slug: "a", name: "A", tagline: null, visibility: "public", kind: "skill", downloads_count: 0, stars_count: 0, profiles: { username: "alice" } },
         { slug: "b", name: "B", tagline: null, visibility: "private", kind: "mcp", downloads_count: 0, stars_count: 0, profiles: { username: "alice" } },
         { slug: "c", name: "C", tagline: null, visibility: "private", downloads_count: 0, stars_count: 0, profiles: { username: "alice" } },
       ];
-      fakeRegistry({}, rows);
+      const calls = fakeRegistry({}, rows);
       const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       await dispatchMcp(["list", "--json"]);
       expect(JSON.parse(log.mock.calls[0][0] as string)).toEqual([rows[1]]);
-      expect(String(warn.mock.calls[0][0])).toMatch(/1 of your entries had no kind/);
+      expect(new URL(calls[0].url).searchParams.get("kind")).toBe("mcp");
       log.mockClear();
       await dispatchSkill(["list", "--json"]);
       expect(JSON.parse(log.mock.calls[0][0] as string)).toEqual(rows);
+      expect(new URL(calls[1].url).searchParams.has("kind")).toBe(false);
       log.mockClear();
       await dispatchAgent(["list"]);
       expect(log).toHaveBeenCalledWith("You haven't published any agents yet.");

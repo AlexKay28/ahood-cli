@@ -22,32 +22,19 @@ type OwnSkill = {
   profiles: { username: string } | null;
 };
 
-export async function listOwnSkills(): Promise<OwnSkill[]> {
-  const { skills } = await apiJson<{ skills: OwnSkill[] }>("/api/v1/skills?mine=true");
+// A strict kind is filtered by the registry: its `mine=true` branch honours
+// ?kind= (ahood#657) and, with no page/per_page, still returns every owned
+// row unpaginated -- the same shape as before.
+export async function listOwnSkills(kind?: string): Promise<OwnSkill[]> {
+  const query = kind ? `mine=true&kind=${encodeURIComponent(kind)}` : "mine=true";
+  const { skills } = await apiJson<{ skills: OwnSkill[] }>(`/api/v1/skills?${query}`);
   return skills ?? [];
 }
 
 export async function listSkills(args: string[] = [], scope?: KindScope): Promise<void> {
   const jsonOutput = args.includes("--json");
   const kind = strictKind(scope);
-  let skills = await listOwnSkills();
-
-  // The backend's `mine=true` branch ignores ?kind= (it is a separate query
-  // from the public search -- see app/api/v1/skills/route.ts), but it does
-  // select each row's `kind` and returns every owned row unpaginated, so
-  // filtering here is exact rather than a page-local approximation. A row with
-  // no `kind` is left out of a strict listing rather than guessed into one,
-  // and the omission is reported on stderr so --json stdout keeps its shape.
-  if (kind) {
-    const unknown = skills.filter((s) => typeof s.kind !== "string" || s.kind === "");
-    skills = skills.filter((s) => s.kind === kind);
-    if (unknown.length > 0) {
-      console.warn(
-        `WARNING: ${unknown.length} of your entries had no kind in the registry's response and were left out. ` +
-          "Run `ahood skill list` (legacy, all kinds) to see them.",
-      );
-    }
-  }
+  const skills = await listOwnSkills(kind);
 
   if (jsonOutput) {
     console.log(JSON.stringify(skills));
