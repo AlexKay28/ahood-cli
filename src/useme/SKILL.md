@@ -146,7 +146,7 @@ ahood skill publish alice/pdf-tools@1.1.0 --path pdf-tools --changelog "Adds spl
    CLI's own credential. Example: `claude mcp add ahood -- ahood mcp serve`.
 2. **`ahood mcp <verb>`**: registry commands for MCP server *manifests* (`server.json`) --
    installing one merges a server entry into `.mcp.json`. This does not start anything.
-3. **The hosted registry MCP endpoint**, `https://ahood.vercel.app/api/mcp`: Streamable HTTP,
+3. **The hosted registry MCP endpoint**, `https://www.ahood.dev/api/mcp`: Streamable HTTP,
    stateless (POST only), `Authorization: Bearer <token>`. It has write tools too:
    `search_skills`, `get_skill`, `fetch_skill`, `read_skill`, `list_skill_versions`,
    `list_my_skills`, `search_collections`, `get_collection`, `create_skill`, `update_skill`,
@@ -167,4 +167,4 @@ changes. `ahood skill add alexkay/ahood` is a separate, optional thing: it insta
 registry-published ahood skill into this project as a pinned skill, on its own release
 schedule. Neither is required for the other.
 
-Full reference: `ahood --help`, `ahood <group> --help`, and https://ahood.vercel.app/docs.
+Full reference: `ahood --help`, `ahood <group> --help`, and https://www.ahood.dev/docs.

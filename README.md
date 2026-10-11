@@ -1,6 +1,6 @@
 # ahood
 
-**The command-line client for [ahood](https://ahood.vercel.app) — a registry for installing and publishing [Claude Code](https://claude.com/claude-code) Skills.**
+**The command-line client for [ahood](https://www.ahood.dev) — a registry for installing and publishing [Claude Code](https://claude.com/claude-code) Skills.**
 
 [![npm version](https://img.shields.io/npm/v/@ahood/cli.svg?color=blue)](https://www.npmjs.com/package/@ahood/cli)
 [![npm downloads](https://img.shields.io/npm/dm/@ahood/cli.svg)](https://www.npmjs.com/package/@ahood/cli)
@@ -80,7 +80,7 @@ Requires Node.js 18 or later.
 | Variable | Purpose |
 | --- | --- |
 | `AHOOD_TOKEN` | A personal API token (create one with `ahood token create <name>` after logging in once). When set, every command uses it instead of the stored browser-login credentials — the standard way to authenticate in CI or any non-interactive environment. |
-| `AHOOD_API_URL` | Overrides the registry endpoint (default: `https://ahood.vercel.app`). Must be `https://`, except for `localhost`/`127.0.0.1` or a `.test`/`.invalid`/`.example`/`.localhost` host, which may use plain `http://` for local development. |
+| `AHOOD_API_URL` | Overrides the registry endpoint (default: `https://www.ahood.dev`). Must be `https://`, except for `localhost`/`127.0.0.1` or a `.test`/`.invalid`/`.example`/`.localhost` host, which may use plain `http://` for local development. |
 | `XDG_CONFIG_HOME` | If set, browser-login credentials are stored under `$XDG_CONFIG_HOME/ahood/credentials.json` instead of the default `~/.config/ahood/credentials.json`. |
 
 Paths `ahood` reads and writes in your project. The lockfile is meant to be committed, same as `package-lock.json`:
@@ -178,7 +178,7 @@ $ ahood group create "Design Team" --description "Shared skills for the design t
 Created group Design Team (design-team).
 
 $ ahood group invite-link design-team
-https://ahood.vercel.app/groups/join?token=abc123...
+https://www.ahood.dev/groups/join?token=abc123...
 Expires: 2026-09-14T00:00:00.000Z
 This link (and its token) is shown only this once -- save it now, it cannot be retrieved again.
 
@@ -216,7 +216,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 
 **Migration plan for a strict `ahood skill`.** A future major version will make `ahood skill <verb>` skills-only by default, matching `agent` and `mcp`. Until then: (1) this release adds the strict groups and `--kind`, and labels `ahood skill` as legacy in `--help`; (2) a following minor release prints a stderr deprecation note when an `ahood skill` command actually touches a non-skill entry (stdout and `--json` unchanged); (3) the major release flips the default, keeping `ahood skill <verb> --kind all` as the explicit cross-kind escape hatch. Scripts that want today's behavior forever can pass `--kind all` now.
 
-**`ahood mcp` has two meanings.** With no arguments, or as `ahood mcp serve` (the preferred spelling), it starts this CLI's local, read-only MCP server over stdio -- unchanged, so existing MCP host configurations keep working with no edits. With a registry verb it manages MCP server manifests. Anything else (`ahood mcp srve`, `ahood mcp --flag`) fails with usage and a suggestion instead of starting a server. Neither is the hosted registry MCP endpoint at `https://ahood.vercel.app/api/mcp`.
+**`ahood mcp` has two meanings.** With no arguments, or as `ahood mcp serve` (the preferred spelling), it starts this CLI's local, read-only MCP server over stdio -- unchanged, so existing MCP host configurations keep working with no edits. With a registry verb it manages MCP server manifests. Anything else (`ahood mcp srve`, `ahood mcp --flag`) fails with usage and a suggestion instead of starting a server. Neither is the hosted registry MCP endpoint at `https://www.ahood.dev/api/mcp`.
 
 ## Commands
 
@@ -391,7 +391,7 @@ npm test        # run the vitest suite
 
 If you add or change a command, update `src/help.ts`'s `COMMANDS_HELP` and then run `npm run sync-readme` to regenerate the table above — CI fails (`node scripts/sync-readme.mjs --check`) if it's out of sync.
 
-Full reference, including personal API tokens, the public REST API, and the MCP server: **https://ahood.vercel.app/docs**
+Full reference, including personal API tokens, the public REST API, and the MCP server: **https://www.ahood.dev/docs**
 
 ## License
 

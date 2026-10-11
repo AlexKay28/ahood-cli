@@ -122,7 +122,7 @@ export async function inviteLink(args: string[]): Promise<void> {
   console.log("This link (and its token) is shown only this once -- save it now, it cannot be retrieved again.");
 }
 
-// Accepts either a full join URL (https://ahood.vercel.app/groups/join?token=...)
+// Accepts either a full join URL (https://www.ahood.dev/groups/join?token=...)
 // or a bare raw token, for convenience -- whatever a user pastes from
 // `ahood group invite-link` or forwards from someone else. Anything that
 // doesn't parse as a URL, or parses but has no `token` query param, is

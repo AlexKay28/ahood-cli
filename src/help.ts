@@ -428,7 +428,7 @@ export const MCP_SERVE_HELP: CommandHelp[] = [
       "skill_versions, skill_list, skill_outdated, and whoami as MCP tools -- the same data ahood's --json " +
       "commands already return, reachable as typed tool calls instead of parsed CLI output. Meant to be " +
       "launched by an MCP-aware agent host (e.g. Claude Code's MCP server configuration), not run interactively. " +
-      "Read-only by design. This is not the hosted registry MCP endpoint (https://ahood.vercel.app/api/mcp), which " +
+      "Read-only by design. This is not the hosted registry MCP endpoint (https://www.ahood.dev/api/mcp), which " +
       "is a separate server with write tools.",
     examples: ['claude mcp add ahood -- ahood mcp serve', "npx @ahood/cli@latest mcp serve"],
   },
@@ -483,10 +483,10 @@ export const GROUP_COMMANDS_HELP: CommandHelp[] = [
     usage: "ahood group join <invite-url-or-token>",
     summary: "Join a group using an invite link or its raw token.",
     desc:
-      "Join a group using an invite link (e.g. https://ahood.vercel.app/groups/join?token=...) or its bare " +
+      "Join a group using an invite link (e.g. https://www.ahood.dev/groups/join?token=...) or its bare " +
       "raw token -- either form works.",
     examples: [
-      "ahood group join https://ahood.vercel.app/groups/join?token=abc123",
+      "ahood group join https://www.ahood.dev/groups/join?token=abc123",
       "ahood group join abc123",
     ],
   },
@@ -811,7 +811,7 @@ export function formatMcpHelp(): string {
       "  ahood mcp / ahood mcp serve   start this CLI's local, read-only MCP server over stdio",
       "                                (what MCP host configs launch; `serve` is the preferred spelling)",
       "  ahood mcp <verb>              manage mcp-kind registry entries (installs merge into .mcp.json)",
-      "Neither is the hosted registry MCP endpoint, https://ahood.vercel.app/api/mcp.",
+      "Neither is the hosted registry MCP endpoint, https://www.ahood.dev/api/mcp.",
       "Registry verbs act on MCP server manifests only; another kind is refused before any side effect.",
     ],
     MCP_COMMANDS_HELP,
@@ -881,7 +881,7 @@ export function formatHelp(): string {
     { usage: snapGroupUsage, summary: snapGroupSummary },
   ]);
   return [
-    "ahood -- CLI for the ahood skills registry (https://ahood.vercel.app)",
+    "ahood -- CLI for the ahood skills registry (https://www.ahood.dev)",
     "",
     "Quick start:",
     "  ahood login",
@@ -907,6 +907,6 @@ export function formatHelp(): string {
     "            4 authentication required or rejected, 5 not found,",
     "            6 network/transport error or upstream server (5xx) error.",
     "",
-    "Full reference: https://ahood.vercel.app/docs",
+    "Full reference: https://www.ahood.dev/docs",
   ].join("\n");
 }

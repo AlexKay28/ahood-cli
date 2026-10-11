@@ -109,7 +109,7 @@ describe("ahood mcp: the local stdio server is unchanged", () => {
       expect(text).toContain("ahood mcp serve");
       expect(text).toContain("read-only MCP server over stdio");
       expect(text).toContain("ahood mcp add <owner>/<server>");
-      expect(text).toContain("https://ahood.vercel.app/api/mcp");
+      expect(text).toContain("https://www.ahood.dev/api/mcp");
     });
   }
 
@@ -196,7 +196,7 @@ describe("ahood help useme", () => {
 
   it("documents each kind group, mcp serve vs. manifests vs. hosted MCP, and does not repeat the old nested install path", () => {
     const content = readFileSync(skillSource, "utf8");
-    for (const needle of ["ahood agent", "ahood mcp serve", "server.json", "AGENT.md", "AHOOD_TOKEN", "--json", "https://ahood.vercel.app/api/mcp", "unpublish"]) {
+    for (const needle of ["ahood agent", "ahood mcp serve", "server.json", "AGENT.md", "AHOOD_TOKEN", "--json", "https://www.ahood.dev/api/mcp", "unpublish"]) {
       expect(content).toContain(needle);
     }
     expect(content).toContain(".claude/skills/<owner>@<skill>/");
