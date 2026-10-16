@@ -36,6 +36,7 @@ const {
   SKILL_COMMANDS_HELP,
   AGENT_COMMANDS_HELP,
   MCP_COMMANDS_HELP,
+  DOC_COMMANDS_HELP,
   GROUP_COMMANDS_HELP,
   SNAP_COMMANDS_HELP,
   usageWithAliases,
@@ -58,7 +59,8 @@ function renderTable(entries) {
 // One table per noun, gh-style: account-scoped commands (login/logout/
 // whoami/token/completion/help) stay flat; registry commands are reached as
 // `ahood skill <verb>` (legacy, cross-kind), `ahood agent <verb>`, and
-// `ahood mcp <verb>` (which also holds the local MCP server, ahood-cli#172);
+// `ahood mcp <verb>` (which also holds the local MCP server, ahood-cli#172),
+// and `ahood doc <verb>` (ahood-cli#182);
 // group-entity commands as `ahood group <verb>`; snap-entity commands as
 // `ahood snap <verb>`.
 function renderTables() {
@@ -78,6 +80,10 @@ function renderTables() {
     "### MCP (local server and server manifests)",
     "",
     renderTable(MCP_COMMANDS_HELP),
+    "",
+    "### Doc",
+    "",
+    renderTable(DOC_COMMANDS_HELP),
     "",
     "### Group",
     "",

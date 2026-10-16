@@ -4,10 +4,11 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import * as tarStream from "tar-stream";
 import { gunzipSync } from "node:zlib";
 import { apiFetch, apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
-import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, AGENTS_ROOT, MCP_CONFIG_PATH } from "../spec.js";
+import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, docPath, AGENTS_ROOT, MCP_CONFIG_PATH } from "../spec.js";
 import {
   readLockfile,
   withLock,
+  writeFileAtomic,
   writeJsonFileAtomic,
   writeLockfileEntryVerifyingChecksum,
   LockfileChecksumConflictError,
@@ -16,7 +17,7 @@ import {
 import { promptSecret } from "../secret-prompt.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
-import { assertKind, type KindScope } from "../kinds.js";
+import { assertKind, strictKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill add <owner>/<skill>[@version]";
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB compressed
@@ -974,6 +975,36 @@ export async function downloadVerifiedArchive(owner: string, skill: string, meta
   return buffer;
 }
 
+// `ahood doc add` (ahood-cli#182): only DOC.md is extracted, written
+// atomically to .claude/docs/<owner>@<doc>.md, and pinned with kind "doc" so
+// remove/update can tell the pin apart without asking the registry. If the
+// pin can't be written, the file goes back to what it was: the previous
+// version's content on an update, nothing on a fresh install.
+async function installDoc(owner: string, skill: string, meta: VersionMeta, buffer: Buffer): Promise<void> {
+  const key = `${owner}/${skill}`;
+  const content = await extractSingleFileContent(buffer, "DOC.md");
+  const destPath = docPath(owner, skill);
+  const previous = existsSync(destPath) ? readFileSync(destPath) : undefined;
+  writeFileAtomic(destPath, content);
+  try {
+    writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
+      version: meta.version,
+      checksum_sha256: meta.checksum_sha256,
+      kind: "doc",
+    });
+  } catch (error) {
+    rollbackOrWarn(
+      () => (previous === undefined ? rmSync(destPath, { force: true }) : writeFileAtomic(destPath, previous)),
+      `WARNING: could not restore ${destPath} after ${key}'s install failed -- it may not match its ${LOCKFILE_PATH} pin. Run \`ahood doc remove ${key}\` to clean it up.`,
+    );
+    if (error instanceof LockfileChecksumConflictError) {
+      throw new Error(checksumConflictMessage(key, meta, error.existing));
+    }
+    throw error;
+  }
+  console.log(`Installed ${key}@${meta.version} to ${destPath}`);
+}
+
 export async function add(args: string[], scope?: KindScope): Promise<void> {
   const spec = args[0];
   if (!spec) throw new UsageError(USAGE);
@@ -985,17 +1016,27 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
   // refused here, before the download, the lockfile and every write below.
   // Both metadata routes report the entry's kind, so this costs no request.
   assertKind(scope, key, meta.kind, "add", "install");
-  // A doc has no local install target (ahood-cli#175): only skill, agent and
-  // mcp entries map to a place on disk. Legacy cross-kind `ahood skill add`
-  // used to fall through to the skill path and extract a doc into
+  // Legacy cross-kind `ahood skill add` of a doc stays refused (ahood-cli#175):
+  // it used to fall through to the skill path and extract a doc into
   // .claude/skills/<owner>@<slug>/ with no SKILL.md -- not a working skill,
-  // with nothing telling the user. Refused here, on every path, before the
-  // download, the lockfile and any write. Entries with NO kind keep the
-  // legacy skill behaviour.
-  if (meta.kind === "doc") {
+  // with nothing telling the user. Docs install only through the doc scope
+  // (`ahood doc add`, ahood-cli#182), which writes the one flat file below.
+  // Refused before the download, the lockfile and any write. Entries with NO
+  // kind keep the legacy skill behaviour.
+  const docInstall = meta.kind === "doc" && strictKind(scope) === "doc";
+  if (meta.kind === "doc" && !docInstall) {
     throw new UsageError(
-      `${key} is a doc (a documentation page), which has no local install target. ` +
-        `Read it with \`ahood skill read ${key}\`, or open it with \`ahood skill view ${key} --web\`.`,
+      `${key} is a doc (a documentation page), not a skill. ` +
+        `Install it with \`ahood doc add ${key}\`, or read it without installing with \`ahood doc read ${key}\`.`,
+    );
+  }
+  // No-overwrite: a file already at the doc's path that this project's
+  // lockfile does not pin as this doc was not written by ahood, so it is
+  // left alone. Checked before the download, like every refusal above.
+  if (docInstall && existsSync(docPath(owner, skill)) && readLockfile(LOCKFILE_PATH)[key]?.kind !== "doc") {
+    throw new Error(
+      `${docPath(owner, skill)} already exists and is not pinned as ${key} in ${LOCKFILE_PATH} -- refusing to overwrite it. ` +
+        "Move or delete it first.",
     );
   }
 
@@ -1025,7 +1066,7 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
   // manifest can never actually land on disk there -- the warning would be
   // both mislabeled ("skill") and about a risk that can't materialize
   // (ahood-cli final review finding #5).
-  if (meta.kind !== "agent" && meta.kind !== "mcp" && meta.manifest.some((f) => f.path.startsWith("scripts/"))) {
+  if (meta.kind !== "agent" && meta.kind !== "mcp" && meta.kind !== "doc" && meta.manifest.some((f) => f.path.startsWith("scripts/"))) {
     console.warn("WARNING: this skill includes a scripts/ directory. Review its contents before use.");
   }
 
@@ -1061,6 +1102,11 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
 
   if (meta.kind === "mcp") {
     await installMcpEntry(owner, skill, meta, buffer);
+    return;
+  }
+
+  if (docInstall) {
+    await installDoc(owner, skill, meta, buffer);
     return;
   }
 

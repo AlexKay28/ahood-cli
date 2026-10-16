@@ -50,7 +50,8 @@ import { exitCodeFor } from "./exit-code.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
 
 // Every registry verb, reached as `ahood skill <verb>`, `ahood agent <verb>`,
-// or `ahood mcp <verb>` -- one handler per verb shared by all three nouns
+// `ahood mcp <verb>` or `ahood doc <verb>` -- one handler per verb shared by
+// every noun
 // (see dispatchRegistry() below), never a copy per kind. "show" is an alias
 // for "view" (issue #30). A handler gets a second, KindScope argument only
 // when the verb runs kind-scoped; the legacy `ahood skill <verb>` call is
@@ -126,6 +127,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   mcp: dispatchMcp,
   skill: dispatchSkill,
   agent: dispatchAgent,
+  doc: dispatchDoc,
   group: dispatchGroup,
   snap: dispatchSnap,
 };
@@ -138,8 +140,9 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
 // here just means "a command that owns its own sub-verb dispatch", the same
 // sense "skill" already used before "group" (the entity) existed. "snap"
 // joins this set for the exact same reason (ahood-cli#107).
-// "agent" and "mcp" join it as registry nouns (ahood-cli#172).
-const GROUP_COMMANDS = new Set(["skill", "agent", "mcp", "group", "snap"]);
+// "agent" and "mcp" join it as registry nouns (ahood-cli#172), "doc" too
+// (ahood-cli#182).
+const GROUP_COMMANDS = new Set(["skill", "agent", "mcp", "doc", "group", "snap"]);
 
 function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
@@ -182,7 +185,7 @@ function closestSnapVerb(input: string): string | undefined {
   return closestOf(input, Object.keys(SNAP_VERBS));
 }
 
-// `ahood <noun> <verb> [...]` for every registry noun (skill, agent, mcp) --
+// `ahood <noun> <verb> [...]` for every registry noun (skill, agent, mcp, doc) --
 // owns its own help handling at both the noun level (`ahood agent` /
 // `ahood agent --help`) and the per-verb level (`ahood agent <verb> --help`),
 // since neither should fall through to main()'s generic top-level --help
@@ -250,6 +253,10 @@ async function dispatchSkill(args: string[]): Promise<void> {
 
 async function dispatchAgent(args: string[]): Promise<void> {
   await dispatchRegistry("agent", args);
+}
+
+async function dispatchDoc(args: string[]): Promise<void> {
+  await dispatchRegistry("doc", args);
 }
 
 // `ahood mcp` keeps its original contract byte-for-byte: with NO arguments it
@@ -364,7 +371,7 @@ async function main() {
       process.stdout.write(content);
       return;
     }
-    if (sub === "skill" || sub === "agent" || sub === "mcp") {
+    if (sub === "skill" || sub === "agent" || sub === "mcp" || sub === "doc") {
       const verb = args[1];
       const entry = verb ? findCommandHelp(sub, verb) : undefined;
       console.log(entry ? formatCommandHelp(entry) : formatKindHelp(sub));
@@ -450,4 +457,4 @@ if (isEntrypoint) {
 }
 
 // Exported for tests only -- the CLI itself only ever calls main() above.
-export { main, dispatchSkill, dispatchAgent, dispatchMcp, dispatchRegistry, dispatchGroup, dispatchSnap, COMMANDS, SKILL_COMMANDS, GROUP_VERBS, SNAP_VERBS };
+export { main, dispatchSkill, dispatchAgent, dispatchDoc, dispatchMcp, dispatchRegistry, dispatchGroup, dispatchSnap, COMMANDS, SKILL_COMMANDS, GROUP_VERBS, SNAP_VERBS };

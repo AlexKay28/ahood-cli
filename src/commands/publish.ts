@@ -56,7 +56,7 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
 }
 
 const USAGE =
-  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]\n" +
+  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]\n" +
   "   or: ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
@@ -301,8 +301,8 @@ function parsePublishArgs(args: string[]): {
   if (!SEMVER_RE.test(version)) {
     throw new UsageError(`--version must be a semver like 1.2.3 (got "${version}").\n${USAGE}`);
   }
-  if (kind !== undefined && kind !== "skill" && kind !== "agent" && kind !== "mcp") {
-    throw new UsageError(`--kind must be "skill", "agent", or "mcp" (got "${kind}").\n${USAGE}`);
+  if (kind !== undefined && kind !== "skill" && kind !== "agent" && kind !== "mcp" && kind !== "doc") {
+    throw new UsageError(`--kind must be "skill", "agent", "mcp", or "doc" (got "${kind}").\n${USAGE}`);
   }
   // Validated here, before any network call (including the tar/gzip of the
   // skill directory) -- these only ever reach the server via
@@ -425,12 +425,16 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
     const skillMdPath = join(path, "SKILL.md");
     const agentMdPath = join(path, "AGENT.md");
     const serverJsonPath = join(path, "server.json");
+    const docMdPath = join(path, "DOC.md");
     const hasSkillMd = existsSync(skillMdPath);
     const hasAgentMd = existsSync(agentMdPath);
     const hasServerJson = existsSync(serverJsonPath);
+    const hasDocMd = existsSync(docMdPath);
 
     let resolvedKind = kind;
-    if (kind === "agent") {
+    if (kind === "doc") {
+      if (!hasDocMd) throw new Error(`No DOC.md found at ${docMdPath} -- ${via} must point at a folder containing DOC.md.`);
+    } else if (kind === "agent") {
       if (!hasAgentMd) throw new Error(`No AGENT.md found at ${agentMdPath} -- ${via} must point at a folder containing AGENT.md.`);
     } else if (kind === "skill") {
       if (!hasSkillMd) throw new Error(`No SKILL.md found at ${skillMdPath} -- ${via} must point at a folder containing SKILL.md.`);
@@ -438,21 +442,26 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
       if (!hasServerJson) throw new Error(`No server.json found at ${serverJsonPath} -- ${via} must point at a folder containing server.json.`);
     } else {
       // kind === undefined -- infer from whichever root file(s) are actually present
-      const present = [hasSkillMd && "SKILL.md", hasAgentMd && "AGENT.md", hasServerJson && "server.json"].filter(
-        Boolean,
-      ) as string[];
+      const present = [
+        hasSkillMd && "SKILL.md",
+        hasAgentMd && "AGENT.md",
+        hasServerJson && "server.json",
+        hasDocMd && "DOC.md",
+      ].filter(Boolean) as string[];
       if (present.length > 1) {
         throw new Error(
-          `Multiple root files found at ${path} (${present.join(", ")}) -- pass --kind skill, --kind agent, or --kind mcp to disambiguate.`,
+          `Multiple root files found at ${path} (${present.join(", ")}) -- pass --kind skill, --kind agent, --kind mcp, or --kind doc to disambiguate.`,
         );
       }
       if (present.length === 0) {
-        throw new Error(`No SKILL.md, AGENT.md, or server.json found at ${path} -- publish must point at a skill, agent, or mcp folder's root.`);
+        throw new Error(`No SKILL.md, AGENT.md, server.json, or DOC.md found at ${path} -- publish must point at a skill, agent, mcp, or doc folder's root.`);
       }
       if (hasAgentMd) {
         resolvedKind = "agent"; // inferred: only AGENT.md present, no --kind needed
       } else if (hasServerJson) {
         resolvedKind = "mcp"; // inferred: only server.json present, no --kind needed
+      } else if (hasDocMd) {
+        resolvedKind = "doc"; // inferred: only DOC.md present (ahood-cli#182)
       }
       // else: hasSkillMd only -- resolvedKind stays undefined (unchanged existing behavior, server defaults to 'skill')
     }

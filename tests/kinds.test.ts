@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
-import { dispatchAgent, dispatchMcp, dispatchSkill } from "../src/index.js";
+import { dispatchAgent, dispatchDoc, dispatchMcp, dispatchSkill } from "../src/index.js";
 import {
   assertKind,
   extractKindFlag,
@@ -15,7 +15,7 @@ import {
   resolveScope,
 } from "../src/kinds.js";
 import { readLockfile, writeLockfileEntry } from "../src/lockfile.js";
-import { agentPath, skillDir, LOCKFILE_PATH } from "../src/spec.js";
+import { agentPath, docPath, skillDir, LOCKFILE_PATH } from "../src/spec.js";
 import { UsageError } from "../src/usage-error.js";
 import { hashMcpServerConfig } from "../src/commands/add.js";
 
@@ -53,7 +53,7 @@ type Entry = {
 
 type Call = { method: string; url: string; body?: string };
 
-const ROOT_DOCS: Record<string, string> = { skill: "SKILL.md", agent: "AGENT.md", mcp: "server.json" };
+const ROOT_DOCS: Record<string, string> = { skill: "SKILL.md", agent: "AGENT.md", mcp: "server.json", doc: "DOC.md" };
 
 async function entry(kind: string | undefined, version = "1.0.0", contentKind = kind ?? "skill"): Promise<Entry> {
   const rootDoc = ROOT_DOCS[contentKind];
@@ -143,7 +143,7 @@ describe("kind scope resolution", () => {
     expect(resolveScope("mcp", "mcp")).toEqual({ noun: "mcp", kind: "mcp" });
     expect(() => resolveScope("agent", "mcp")).toThrow(UsageError);
     expect(() => resolveScope("mcp", "all")).toThrow(/contradicts/);
-    expect(() => resolveScope("skill", "doc")).toThrow(/--kind must be one of/);
+    expect(() => resolveScope("skill", "bogus")).toThrow(/--kind must be one of/);
   });
 
   it("extractKindFlag strips both --kind forms and refuses a repeat or a missing value", () => {
@@ -163,7 +163,7 @@ describe("kind scope resolution", () => {
     expect(() => assertKind(strict, "a/b", "skill", "add", "install")).toThrow(
       "a/b is a skill, not an agent -- refusing to install it. Use `ahood skill add a/b` instead.",
     );
-    for (const bad of [undefined, null, "", "doc", 42]) {
+    for (const bad of [undefined, null, "", "bogus", 42]) {
       let thrown: unknown;
       try {
         assertKind(strict, "a/b", bad, "add", "install");
@@ -567,6 +567,368 @@ describe("kind-scoped registry verbs", () => {
         "Fill in the description, then flesh out the ## Instructions section.",
         "Run `ahood skill publish <owner>/<skill>@<version> --path pdf` when ready.",
       ]);
+    });
+  });
+});
+
+// ahood-cli#182: `ahood doc <verb>`, the fourth registry noun. Every verb is
+// the same shared handler, strict for kind doc; a doc installs as one flat
+// file, .claude/docs/<owner>@<doc>.md, pinned with kind "doc".
+//
+// A port of the backend's publish-time DOC.md check
+// (lib/publish/parse-doc-frontmatter.ts in the ahood repo): starts with a
+// `---` line, a closing `---` line followed by a newline, and non-empty flat
+// `name` and `description` fields.
+function backendAcceptsDocMd(content: string): boolean {
+  if (!content.startsWith("---\n")) return false;
+  const afterOpen = content.slice(4);
+  const close = afterOpen.match(/\r?\n---\r?\n/);
+  if (!close || close.index === undefined) return false;
+  const fields: Record<string, string> = {};
+  for (const line of afterOpen.slice(0, close.index).split(/\r?\n/)) {
+    const i = line.indexOf(":");
+    if (i !== -1) fields[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return Boolean(fields.name) && Boolean(fields.description);
+}
+
+describe("ahood doc (ahood-cli#182)", () => {
+  let dir: string;
+  let originalCwd: string;
+  const saved = { HOME: process.env.HOME, AHOOD_API_URL: process.env.AHOOD_API_URL, AHOOD_TOKEN: process.env.AHOOD_TOKEN };
+
+  beforeEach(() => {
+    originalCwd = process.cwd();
+    dir = mkdtempSync(join(tmpdir(), "ahood-doc-test-"));
+    process.chdir(dir);
+    process.env.HOME = dir;
+    process.env.AHOOD_API_URL = API_URL;
+    delete process.env.AHOOD_TOKEN;
+    process.exitCode = 0;
+    vi.mocked(confirm).mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    process.chdir(originalCwd);
+    rmSync(dir, { recursive: true, force: true });
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    process.exitCode = 0;
+  });
+
+  function quiet() {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  }
+
+  it("the doc noun is strict for kind doc and refuses a contradictory --kind", () => {
+    expect(resolveScope("doc", undefined)).toEqual({ noun: "doc", kind: "doc" });
+    expect(resolveScope("doc", "doc")).toEqual({ noun: "doc", kind: "doc" });
+    expect(() => resolveScope("doc", "skill")).toThrow(/--kind skill contradicts it/);
+    expect(() => resolveScope("doc", "all")).toThrow(UsageError);
+    expect(resolveScope("skill", "doc")).toEqual({ noun: "skill", kind: "doc" });
+  });
+
+  describe("install: add, update, outdated, remove (owner decision on #182 question 1)", () => {
+    const docFile = join(".claude", "docs", "alice@guide.md");
+
+    it("doc add writes DOC.md to .claude/docs/<owner>@<doc>.md and pins it with kind doc", async () => {
+      quiet();
+      fakeRegistry({ "alice/guide": await entry("doc") });
+      await dispatchDoc(["add", "alice/guide"]);
+      expect(readFileSync(docFile, "utf8")).toBe("---\nname: x\ndescription: d\n---\nbody\n");
+      const pin = readLockfile(LOCKFILE_PATH)["alice/guide"];
+      expect(pin).toMatchObject({ version: "1.0.0", kind: "doc" });
+      expect(existsSync(join(".claude", "skills"))).toBe(false);
+      expect(existsSync(join(".claude", "agents"))).toBe(false);
+      expect(localInstalledKind("alice", "guide", pin)).toBe("doc");
+    });
+
+    it("doc add of a pinned version installs that version", async () => {
+      quiet();
+      fakeRegistry({ "alice/guide": await entry("doc", "1.2.0") });
+      await dispatchDoc(["add", "alice/guide@1.2.0"]);
+      expect(readLockfile(LOCKFILE_PATH)["alice/guide"]?.version).toBe("1.2.0");
+    });
+
+    it("refuses path traversal: the segment check runs before any request, and docPath itself refuses", async () => {
+      const calls = fakeRegistry({});
+      for (const spec of ["alice/..", "../guide", "alice/../../etc", "alice/.hidden"]) {
+        await expect(dispatchDoc(["add", spec])).rejects.toThrow(UsageError);
+      }
+      expect(calls).toEqual([]);
+      expect(() => docPath("alice", "..")).toThrow(UsageError);
+      expect(() => docPath("..", "guide")).toThrow(UsageError);
+      expect(docPath("alice", "guide")).toBe(docFile);
+      expect(readdirSync(dir)).toEqual([]);
+    });
+
+    it("refuses to overwrite a file at the doc's path that is not pinned as that doc, before downloading", async () => {
+      quiet();
+      mkdirSync(join(".claude", "docs"), { recursive: true });
+      writeFileSync(docFile, "mine");
+      const calls = fakeRegistry({ "alice/guide": await entry("doc") });
+      await expect(dispatchDoc(["add", "alice/guide"])).rejects.toThrow(/already exists and is not pinned as alice\/guide/);
+      expect(readFileSync(docFile, "utf8")).toBe("mine");
+      expect(mutations(calls)).toEqual([]);
+      expect(existsSync(LOCKFILE_PATH)).toBe(false);
+    });
+
+    it("no-arg doc outdated/update consider only doc pins; doc update moves the doc forward", async () => {
+      quiet();
+      fakeRegistry({ "alice/guide": await entry("doc"), "alice/rev": await entry("agent") });
+      await dispatchDoc(["add", "alice/guide"]);
+      await dispatchAgent(["add", "alice/rev"]);
+
+      const calls = fakeRegistry({ "alice/guide": await entry("doc", "2.0.0"), "alice/rev": await entry("agent", "2.0.0") });
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await dispatchDoc(["outdated", "--json"]);
+      const previews = JSON.parse(log.mock.calls.at(-1)![0] as string);
+      expect(previews.map((p: { skill: string }) => p.skill)).toEqual(["alice/guide"]);
+      expect(calls.some((c) => c.url.includes("alice/rev"))).toBe(false);
+      expect(readLockfile(LOCKFILE_PATH)["alice/guide"]?.version).toBe("1.0.0");
+
+      await dispatchDoc(["update"]);
+      const lock = readLockfile(LOCKFILE_PATH);
+      expect(lock["alice/guide"]).toMatchObject({ version: "2.0.0", kind: "doc" });
+      expect(lock["alice/rev"]?.version).toBe("1.0.0");
+      expect(calls.some((c) => c.url.includes("alice/rev"))).toBe(false);
+    });
+
+    it("legacy no-arg skill update moves a doc pin forward too, through the doc install path", async () => {
+      quiet();
+      fakeRegistry({ "alice/guide": await entry("doc") });
+      await dispatchDoc(["add", "alice/guide"]);
+      fakeRegistry({ "alice/guide": await entry("doc", "2.0.0") });
+      await dispatchSkill(["update"]);
+      expect(readLockfile(LOCKFILE_PATH)["alice/guide"]).toMatchObject({ version: "2.0.0", kind: "doc" });
+      expect(existsSync(join(".claude", "skills"))).toBe(false);
+    });
+
+    it("doc remove deletes the file and the pin, offline", async () => {
+      quiet();
+      fakeRegistry({ "alice/guide": await entry("doc") });
+      await dispatchDoc(["add", "alice/guide"]);
+      const calls = fakeRegistry({});
+      await dispatchDoc(["remove", "alice/guide", "--yes"]);
+      expect(existsSync(docFile)).toBe(false);
+      expect(readLockfile(LOCKFILE_PATH)["alice/guide"]).toBeUndefined();
+      expect(calls).toEqual([]);
+    });
+
+    it("agent remove of an installed doc, and doc remove of an installed agent, are refused before deleting", async () => {
+      quiet();
+      fakeRegistry({ "alice/guide": await entry("doc"), "alice/rev": await entry("agent") });
+      await dispatchDoc(["add", "alice/guide"]);
+      await dispatchAgent(["add", "alice/rev"]);
+      await expect(dispatchAgent(["remove", "alice/guide", "--yes"])).rejects.toThrow(/alice\/guide is a doc, not an agent/);
+      await expect(dispatchDoc(["remove", "alice/rev", "--yes"])).rejects.toThrow(/alice\/rev is an agent, not a doc/);
+      expect(existsSync(docFile)).toBe(true);
+      expect(existsSync(agentPath("alice", "rev"))).toBe(true);
+      expect(Object.keys(readLockfile(LOCKFILE_PATH)).sort()).toEqual(["alice/guide", "alice/rev"]);
+    });
+
+    it("legacy skill remove removes an installed doc too", async () => {
+      quiet();
+      fakeRegistry({ "alice/guide": await entry("doc") });
+      await dispatchDoc(["add", "alice/guide"]);
+      await dispatchSkill(["remove", "alice/guide", "--yes"]);
+      expect(existsSync(docFile)).toBe(false);
+      expect(readLockfile(LOCKFILE_PATH)["alice/guide"]).toBeUndefined();
+    });
+
+    it("legacy `ahood skill add` of a doc is still refused before any download, now pointing at doc add", async () => {
+      quiet();
+      const calls = fakeRegistry({ "alice/guide": await entry("doc") });
+      const error = await dispatchSkill(["add", "alice/guide"]).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(UsageError);
+      expect((error as Error).message).toBe(
+        "alice/guide is a doc (a documentation page), not a skill. " +
+          "Install it with `ahood doc add alice/guide`, or read it without installing with `ahood doc read alice/guide`.",
+      );
+      expect(mutations(calls)).toEqual([]);
+      expect(readdirSync(dir)).toEqual([]);
+    });
+
+    it("`ahood skill add --kind doc` installs through the doc scope", async () => {
+      quiet();
+      fakeRegistry({ "alice/guide": await entry("doc") });
+      await dispatchSkill(["add", "alice/guide", "--kind", "doc"]);
+      expect(existsSync(docFile)).toBe(true);
+    });
+
+    it("doc add of a skill, and agent/mcp add of a doc, are refused before any download or write", async () => {
+      quiet();
+      const calls = fakeRegistry({ "alice/pdf": await entry("skill"), "alice/guide": await entry("doc") });
+      await expect(dispatchDoc(["add", "alice/pdf"])).rejects.toThrow(/alice\/pdf is a skill, not a doc -- refusing to install it/);
+      await expect(dispatchAgent(["add", "alice/guide"])).rejects.toThrow(
+        /alice\/guide is a doc, not an agent -- refusing to install it\. Use `ahood doc add alice\/guide` instead\./,
+      );
+      await expect(dispatchMcp(["add", "alice/guide@1.0.0"])).rejects.toThrow(KindMismatchError);
+      expect(mutations(calls)).toEqual([]);
+      expect(readdirSync(dir)).toEqual([]);
+    });
+  });
+
+  describe("read and author verbs work on a doc", () => {
+    it("search asks for ?kind=doc; list asks for the owner's docs only, same --json shape", async () => {
+      const rows = [
+        { slug: "a", name: "A", tagline: null, visibility: "public", kind: "skill", downloads_count: 0, stars_count: 0, profiles: { username: "alice" } },
+        { slug: "g", name: "G", tagline: null, visibility: "public", kind: "doc", downloads_count: 0, stars_count: 0, profiles: { username: "alice" } },
+      ];
+      const calls = fakeRegistry({}, rows);
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await dispatchDoc(["search", "setup"]);
+      expect(new URL(calls[0].url).searchParams.get("kind")).toBe("doc");
+      await dispatchDoc(["list", "--json"]);
+      const listUrl = new URL(calls[1].url);
+      expect(listUrl.searchParams.get("mine")).toBe("true");
+      expect(listUrl.searchParams.get("kind")).toBe("doc");
+      expect(JSON.parse(log.mock.calls.at(-1)![0] as string)).toEqual([rows[1]]);
+    });
+
+    it("read prints the DOC.md content; view, show, versions and diff go through", async () => {
+      quiet();
+      const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const calls = fakeRegistry({ "alice/guide": await entry("doc") });
+      await dispatchDoc(["read", "alice/guide"]);
+      expect(stdout.mock.calls.map((c) => String(c[0])).join("")).toContain("doc");
+      await dispatchDoc(["view", "alice/guide", "--json"]);
+      await dispatchDoc(["show", "alice/guide", "--json"]);
+      await dispatchDoc(["versions", "alice/guide"]);
+      await dispatchDoc(["diff", "alice/guide", "1.0.0", "1.0.0"]);
+      // diff downloads both archives to compare DOC.md; nothing else is sent.
+      expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
+      expect(vi.mocked(console.log)).toHaveBeenCalledWith("DOC.md is unchanged between these versions.");
+    });
+
+    it("edit, star, unstar, share, unshare and unpublish reach their mutation", async () => {
+      quiet();
+      const calls = fakeRegistry({ "alice/guide": await entry("doc") });
+      await dispatchDoc(["edit", "alice/guide", "--tagline", "x"]);
+      await dispatchDoc(["star", "alice/guide"]);
+      await dispatchDoc(["unstar", "alice/guide"]);
+      await dispatchDoc(["share", "alice/guide", "--group", "team"]);
+      await dispatchDoc(["unshare", "alice/guide", "--group", "team"]);
+      await dispatchDoc(["unpublish", "alice/guide", "--yes"]);
+      expect(mutations(calls).map((c) => c.method)).toEqual(["PATCH", "POST", "DELETE", "POST", "DELETE", "DELETE"]);
+    });
+  });
+
+  describe("wrong-kind targets are refused before any mutation, both directions", () => {
+    const verbs: Array<[string, (key: string) => string[]]> = [
+      ["edit", (k) => ["edit", k, "--tagline", "x"]],
+      ["unpublish", (k) => ["unpublish", k, "--yes"]],
+      ["star", (k) => ["star", k]],
+      ["unstar", (k) => ["unstar", k]],
+      ["share", (k) => ["share", k, "--group", "team"]],
+      ["unshare", (k) => ["unshare", k, "--group", "team"]],
+      ["read", (k) => ["read", k]],
+      ["view", (k) => ["view", k, "--json"]],
+      ["versions", (k) => ["versions", k]],
+      ["diff", (k) => ["diff", k, "1.0.0", "1.0.0"]],
+    ];
+    for (const [name, argv] of verbs) {
+      it(`doc ${name} of a skill, and agent/mcp ${name} of a doc`, async () => {
+        quiet();
+        const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+        const calls = fakeRegistry({ "alice/pdf": await entry("skill"), "alice/guide": await entry("doc") });
+        await expect(dispatchDoc(argv("alice/pdf"))).rejects.toThrow(/alice\/pdf is a skill, not a doc -- .* Use `ahood skill /);
+        await expect(dispatchAgent(argv("alice/guide"))).rejects.toThrow(/alice\/guide is a doc, not an agent/);
+        await expect(dispatchMcp(argv("alice/guide"))).rejects.toThrow(KindMismatchError);
+        await expect(dispatchSkill([...argv("alice/guide"), "--kind", "skill"])).rejects.toThrow(KindMismatchError);
+        expect(mutations(calls)).toEqual([]);
+        expect(confirm).not.toHaveBeenCalled();
+        expect(stdout).not.toHaveBeenCalled();
+      });
+    }
+
+    it("doc publish onto an existing skill is refused before init/upload", async () => {
+      quiet();
+      mkdirSync("g");
+      writeFileSync(join("g", "DOC.md"), "---\nname: g\ndescription: d\n---\n");
+      const calls = fakeRegistry({ "alice/pdf": await entry("skill") });
+      await expect(dispatchDoc(["publish", "alice/pdf@1.1.0", "--path", "g"])).rejects.toThrow(
+        /alice\/pdf is a skill, not a doc -- refusing to publish a new version of it/,
+      );
+      expect(mutations(calls)).toEqual([]);
+    });
+  });
+
+  describe("publish", () => {
+    it("doc publish of a new entry creates it with kind doc", async () => {
+      quiet();
+      mkdirSync("g");
+      writeFileSync(join("g", "DOC.md"), "---\nname: g\ndescription: d\n---\n");
+      const calls = fakeRegistry({});
+      await dispatchDoc(["publish", "alice/g@1.0.0", "--path", "g", "--name", "G"]);
+      const create = calls.find((c) => c.method === "POST" && new URL(c.url).pathname === "/api/v1/skills");
+      expect(JSON.parse(create!.body!).kind).toBe("doc");
+    });
+
+    it("doc publish refuses a contradictory --kind and a folder without DOC.md, before any request", async () => {
+      quiet();
+      const calls = fakeRegistry({});
+      await expect(dispatchDoc(["publish", "alice/g@1.0.0", "--kind", "skill"])).rejects.toThrow(/contradicts/);
+      mkdirSync("s");
+      writeFileSync(join("s", "SKILL.md"), "x");
+      await expect(dispatchDoc(["publish", "alice/g@1.0.0", "--path", "s"])).rejects.toThrow(
+        /No DOC.md found .* ahood doc publish must point at a folder containing DOC.md/,
+      );
+      expect(calls).toEqual([]);
+    });
+
+    it("legacy skill publish accepts --kind doc and infers doc from a DOC.md-only folder", async () => {
+      quiet();
+      mkdirSync("g");
+      writeFileSync(join("g", "DOC.md"), "---\nname: g\ndescription: d\n---\n");
+      let calls = fakeRegistry({});
+      await dispatchSkill(["publish", "alice/g@1.0.0", "--path", "g", "--name", "G"]);
+      let create = calls.find((c) => c.method === "POST" && new URL(c.url).pathname === "/api/v1/skills");
+      expect(JSON.parse(create!.body!).kind).toBe("doc");
+      vi.unstubAllGlobals();
+      calls = fakeRegistry({});
+      await dispatchSkill(["publish", "alice/g@1.0.0", "--path", "g", "--name", "G", "--kind", "doc"]);
+      create = calls.find((c) => c.method === "POST" && new URL(c.url).pathname === "/api/v1/skills");
+      expect(JSON.parse(create!.body!).kind).toBe("doc");
+    });
+  });
+
+  describe("init", () => {
+    it("writes a DOC.md the backend's validator accepts and points at doc publish", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await dispatchDoc(["init", "Setup Guide"]);
+      const docMd = readFileSync(join("setup-guide", "DOC.md"), "utf8");
+      expect(backendAcceptsDocMd(docMd)).toBe(true);
+      expect(docMd.startsWith("---\nname: setup-guide\ndescription: ")).toBe(true);
+      expect(log.mock.calls.flat().join("\n")).toContain("ahood doc publish <owner>/<doc>@<version> --path setup-guide");
+
+      rmSync("setup-guide", { recursive: true });
+      await dispatchDoc(["init"]);
+      expect(backendAcceptsDocMd(readFileSync("DOC.md", "utf8"))).toBe(true);
+    });
+
+    it("refuses to overwrite, to mix kinds in one folder, or to escape the project", async () => {
+      quiet();
+      await dispatchDoc(["init", "g"]);
+      const before = readFileSync(join("g", "DOC.md"), "utf8");
+      await expect(dispatchDoc(["init", "g"])).rejects.toThrow(/DOC.md already exists/);
+      expect(readFileSync(join("g", "DOC.md"), "utf8")).toBe(before);
+      await expect(dispatchAgent(["init", "g"])).rejects.toThrow(/already a doc/);
+      expect(existsSync(join("g", "AGENT.md"))).toBe(false);
+      await dispatchSkill(["init", "s", "--kind", "skill"]);
+      await expect(dispatchDoc(["init", "s"])).rejects.toThrow(/already a skill/);
+      expect(existsSync(join("s", "DOC.md"))).toBe(false);
+      await expect(dispatchDoc(["init", "../escape"])).rejects.toThrow(/outside the current directory/);
+      expect(existsSync(join(dir, "..", "escape"))).toBe(false);
     });
   });
 });

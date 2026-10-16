@@ -131,7 +131,8 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "installs instead as a single file at .claude/agents/<owner>@<skill>.md (Claude Code's own subagent " +
       "loader scans .claude/agents/*.md as flat files), not a .claude/skills/ directory. An artifact published " +
       "with --kind mcp installs by merging an entry into .mcp.json instead, prompting for any secret " +
-      "environment variables its server.json declares that aren't already set in your shell.",
+      "environment variables its server.json declares that aren't already set in your shell. A doc is refused " +
+      "here; install it with `ahood doc add`.",
     examples: ["ahood skill add alice/pdf-tools", "ahood skill add alice/pdf-tools@1.2.0"],
   },
   {
@@ -225,19 +226,19 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage:
-      "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+      "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
     summary:
-      "Publish a new version of a skill, agent, or mcp server manifest from a folder containing SKILL.md, AGENT.md, or server.json, creating the skill first if it doesn't already exist.",
+      "Publish a new version of a skill, agent, mcp server manifest, or doc from a folder containing SKILL.md, AGENT.md, server.json, or DOC.md, creating the skill first if it doesn't already exist.",
     desc:
-      "Publish a new version of a skill, agent, or mcp server manifest from a folder containing SKILL.md, AGENT.md, or server.json. If the artifact " +
-      "doesn't exist yet, this creates it first -- pass --name to set its display name, and --kind agent or --kind mcp if " +
-      "publishing an AGENT.md or server.json (auto-detected from the folder contents when only one of SKILL.md/AGENT.md/server.json is present). " +
+      "Publish a new version of a skill, agent, mcp server manifest, or doc from a folder containing SKILL.md, AGENT.md, server.json, or DOC.md. If the artifact " +
+      "doesn't exist yet, this creates it first -- pass --name to set its display name, and --kind agent, --kind mcp, or --kind doc if " +
+      "publishing an AGENT.md, server.json, or DOC.md (auto-detected from the folder contents when only one of SKILL.md/AGENT.md/server.json/DOC.md is present). " +
       "--name is required when creating; optionally also pass --tagline/--tags/--license/--homepage/--repository. " +
       "Processing happens server-side after upload; this command polls and reports the final published/failed status. " +
       "The legacy form `ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted. " +
       "Every flag also accepts the --flag=value form, needed when a value itself starts with --.",
     flags: [
-      "--kind skill|agent|mcp        What kind of artifact this is. Auto-detected from SKILL.md/AGENT.md/server.json when omitted.",
+      "--kind skill|agent|mcp|doc    What kind of artifact this is. Auto-detected from SKILL.md/AGENT.md/server.json/DOC.md when omitted.",
       "--name <text>                 Required only when creating the artifact on this publish.",
       "--tagline <text>              Short one-line description, used only when creating.",
       "--tags <comma,separated>      Initial tags, used only when creating.",
@@ -262,15 +263,22 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
 // rather than hand-copied twice, so the two lists can't drift from each other.
 // SKILL_COMMANDS_HELP above stays hand-written: it documents the legacy,
 // cross-kind behavior `ahood skill` keeps in this release.
+const PLACEHOLDER: Record<Exclude<CliKind, "skill">, string> = { agent: "<agent>", mcp: "<server>", doc: "<doc>" };
+const EXAMPLE: Record<Exclude<CliKind, "skill">, { slug: string; name: string }> = {
+  agent: { slug: "alice/code-reviewer", name: "Code Reviewer" },
+  mcp: { slug: "alice/github-server", name: "GitHub Server" },
+  doc: { slug: "alice/setup-guide", name: "Setup Guide" },
+};
+
 function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
   const info = KINDS[kind];
-  const n = kind === "agent" ? "<agent>" : "<server>";
+  const n = PLACEHOLDER[kind];
   const p = `ahood ${kind}`;
   const label = info.label;
   const a = info.article;
   const plural = info.plural;
   const doc = info.rootDoc;
-  const ex = kind === "agent" ? "alice/code-reviewer" : "alice/github-server";
+  const ex = EXAMPLE[kind].slug;
   const kindRefusal = `Refused, before anything else happens, when the target is not ${a} ${label}.`;
   return [
     {
@@ -407,12 +415,13 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
         "--changelog <text>            What changed in this version.",
         "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure).",
       ],
-      examples: [`${p} publish ${ex}@1.0.0 --name "${kind === "agent" ? "Code Reviewer" : "GitHub Server"}"`],
+      examples: [`${p} publish ${ex}@1.0.0 --name "${EXAMPLE[kind].name}"`],
     },
   ];
 }
 
 export const AGENT_COMMANDS_HELP: CommandHelp[] = registryCommandsHelp("agent");
+export const DOC_COMMANDS_HELP: CommandHelp[] = registryCommandsHelp("doc");
 
 // `ahood mcp` is two things (ADR 0007 in the ahood repo separates the hosted
 // registry MCP endpoint from this CLI's local one): with no verb, or with
@@ -635,6 +644,7 @@ const ENTITY_COMMANDS_HELP: Record<string, CommandHelp[]> = {
   skill: SKILL_COMMANDS_HELP,
   agent: AGENT_COMMANDS_HELP,
   mcp: MCP_COMMANDS_HELP,
+  doc: DOC_COMMANDS_HELP,
   group: GROUP_COMMANDS_HELP,
   snap: SNAP_COMMANDS_HELP,
 };
@@ -765,8 +775,8 @@ export function formatSkillHelp(): string {
     "Legacy, cross-kind: in this release `ahood skill <verb>` still acts on any registry kind",
     "(skills, agents, MCP server manifests) -- `skill list`/`skill search` include every kind, and",
     "`skill add`/`skill update` install whatever kind they resolve. Scripts relying on that keep",
-    "working. For one kind only, use `ahood agent <verb>` / `ahood mcp <verb>`, or add",
-    "`--kind skill|agent|mcp` to any verb below (`--kind all` spells out the legacy behavior).",
+    "working. For one kind only, use `ahood agent|mcp|doc <verb>`, or add",
+    "`--kind skill|agent|mcp|doc` to any verb below (`--kind all` spells out the legacy behavior).",
     "A future major version will make `ahood skill` skills-only.",
     "",
     "Commands:",
@@ -821,9 +831,23 @@ export function formatMcpHelp(): string {
 
 // One entry point for every registry noun's group help, so dispatch and
 // `ahood help <noun>` can't disagree about which listing a noun gets.
+export function formatDocHelp(): string {
+  return formatRegistryKindHelp(
+    "ahood doc -- docs (DOC.md) in the ahood registry",
+    [
+      "Every verb here acts on docs only: a target of another kind is refused before anything",
+      "is downloaded, prompted for, written, or sent. Installs land in .claude/docs/<owner>@<doc>.md.",
+      "To look at a doc without installing it, use `ahood doc read`.",
+    ],
+    DOC_COMMANDS_HELP,
+    "doc",
+  );
+}
+
 export function formatKindHelp(noun: CliKind): string {
   if (noun === "agent") return formatAgentHelp();
   if (noun === "mcp") return formatMcpHelp();
+  if (noun === "doc") return formatDocHelp();
   return formatSkillHelp();
 }
 
@@ -866,6 +890,8 @@ export function formatHelp(): string {
   const mcpGroupUsage = "ahood mcp <command>";
   const mcpGroupSummary =
     "The same verbs, for MCP server manifests only; bare `ahood mcp` or `ahood mcp serve` starts the local MCP server.";
+  const docGroupUsage = "ahood doc <command>";
+  const docGroupSummary = "The same verbs, for docs (DOC.md) only -- run `ahood doc --help` for the full list.";
   const groupGroupUsage = "ahood group <command>";
   const groupGroupSummary =
     "Create private groups and share skills with them -- run `ahood group --help` for the full list.";
@@ -877,6 +903,7 @@ export function formatHelp(): string {
     { usage: skillGroupUsage, summary: skillGroupSummary },
     { usage: agentGroupUsage, summary: agentGroupSummary },
     { usage: mcpGroupUsage, summary: mcpGroupSummary },
+    { usage: docGroupUsage, summary: docGroupSummary },
     { usage: groupGroupUsage, summary: groupGroupSummary },
     { usage: snapGroupUsage, summary: snapGroupSummary },
   ]);
@@ -898,7 +925,7 @@ export function formatHelp(): string {
     "",
     "Run `ahood <command> --help` (or `ahood help <command>`) for a single command's flags and examples.",
     "Run `ahood skill --help` for the full list of skill commands.",
-    "Run `ahood agent --help` / `ahood mcp --help` for the kind-scoped agent and MCP commands.",
+    "Run `ahood agent --help` / `ahood mcp --help` / `ahood doc --help` for the kind-scoped agent, MCP and doc commands.",
     "Run `ahood group --help` for the full list of group commands.",
     "Run `ahood snap --help` for the full list of snap commands.",
     "Run `ahood --version` to print the installed CLI version.",
