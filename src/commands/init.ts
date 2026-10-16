@@ -109,10 +109,31 @@ function buildServerJson(name: string): string {
 `;
 }
 
+// DOC.md, for `ahood doc init` (ahood-cli#182). The backend's publish
+// validator (lib/publish/parse-doc-frontmatter.ts in the ahood repo) is the
+// same hand-rolled flat `key: value` reader as AGENT.md's, minus the skills
+// list: the file must START with a `---` line, the closing `---` line must be
+// followed by a newline, and `name` and `description` must be non-empty. So
+// the same rules as buildAgentMd apply: nothing above the opening `---`, and
+// no colon in a comment line inside the frontmatter.
+function buildDocMd(name: string): string {
+  return `---
+name: ${name}
+description: TODO -- one line saying what this doc covers and when an agent should read it.
+---
+
+# ${name}
+
+TODO -- write the documentation here. Plain Markdown; this whole file, frontmatter
+included, is what \`ahood doc read\` prints and \`ahood doc add\` saves.
+`;
+}
+
 const TEMPLATES: Record<CliKind, (name: string) => string> = {
   skill: buildSkillMd,
   agent: buildAgentMd,
   mcp: buildServerJson,
+  doc: buildDocMd,
 };
 
 const NEXT_STEPS: Record<CliKind, string[]> = {
@@ -123,7 +144,10 @@ const NEXT_STEPS: Record<CliKind, string[]> = {
     '"remotes" with one npm package: "packages": [{"registry_type": "npm", "runtime_hint": "npx",',
     '"identifier": "<npm-package>", "version": "<x.y.z>"}] (plus optional "environment_variables").',
   ],
+  doc: ["Fill in the description, then write the doc below the frontmatter."],
 };
+
+const PLACEHOLDERS: Record<CliKind, string> = { skill: "<skill>", agent: "<agent>", mcp: "<server>", doc: "<doc>" };
 
 // Falls back to "my-skill" when the directory name itself isn't usable as a
 // bare YAML scalar (empty, or starting with a character like "-" or "@" that
@@ -199,6 +223,6 @@ export async function init(args: string[], scope?: KindScope): Promise<void> {
 
   console.log(`Created ${docPath}`);
   for (const line of NEXT_STEPS[kind]) console.log(line);
-  const placeholder = kind === "skill" ? "<skill>" : kind === "agent" ? "<agent>" : "<server>";
+  const placeholder = PLACEHOLDERS[kind];
   console.log(`Run \`ahood ${strict ?? "skill"} publish <owner>/${placeholder}@<version>${name ? ` --path ${name}` : ""}\` when ready.`);
 }

@@ -19,7 +19,11 @@ import { hostname } from "node:os";
 // remove/update (ahood-cli#169) tell an untouched entry from a hand-edited
 // one before deleting or overwriting it. Absent for skill/agent entries,
 // and absent for any mcp entry installed before this field existed.
-export type LockEntry = { version: string; checksum_sha256: string; mcp_config_hash?: string };
+//
+// kind is written only for a doc pin (ahood-cli#182). The other kinds are
+// told apart by what they leave on disk (kinds.ts localInstalledKind), and
+// their pins keep the exact shape they have always had.
+export type LockEntry = { version: string; checksum_sha256: string; mcp_config_hash?: string; kind?: "doc" };
 export type Lockfile = Record<string, LockEntry>;
 
 export function readLockfile(path: string): Lockfile {
@@ -166,6 +170,13 @@ function resolveWriteTarget(path: string): string {
 // file it is creating must get what it asked for regardless of the ambient
 // umask.
 export function writeJsonFileAtomic(path: string, data: unknown, mode?: number): void {
+  writeFileAtomic(path, JSON.stringify(data, null, 2) + "\n", mode);
+}
+
+// The same write-then-rename for raw content. A doc install (ahood-cli#182)
+// writes its DOC.md through this, so an interrupted install never leaves a
+// truncated doc behind.
+export function writeFileAtomic(path: string, content: string | Buffer, mode?: number): void {
   // Resolved before the mkdir so the directory that actually gets created is
   // the resolved target's, not the link's -- a link set up ahead of the first
   // install can point somewhere that doesn't exist yet -- and so that every
@@ -208,7 +219,7 @@ export function writeJsonFileAtomic(path: string, data: unknown, mode?: number):
     // 0600 from the moment of creation: for .mcp.json this temp file holds
     // resolved MCP server secrets, and it must never be world-readable, not
     // even for the instant before the rename (ahood-cli#119).
-    writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+    writeFileSync(tmpPath, content, { mode: 0o600 });
     renameSync(tmpPath, dest);
     try {
       chmodSync(dest, finalMode);

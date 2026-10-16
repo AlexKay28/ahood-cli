@@ -98,6 +98,8 @@ export async function ensureRemoteKind(
 // skill whose directory was deleted by hand) is undefined: unknown, and the
 // caller must ask the registry rather than guess.
 export function localInstalledKind(owner: string, skill: string, entry: LockEntry | undefined): CliKind | undefined {
+  // A doc pin records its kind (ahood-cli#182), the one kind that does.
+  if (entry?.kind === "doc") return "doc";
   const hasDir = existsSync(skillDir(owner, skill));
   const hasAgentFile = existsSync(agentPath(owner, skill));
   if (hasDir && !hasAgentFile) return "skill";
@@ -134,8 +136,8 @@ export function extractKindFlag(args: string[]): { kind: string | undefined; res
 // Resolves the scope for `ahood <noun> <verb> [--kind <k>]`.
 //   skill noun, no --kind or --kind all  -> legacy (cross-kind)
 //   skill noun, --kind <k>               -> strict <k>
-//   agent/mcp noun, no --kind or --kind <same> -> strict <noun>
-//   agent/mcp noun, any other --kind     -> usage error (contradiction)
+//   agent/mcp/doc noun, no --kind or --kind <same> -> strict <noun>
+//   agent/mcp/doc noun, any other --kind     -> usage error (contradiction)
 export function resolveScope(noun: CliKind, kindFlag: string | undefined): KindScope {
   const valid = [...CLI_KINDS, "all"].join(", ");
   if (kindFlag !== undefined && kindFlag !== "all" && !isCliKind(kindFlag)) {

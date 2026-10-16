@@ -163,6 +163,62 @@ describe("agent/mcp command groups are discoverable", () => {
   });
 });
 
+describe("ahood doc command group (ahood-cli#182)", () => {
+  it("`ahood --help` lists `ahood doc <command>`; `ahood doc`, `--help` and `help doc` print doc help", () => {
+    expect(run(["--help"]).stdout.toString()).toContain("ahood doc <command>");
+    for (const args of [["doc"], ["doc", "--help"], ["help", "doc"]]) {
+      const { stdout, status } = run(args);
+      expect(status).toBe(0);
+      const text = stdout.toString();
+      expect(text).toContain("ahood doc -- docs (DOC.md) in the ahood registry");
+      expect(text).toContain("ahood doc read <owner>/<doc>");
+      expect(text).toContain("ahood doc init [name]");
+      expect(text).toContain("ahood doc add <owner>/<doc>[@version]");
+      expect(text).toContain(".claude/docs/<owner>@<doc>.md");
+    }
+    expect(run(["doc", "read", "--help"]).stdout.toString()).toMatch(/^ahood doc read <owner>\/<doc>/);
+    expect(run(["help", "doc", "publish"]).stdout.toString()).toMatch(/^ahood doc publish <owner>\/<doc>@<version>/);
+  });
+
+  it("`ahood doc add alice/..` is refused (exit 2) before any request, writing nothing", () => {
+    const home = mkdtempSync(path.join(tmpdir(), "ahood-doc-home-"));
+    const cwd = mkdtempSync(path.join(tmpdir(), "ahood-doc-cwd-"));
+    try {
+      // Exit 2, not 6: refused before any request to the unreachable registry.
+      const { status, stderr } = run(["doc", "add", "alice/.."], { cwd, env: offlineEnv(home) });
+      expect(status).toBe(2);
+      expect(stderr).toContain('Invalid skill ".."');
+      expect(readdirSync(cwd)).toEqual([]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("an unknown doc verb fails with a suggestion; completion offers doc and all its verbs", () => {
+    const bad = run(["doc", "raed", "x"]);
+    expect(bad.status).toBe(2);
+    expect(bad.stderr).toContain("Unknown doc command: raed");
+    expect(bad.stderr).toContain("Did you mean 'read'?");
+    const bash = run(["completion", "bash"]).stdout.toString();
+    expect(bash).toMatch(/local top_words="[^"]*\bdoc\b/);
+    const docWords = bash.match(/local doc_words="([^"]*)"/)![1].split(" ");
+    expect(docWords).toEqual(
+      expect.arrayContaining(["search", "list", "view", "show", "read", "init", "publish", "add", "update", "outdated", "remove"]),
+    );
+    expect(bash).toMatch(/local help_words="[^"]*\bdoc\b/);
+  });
+
+  it("the self-skill documents the doc group", () => {
+    const content = readFileSync(skillSource, "utf8");
+    expect(content).toContain("ahood doc read");
+    expect(content).toContain("ahood doc add");
+    expect(content).toContain(".claude/docs/<owner>@<doc>.md");
+    expect(content).toContain("DOC.md");
+    expect(content).not.toContain("This CLI has no `doc` group");
+  });
+});
+
 describe("ahood help useme", () => {
   it("prints the bundled SKILL.md byte-for-byte, offline, unauthenticated, writing nothing", () => {
     const home = mkdtempSync(path.join(tmpdir(), "ahood-useme-home-"));
@@ -234,6 +290,13 @@ describe("npm tarball", () => {
       expect(Buffer.compare(stdout, readFileSync(skillSource))).toBe(0);
       expect(run(["--version"], { cli: installedCli }).stdout.toString().trim()).toBe(`@ahood/cli ${packed.version}`);
       expect(existsSync(path.join(cwd, ".claude"))).toBe(false);
+      // ahood-cli#182: the tarball carries the doc group's help and the
+      // self-skill that documents it.
+      expect(stdout.toString()).toContain("ahood doc read");
+      const docHelp = run(["doc", "--help"], { cli: installedCli, cwd, env: offlineEnv(home) });
+      expect(docHelp.status).toBe(0);
+      expect(docHelp.stdout.toString()).toContain("ahood doc -- docs (DOC.md) in the ahood registry");
+      expect(run(["--help"], { cli: installedCli }).stdout.toString()).toContain("ahood doc <command>");
     } finally {
       rmSync(work, { recursive: true, force: true });
     }

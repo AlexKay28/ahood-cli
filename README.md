@@ -189,15 +189,16 @@ Shared alice/pdf-tools with design-team.
 Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private visibility, it just makes it visible to everyone in `design-team` too. On the other side, whoever received the link runs `ahood group join <the link>` to join.
 </details>
 
-## Kinds: skills, agents, and MCP servers
+## Kinds: skills, agents, MCP servers, and docs
 
-The registry holds three kinds of artifact this CLI works with, each with its own command group. All three take the same verbs (`search`, `list`, `view`/`show`, `read`, `versions`, `diff`, `add`, `update`, `outdated`, `remove`, `edit`, `unpublish`, `star`, `unstar`, `share`, `unshare`, `init`, `publish`), run by the same code:
+The registry holds four kinds of artifact, each with its own command group. All four take the same verbs (`search`, `list`, `view`/`show`, `read`, `versions`, `diff`, `add`, `update`, `outdated`, `remove`, `edit`, `unpublish`, `star`, `unstar`, `share`, `unshare`, `init`, `publish`), run by the same code:
 
 | Kind | Root file | `add` installs to | Group |
 | --- | --- | --- | --- |
 | skill | `SKILL.md` | `.claude/skills/<owner>@<skill>/` | `ahood skill <verb>` |
 | agent | `AGENT.md` | `.claude/agents/<owner>@<agent>.md` | `ahood agent <verb>` |
 | mcp | `server.json` | an entry merged into `.mcp.json` | `ahood mcp <verb>` |
+| doc | `DOC.md` | `.claude/docs/<owner>@<doc>.md` | `ahood doc <verb>` |
 
 ```
 $ ahood agent search review
@@ -205,14 +206,16 @@ $ ahood agent init code-reviewer        # ./code-reviewer/AGENT.md
 $ ahood agent publish alice/code-reviewer@1.0.0 --path code-reviewer --name "Code Reviewer"
 $ ahood mcp init github-server          # ./github-server/server.json, a safe placeholder starter
 $ ahood mcp add alice/github-server
+$ ahood doc read alice/setup-guide      # print a doc without installing it
+$ ahood doc add alice/setup-guide       # ./.claude/docs/alice@setup-guide.md, pinned
 $ ahood agent add alice/pdf-tools
 alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood skill add alice/pdf-tools` instead.
 ```
 
-- **`ahood agent` and `ahood mcp` are strict.** A target of another kind is refused -- exit code `2`, naming the kind it found -- before anything is downloaded, prompted for, written, or sent. That covers `add`, `update`, `remove`, `edit`, `unpublish`, `share`/`unshare`, `star`/`unstar`, and `publish` (an existing entry of another kind is refused before anything is packed or uploaded); the read-only verbs refuse too, rather than show the wrong kind. `search` asks the registry for that kind only, `list` keeps only that kind of your own entries, and `update`/`outdated` with no argument consider only installed pins of that kind. `agent publish`/`mcp publish` imply their kind and reject a contradictory `--kind`.
-- **Missing or unexpected kind metadata is refused, never guessed.** If the registry's answer carries no kind (or one this CLI doesn't handle), a kind-scoped command stops with exit `1` and points at the legacy form. `remove` reads the kind from the project's own files (the skill directory, the agent file, or the mcp fingerprint in the lockfile) and asks the registry only when those can't tell; if neither can, nothing is removed.
-- **`ahood skill` is legacy and cross-kind in this release.** `ahood skill search` and `ahood skill list` include every kind, and `ahood skill add`/`update`/`remove`/... act on whatever kind the target is, exactly as before -- including `--json` output and exit codes -- so existing scripts keep working. Add `--kind skill|agent|mcp` to any `ahood skill` verb (except `publish`, whose `--kind` keeps its original meaning) to scope it, or `--kind all` to spell out the cross-kind behavior.
-- **Not in scope: `doc`.** The registry also has a `doc` kind (documentation pages); this CLI has no `ahood doc` group. Kind dispatch is table-driven (`src/kind-info.ts`), so adding one is an entry there plus its help and `init` template.
+- **`ahood agent`, `ahood mcp` and `ahood doc` are strict.** A target of another kind is refused -- exit code `2`, naming the kind it found -- before anything is downloaded, prompted for, written, or sent. That covers `add`, `update`, `remove`, `edit`, `unpublish`, `share`/`unshare`, `star`/`unstar`, and `publish` (an existing entry of another kind is refused before anything is packed or uploaded); the read-only verbs refuse too, rather than show the wrong kind. `search` asks the registry for that kind only, `list` keeps only that kind of your own entries, and `update`/`outdated` with no argument consider only installed pins of that kind. `agent publish`/`mcp publish`/`doc publish` imply their kind and reject a contradictory `--kind`.
+- **Missing or unexpected kind metadata is refused, never guessed.** If the registry's answer carries no kind (or one this CLI doesn't handle), a kind-scoped command stops with exit `1` and points at the legacy form. `remove` reads the kind from the project's own files (the skill directory, the agent file, the mcp fingerprint in the lockfile, or a doc pin's recorded `kind`) and asks the registry only when those can't tell; if neither can, nothing is removed.
+- **`ahood skill` is legacy and cross-kind in this release.** `ahood skill search` and `ahood skill list` include every kind, and `ahood skill add`/`update`/`remove`/... act on whatever kind the target is, exactly as before -- including `--json` output and exit codes -- so existing scripts keep working. The one exception is a doc: `ahood skill add` refuses it and points at `ahood doc add`. Add `--kind skill|agent|mcp|doc` to any `ahood skill` verb (except `publish`, whose `--kind` keeps its original meaning) to scope it, or `--kind all` to spell out the cross-kind behavior.
+- **Docs install as one pinned file.** `ahood doc add` saves a doc's `DOC.md` to `.claude/docs/<owner>@<doc>.md` and pins it in `.claude/skills.lock.json` with `"kind": "doc"`. It refuses to overwrite a file at that path that isn't pinned as that doc. `ahood doc update`/`outdated`/`remove` manage those pins like any other kind. Kind dispatch is table-driven (`src/kind-info.ts`).
 
 **Migration plan for a strict `ahood skill`.** A future major version will make `ahood skill <verb>` skills-only by default, matching `agent` and `mcp`. Until then: (1) this release adds the strict groups and `--kind`, and labels `ahood skill` as legacy in `--help`; (2) a following minor release prints a stderr deprecation note when an `ahood skill` command actually touches a non-skill entry (stdout and `--json` unchanged); (3) the major release flips the default, keeping `ahood skill <verb> --kind all` as the explicit cross-kind escape hatch. Scripts that want today's behavior forever can pass `--kind all` now.
 
@@ -257,7 +260,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood skill share <owner>/<skill> --group <group>` | Share a skill you own with a group, without changing its public/private visibility. |
 | `ahood skill unshare <owner>/<skill> --group <group>` | Stop sharing a skill you own with a group. |
 | `ahood skill init [name]` | Scaffold a new skill folder with a minimal, valid SKILL.md. |
-| `ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill\|agent\|mcp] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of a skill, agent, or mcp server manifest from a folder containing SKILL.md, AGENT.md, or server.json, creating the skill first if it doesn't already exist. |
+| `ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill\|agent\|mcp\|doc] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of a skill, agent, mcp server manifest, or doc from a folder containing SKILL.md, AGENT.md, server.json, or DOC.md, creating the skill first if it doesn't already exist. |
 
 ### Agent
 
@@ -306,6 +309,29 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood mcp unshare <owner>/<server> --group <group>` | Stop sharing an MCP server manifest you own with a group. |
 | `ahood mcp init [name]` | Scaffold a new MCP server manifest folder with a minimal, valid server.json. |
 | `ahood mcp publish <owner>/<server>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of an MCP server manifest from a folder containing server.json, creating it first if it doesn't exist yet. |
+
+### Doc
+
+| Command | What it does |
+| --- | --- |
+| `ahood doc search <query> [--json] [--limit <n>]` | Search published docs. |
+| `ahood doc view\|show <owner>/<doc> [--json] [--web]` | Show a single doc's details without installing it (alias: ahood doc show). |
+| `ahood doc read <owner>/<doc> [--json]` | Print a published doc's DOC.md, without installing it. |
+| `ahood doc versions <owner>/<doc> [--json]` | List a doc's published-version history. |
+| `ahood doc diff <owner>/<doc> <versionA> <versionB> [--json]` | Show what changed between two published versions of a doc. |
+| `ahood doc list [--json]` | List your own docs, public and private. |
+| `ahood doc add <owner>/<doc>[@version]` | Install a doc into .claude/docs/<owner>@<doc>.md, pinned in the lockfile. |
+| `ahood doc update [<owner>/<doc> ...] [--dry-run] [--json]` | Move doc pins forward to the latest version. |
+| `ahood doc outdated [<owner>/<doc> ...] [--json]` | Read-only staleness check for installed docs. |
+| `ahood doc remove <owner>/<doc> [--yes]` | Uninstall and unpin a doc (local only, prompts unless --yes is passed). |
+| `ahood doc edit <owner>/<doc> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a doc you own, changing only the flags you pass. |
+| `ahood doc unpublish <owner>/<doc>[@version] [--yes]` | Delete a doc from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
+| `ahood doc star <owner>/<doc>` | Star a doc. |
+| `ahood doc unstar <owner>/<doc>` | Remove your star from a doc. |
+| `ahood doc share <owner>/<doc> --group <group>` | Share a doc you own with a group, without changing its visibility. |
+| `ahood doc unshare <owner>/<doc> --group <group>` | Stop sharing a doc you own with a group. |
+| `ahood doc init [name]` | Scaffold a new doc folder with a minimal, valid DOC.md. |
+| `ahood doc publish <owner>/<doc>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of a doc from a folder containing DOC.md, creating it first if it doesn't exist yet. |
 
 ### Group
 

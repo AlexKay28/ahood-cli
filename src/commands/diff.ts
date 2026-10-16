@@ -2,7 +2,7 @@ import { createPatch } from "diff";
 import { fetchVersionMeta, downloadVerifiedArchive, extractSingleFileContent, type VersionMeta } from "./add.js";
 import { parseOwnerSkill, SEMVER_RE } from "../spec.js";
 import { UsageError } from "../usage-error.js";
-import { assertKind, type KindScope } from "../kinds.js";
+import { assertKind, isCliKind, KINDS, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill diff <owner>/<skill> <versionA> <versionB> [--json]";
 
@@ -23,12 +23,16 @@ function validateVersion(version: string, spec: string): void {
 // SKILL.md's presence from the manifest we already fetched -- checked
 // up front so a missing file produces a clean message instead of
 // extractSingleFileContent's generic "not found in the downloaded archive".
-async function fetchSkillMdContent(owner: string, skill: string, meta: VersionMeta): Promise<string> {
-  if (!meta.manifest.some((f) => f.path === "SKILL.md" || f.path === "./SKILL.md")) {
-    throw new Error(`${owner}/${skill}@${meta.version} has no SKILL.md in its manifest.`);
+//
+// The file is the entry's root document (ahood-cli#182): SKILL.md for a skill
+// or an entry with no kind (unchanged), AGENT.md, server.json or DOC.md for
+// the other kinds, which have no SKILL.md to diff.
+async function fetchSkillMdContent(owner: string, skill: string, meta: VersionMeta, rootDoc: string): Promise<string> {
+  if (!meta.manifest.some((f) => f.path === rootDoc || f.path === `./${rootDoc}`)) {
+    throw new Error(`${owner}/${skill}@${meta.version} has no ${rootDoc} in its manifest.`);
   }
   const buffer = await downloadVerifiedArchive(owner, skill, meta);
-  const content = await extractSingleFileContent(buffer, "SKILL.md");
+  const content = await extractSingleFileContent(buffer, rootDoc);
   return content.toString("utf-8");
 }
 
@@ -45,14 +49,15 @@ function diffManifests(
   manifestA: VersionMeta["manifest"],
   manifestB: VersionMeta["manifest"],
   skillMdChanged: boolean,
+  rootDoc: string,
 ): ManifestDiff {
   const pathsA = new Set(manifestA.map((f) => f.path));
   const pathsB = new Set(manifestB.map((f) => f.path));
   const added = [...pathsB].filter((p) => !pathsA.has(p)).sort();
   const removed = [...pathsA].filter((p) => !pathsB.has(p)).sort();
   const changed: string[] = [];
-  if (skillMdChanged && pathsA.has("SKILL.md") && pathsB.has("SKILL.md")) {
-    changed.push("SKILL.md");
+  if (skillMdChanged && pathsA.has(rootDoc) && pathsB.has(rootDoc)) {
+    changed.push(rootDoc);
   }
   return { added, removed, changed };
 }
@@ -74,14 +79,18 @@ export async function diff(args: string[], scope?: KindScope): Promise<void> {
   // Both version responses carry the entry's kind; checked before either archive is downloaded.
   assertKind(scope, `${owner}/${skill}`, metaA.kind, "diff", "diff");
 
+  const rootDoc = isCliKind(metaA.kind) ? KINDS[metaA.kind].rootDoc : "SKILL.md";
+
   const [contentA, contentB] = await Promise.all([
-    fetchSkillMdContent(owner, skill, metaA),
-    fetchSkillMdContent(owner, skill, metaB),
+    fetchSkillMdContent(owner, skill, metaA, rootDoc),
+    fetchSkillMdContent(owner, skill, metaB, rootDoc),
   ]);
 
-  const skillmdDiff = createPatch("SKILL.md", contentA, contentB, versionA, versionB);
+  // The --json key stays `skillmd_diff` whatever the root document is, so
+  // the output shape never changes.
+  const skillmdDiff = createPatch(rootDoc, contentA, contentB, versionA, versionB);
   const skillMdChanged = contentA !== contentB;
-  const manifest = diffManifests(metaA.manifest, metaB.manifest, skillMdChanged);
+  const manifest = diffManifests(metaA.manifest, metaB.manifest, skillMdChanged, rootDoc);
 
   if (jsonOutput) {
     console.log(JSON.stringify({ skillmd_diff: skillMdChanged ? skillmdDiff : "", manifest }));
@@ -93,7 +102,7 @@ export async function diff(args: string[], scope?: KindScope): Promise<void> {
   if (skillMdChanged) {
     console.log(skillmdDiff);
   } else {
-    console.log("SKILL.md is unchanged between these versions.");
+    console.log(`${rootDoc} is unchanged between these versions.`);
   }
 
   const summaryParts: string[] = [];

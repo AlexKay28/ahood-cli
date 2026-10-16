@@ -359,7 +359,7 @@ describe("add", () => {
     const archive = await tarGz({ "README.md": "# a doc\n" });
     const calls = stubApi(archive, sha256(archive), [{ path: "README.md" }], VERSION, "doc");
 
-    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/is a doc .*no local install target.*ahood skill read/);
+    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/is a doc .*not a skill.*ahood doc add/);
 
     expect(calls.some((c) => c.includes("/download"))).toBe(false);
     expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);

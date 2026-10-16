@@ -131,3 +131,18 @@ export function agentPath(owner: string, skill: string): string {
 // file isn't under .claude/ at all, since it's a convention MCP clients
 // broadly share, not one specific to this CLI).
 export const MCP_CONFIG_PATH = ".mcp.json";
+
+// A doc installs as one flat file, .claude/docs/<owner>@<doc>.md
+// (ahood-cli#182), the same "@"-joined shape as agentPath above. Unlike
+// agentPath, both segments are validated again here: callers have already
+// parsed them through parseOwnerSkill, but this is the path a doc install
+// writes to, so the SEGMENT_RE containment is enforced where the path is
+// built too. `alice/..` can never resolve outside .claude/docs/.
+export const DOCS_ROOT = join(".claude", "docs");
+
+export function docPath(owner: string, doc: string): string {
+  const spec = `${owner}/${doc}`;
+  validateSegment(owner, "owner", spec);
+  validateSegment(doc, "skill", spec);
+  return join(DOCS_ROOT, `${owner}@${doc}.md`);
+}
