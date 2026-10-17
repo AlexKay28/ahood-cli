@@ -37,6 +37,7 @@ const {
   AGENT_COMMANDS_HELP,
   MCP_COMMANDS_HELP,
   DOC_COMMANDS_HELP,
+  PROJECT_COMMANDS_HELP,
   GROUP_COMMANDS_HELP,
   SNAP_COMMANDS_HELP,
   usageWithAliases,
@@ -60,7 +61,7 @@ function renderTable(entries) {
 // whoami/token/completion/help) stay flat; registry commands are reached as
 // `ahood skill <verb>` (legacy, cross-kind), `ahood agent <verb>`, and
 // `ahood mcp <verb>` (which also holds the local MCP server, ahood-cli#172),
-// and `ahood doc <verb>` (ahood-cli#182);
+// `ahood doc <verb>` (ahood-cli#182), and `ahood project <verb>` (#185);
 // group-entity commands as `ahood group <verb>`; snap-entity commands as
 // `ahood snap <verb>`.
 function renderTables() {
@@ -84,6 +85,10 @@ function renderTables() {
     "### Doc",
     "",
     renderTable(DOC_COMMANDS_HELP),
+    "",
+    "### Project",
+    "",
+    renderTable(PROJECT_COMMANDS_HELP),
     "",
     "### Group",
     "",

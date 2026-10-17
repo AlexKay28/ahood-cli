@@ -6,8 +6,8 @@ import { apiJson } from "./http.js";
 import { agentPath, skillDir } from "./spec.js";
 import type { LockEntry } from "./lockfile.js";
 import { UsageError } from "./usage-error.js";
-import { KINDS, CLI_KINDS, isCliKind, type CliKind } from "./kind-info.js";
-export { KINDS, CLI_KINDS, isCliKind, type CliKind };
+import { KINDS, CLI_KINDS, isCliKind, isPinnedFileKind, type CliKind, type PinnedFileKind } from "./kind-info.js";
+export { KINDS, CLI_KINDS, isCliKind, isPinnedFileKind, type CliKind, type PinnedFileKind };
 
 // The scope a registry verb runs under.
 //
@@ -98,8 +98,8 @@ export async function ensureRemoteKind(
 // skill whose directory was deleted by hand) is undefined: unknown, and the
 // caller must ask the registry rather than guess.
 export function localInstalledKind(owner: string, skill: string, entry: LockEntry | undefined): CliKind | undefined {
-  // A doc pin records its kind (ahood-cli#182), the one kind that does.
-  if (entry?.kind === "doc") return "doc";
+  // A doc or project pin records its kind (ahood-cli#182, #185).
+  if (isPinnedFileKind(entry?.kind)) return entry.kind;
   const hasDir = existsSync(skillDir(owner, skill));
   const hasAgentFile = existsSync(agentPath(owner, skill));
   if (hasDir && !hasAgentFile) return "skill";
@@ -136,8 +136,8 @@ export function extractKindFlag(args: string[]): { kind: string | undefined; res
 // Resolves the scope for `ahood <noun> <verb> [--kind <k>]`.
 //   skill noun, no --kind or --kind all  -> legacy (cross-kind)
 //   skill noun, --kind <k>               -> strict <k>
-//   agent/mcp/doc noun, no --kind or --kind <same> -> strict <noun>
-//   agent/mcp/doc noun, any other --kind     -> usage error (contradiction)
+//   any other noun, no --kind or --kind <same> -> strict <noun>
+//   any other noun, any other --kind           -> usage error (contradiction)
 export function resolveScope(noun: CliKind, kindFlag: string | undefined): KindScope {
   const valid = [...CLI_KINDS, "all"].join(", ");
   if (kindFlag !== undefined && kindFlag !== "all" && !isCliKind(kindFlag)) {

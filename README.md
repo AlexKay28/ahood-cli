@@ -189,9 +189,9 @@ Shared alice/pdf-tools with design-team.
 Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private visibility, it just makes it visible to everyone in `design-team` too. On the other side, whoever received the link runs `ahood group join <the link>` to join.
 </details>
 
-## Kinds: skills, agents, MCP servers, and docs
+## Kinds: skills, agents, MCP servers, docs, and project guides
 
-The registry holds four kinds of artifact, each with its own command group. All four take the same verbs (`search`, `list`, `view`/`show`, `read`, `versions`, `diff`, `add`, `update`, `outdated`, `remove`, `edit`, `unpublish`, `star`, `unstar`, `share`, `unshare`, `init`, `publish`), run by the same code:
+The registry holds five kinds of artifact, each with its own command group. All five take the same verbs (`search`, `list`, `view`/`show`, `read`, `versions`, `diff`, `add`, `update`, `outdated`, `remove`, `edit`, `unpublish`, `star`, `unstar`, `share`, `unshare`, `init`, `publish`), run by the same code:
 
 | Kind | Root file | `add` installs to | Group |
 | --- | --- | --- | --- |
@@ -199,6 +199,7 @@ The registry holds four kinds of artifact, each with its own command group. All 
 | agent | `AGENT.md` | `.claude/agents/<owner>@<agent>.md` | `ahood agent <verb>` |
 | mcp | `server.json` | an entry merged into `.mcp.json` | `ahood mcp <verb>` |
 | doc | `DOC.md` | `.claude/docs/<owner>@<doc>.md` | `ahood doc <verb>` |
+| project | `PROJECT.md` | `.claude/project.md` (one per repository) | `ahood project <verb>` |
 
 ```
 $ ahood agent search review
@@ -208,14 +209,18 @@ $ ahood mcp init github-server          # ./github-server/server.json, a safe pl
 $ ahood mcp add alice/github-server
 $ ahood doc read alice/setup-guide      # print a doc without installing it
 $ ahood doc add alice/setup-guide       # ./.claude/docs/alice@setup-guide.md, pinned
+$ ahood project                         # project guides for this repo's git remote
+$ ahood project add alice/acme-api      # ./.claude/project.md, pinned
+$ ahood project init acme-api           # ./acme-api/PROJECT.md, `project:` filled from git origin
 $ ahood agent add alice/pdf-tools
 alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood skill add alice/pdf-tools` instead.
 ```
 
-- **`ahood agent`, `ahood mcp` and `ahood doc` are strict.** A target of another kind is refused -- exit code `2`, naming the kind it found -- before anything is downloaded, prompted for, written, or sent. That covers `add`, `update`, `remove`, `edit`, `unpublish`, `share`/`unshare`, `star`/`unstar`, and `publish` (an existing entry of another kind is refused before anything is packed or uploaded); the read-only verbs refuse too, rather than show the wrong kind. `search` asks the registry for that kind only, `list` keeps only that kind of your own entries, and `update`/`outdated` with no argument consider only installed pins of that kind. `agent publish`/`mcp publish`/`doc publish` imply their kind and reject a contradictory `--kind`.
-- **Missing or unexpected kind metadata is refused, never guessed.** If the registry's answer carries no kind (or one this CLI doesn't handle), a kind-scoped command stops with exit `1` and points at the legacy form. `remove` reads the kind from the project's own files (the skill directory, the agent file, the mcp fingerprint in the lockfile, or a doc pin's recorded `kind`) and asks the registry only when those can't tell; if neither can, nothing is removed.
-- **`ahood skill` is legacy and cross-kind in this release.** `ahood skill search` and `ahood skill list` include every kind, and `ahood skill add`/`update`/`remove`/... act on whatever kind the target is, exactly as before -- including `--json` output and exit codes -- so existing scripts keep working. The one exception is a doc: `ahood skill add` refuses it and points at `ahood doc add`. Add `--kind skill|agent|mcp|doc` to any `ahood skill` verb (except `publish`, whose `--kind` keeps its original meaning) to scope it, or `--kind all` to spell out the cross-kind behavior.
+- **`ahood agent`, `ahood mcp`, `ahood doc` and `ahood project` are strict.** A target of another kind is refused -- exit code `2`, naming the kind it found -- before anything is downloaded, prompted for, written, or sent. That covers `add`, `update`, `remove`, `edit`, `unpublish`, `share`/`unshare`, `star`/`unstar`, and `publish` (an existing entry of another kind is refused before anything is packed or uploaded); the read-only verbs refuse too, rather than show the wrong kind. `search` asks the registry for that kind only, `list` keeps only that kind of your own entries, and `update`/`outdated` with no argument consider only installed pins of that kind. `agent publish`/`mcp publish`/`doc publish`/`project publish` imply their kind and reject a contradictory `--kind`.
+- **Missing or unexpected kind metadata is refused, never guessed.** If the registry's answer carries no kind (or one this CLI doesn't handle), a kind-scoped command stops with exit `1` and points at the legacy form. `remove` reads the kind from the project's own files (the skill directory, the agent file, the mcp fingerprint in the lockfile, or a doc or project pin's recorded `kind`) and asks the registry only when those can't tell; if neither can, nothing is removed.
+- **`ahood skill` is legacy and cross-kind in this release.** `ahood skill search` and `ahood skill list` include every kind, and `ahood skill add`/`update`/`remove`/... act on whatever kind the target is, exactly as before -- including `--json` output and exit codes -- so existing scripts keep working. The exceptions are a doc and a project guide: `ahood skill add` refuses them and points at `ahood doc add` / `ahood project add`. Add `--kind skill|agent|mcp|doc|project` to any `ahood skill` verb (except `publish`, whose `--kind` keeps its original meaning) to scope it, or `--kind all` to spell out the cross-kind behavior.
 - **Docs install as one pinned file.** `ahood doc add` saves a doc's `DOC.md` to `.claude/docs/<owner>@<doc>.md` and pins it in `.claude/skills.lock.json` with `"kind": "doc"`. It refuses to overwrite a file at that path that isn't pinned as that doc. `ahood doc update`/`outdated`/`remove` manage those pins like any other kind. Kind dispatch is table-driven (`src/kind-info.ts`).
+- **A project guide is one pinned file per repository.** `ahood project add` saves the guide's `PROJECT.md` to `.claude/project.md` and pins it with `"kind": "project"`. It never touches `CLAUDE.md` or `AGENTS.md` (point those at `.claude/project.md` yourself), refuses to overwrite an unpinned `.claude/project.md`, and refuses a second guide while another is pinned (`ahood project remove` it first). `ahood project init` fills the optional `project` frontmatter field from `git remote get-url origin`, normalized to `host/owner/repo` exactly as the registry does (credentials stripped; `--project <remote>` or `--no-project` to override). Bare `ahood project` lists the guides you can see for this repository's remote, through the hosted `get_project_guide` MCP tool.
 
 **Migration plan for a strict `ahood skill`.** A future major version will make `ahood skill <verb>` skills-only by default, matching `agent` and `mcp`. Until then: (1) this release adds the strict groups and `--kind`, and labels `ahood skill` as legacy in `--help`; (2) a following minor release prints a stderr deprecation note when an `ahood skill` command actually touches a non-skill entry (stdout and `--json` unchanged); (3) the major release flips the default, keeping `ahood skill <verb> --kind all` as the explicit cross-kind escape hatch. Scripts that want today's behavior forever can pass `--kind all` now.
 
@@ -260,7 +265,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood skill share <owner>/<skill> --group <group>` | Share a skill you own with a group, without changing its public/private visibility. |
 | `ahood skill unshare <owner>/<skill> --group <group>` | Stop sharing a skill you own with a group. |
 | `ahood skill init [name]` | Scaffold a new skill folder with a minimal, valid SKILL.md. |
-| `ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill\|agent\|mcp\|doc] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of a skill, agent, mcp server manifest, or doc from a folder containing SKILL.md, AGENT.md, server.json, or DOC.md, creating the skill first if it doesn't already exist. |
+| `ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill\|agent\|mcp\|doc\|project] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of a skill, agent, mcp server manifest, doc, or project guide from a folder containing SKILL.md, AGENT.md, server.json, DOC.md, or PROJECT.md, creating the skill first if it doesn't already exist. |
 
 ### Agent
 
@@ -332,6 +337,30 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood doc unshare <owner>/<doc> --group <group>` | Stop sharing a doc you own with a group. |
 | `ahood doc init [name]` | Scaffold a new doc folder with a minimal, valid DOC.md. |
 | `ahood doc publish <owner>/<doc>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of a doc from a folder containing DOC.md, creating it first if it doesn't exist yet. |
+
+### Project
+
+| Command | What it does |
+| --- | --- |
+| `ahood project [--remote <git-remote>] [--json]` | List the project guides you can see for this repository's git remote. |
+| `ahood project search <query> [--json] [--limit <n>]` | Search published project guides. |
+| `ahood project view\|show <owner>/<slug> [--json] [--web]` | Show a single project guide's details without installing it (alias: ahood project show). |
+| `ahood project read <owner>/<slug> [--json]` | Print a published project guide's PROJECT.md, without installing it. |
+| `ahood project versions <owner>/<slug> [--json]` | List a project guide's published-version history. |
+| `ahood project diff <owner>/<slug> <versionA> <versionB> [--json]` | Show what changed between two published versions of a project guide. |
+| `ahood project list [--json]` | List your own project guides, public and private. |
+| `ahood project add <owner>/<slug>[@version]` | Install a project guide into .claude/project.md, pinned in the lockfile. |
+| `ahood project update [<owner>/<slug> ...] [--dry-run] [--json]` | Move project guide pins forward to the latest version. |
+| `ahood project outdated [<owner>/<slug> ...] [--json]` | Read-only staleness check for installed project guides. |
+| `ahood project remove <owner>/<slug> [--yes]` | Uninstall and unpin a project guide (local only, prompts unless --yes is passed). |
+| `ahood project edit <owner>/<slug> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a project guide you own, changing only the flags you pass. |
+| `ahood project unpublish <owner>/<slug>[@version] [--yes]` | Delete a project guide from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
+| `ahood project star <owner>/<slug>` | Star a project guide. |
+| `ahood project unstar <owner>/<slug>` | Remove your star from a project guide. |
+| `ahood project share <owner>/<slug> --group <group>` | Share a project guide you own with a group, without changing its visibility. |
+| `ahood project unshare <owner>/<slug> --group <group>` | Stop sharing a project guide you own with a group. |
+| `ahood project init [name] [--project <git-remote> \| --no-project]` | Scaffold a new project guide folder with a minimal, valid PROJECT.md. |
+| `ahood project publish <owner>/<slug>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of a project guide from a folder containing PROJECT.md, creating it first if it doesn't exist yet. |
 
 ### Group
 

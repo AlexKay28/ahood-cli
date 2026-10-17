@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { UsageError } from "../usage-error.js";
 import { CLI_KINDS, KINDS, strictKind, type CliKind, type KindScope } from "../kinds.js";
+import { flagValue } from "../flags.js";
+import { detectProjectRemote, normalizeProjectRemote } from "../project-remote.js";
 
 const USAGE = "Usage: ahood skill init [name]";
 
@@ -129,11 +131,29 @@ included, is what \`ahood doc read\` prints and \`ahood doc add\` saves.
 `;
 }
 
-const TEMPLATES: Record<CliKind, (name: string) => string> = {
+// PROJECT.md, for `ahood project init` (ahood-cli#185). The backend's
+// validator (lib/publish/parse-project-frontmatter.ts) is DOC.md's flat
+// reader plus one optional field, `project`: a git remote, normalized there
+// to host/owner/repo. It is written already normalized, or left out.
+function buildProjectMd(name: string, project?: string): string {
+  return `---
+name: ${name}
+description: TODO -- one line saying which repository this guide is for and when an agent should read it.
+${project ? `project: ${project}\n` : ""}---
+
+# ${name}
+
+TODO -- how to work in this repository: conventions, how to verify a change, and the
+traps. Plain Markdown; \`ahood project add\` saves this whole file to .claude/project.md.
+`;
+}
+
+const TEMPLATES: Record<CliKind, (name: string, project?: string) => string> = {
   skill: buildSkillMd,
   agent: buildAgentMd,
   mcp: buildServerJson,
   doc: buildDocMd,
+  project: buildProjectMd,
 };
 
 const NEXT_STEPS: Record<CliKind, string[]> = {
@@ -145,9 +165,36 @@ const NEXT_STEPS: Record<CliKind, string[]> = {
     '"identifier": "<npm-package>", "version": "<x.y.z>"}] (plus optional "environment_variables").',
   ],
   doc: ["Fill in the description, then write the doc below the frontmatter."],
+  project: ["Fill in the description, then write the guide below the frontmatter."],
 };
 
-const PLACEHOLDERS: Record<CliKind, string> = { skill: "<skill>", agent: "<agent>", mcp: "<server>", doc: "<doc>" };
+// `project init`'s flags for the `project` field (ahood-cli#185), parsed and
+// validated up front: --project <remote> sets it, --no-project leaves it out.
+// A rejected remote is not echoed, since it can carry a token.
+type ProjectFlags = { rest: string[]; explicit?: string; skip: boolean };
+
+function parseProjectFlags(args: string[]): ProjectFlags {
+  const raw = flagValue(args, "--project");
+  const skip = args.includes("--no-project");
+  if (skip && raw !== undefined) throw new UsageError("Pass --project <remote> or --no-project, not both.");
+  const rest = args.filter(
+    (a, i) => a !== "--no-project" && a !== "--project" && !a.startsWith("--project=") && args[i - 1] !== "--project",
+  );
+  if (raw === undefined) return { rest, skip };
+  const normalized = normalizeProjectRemote(raw);
+  if (!normalized.ok) throw new UsageError(`--project is ${normalized.reason}.`);
+  return { rest, explicit: normalized.value, skip };
+}
+
+// The field's value: the flags' choice, else this repository's origin. Only
+// the normalized remote is ever printed or written.
+function resolveProjectField(flags: ProjectFlags): string | undefined {
+  if (flags.skip) return undefined;
+  if (flags.explicit !== undefined) return flags.explicit;
+  const detected = detectProjectRemote();
+  if (detected) console.log(`Filled project: ${detected} (from \`git remote get-url origin\`; pass --no-project to leave it out).`);
+  return detected;
+}
 
 // Falls back to "my-skill" when the directory name itself isn't usable as a
 // bare YAML scalar (empty, or starting with a character like "-" or "@" that
@@ -161,6 +208,8 @@ function skillNameFor(dirPath: string, fallback = "my-skill"): string {
 export async function init(args: string[], scope?: KindScope): Promise<void> {
   const strict = strictKind(scope);
   const kind: CliKind = strict ?? "skill";
+  const projectFlags = kind === "project" ? parseProjectFlags(args) : undefined;
+  if (projectFlags) args = projectFlags.rest;
   let name = args[0];
   if (name !== undefined && name.startsWith("-")) throw new UsageError(USAGE);
 
@@ -218,11 +267,12 @@ export async function init(args: string[], scope?: KindScope): Promise<void> {
     }
   }
 
+  const project = projectFlags ? resolveProjectField(projectFlags) : undefined;
   mkdirSync(targetDir, { recursive: true });
-  writeFileSync(docPath, TEMPLATES[kind](name ?? skillNameFor(targetDir, `my-${kind}`)));
+  writeFileSync(docPath, TEMPLATES[kind](name ?? skillNameFor(targetDir, `my-${kind}`), project));
 
   console.log(`Created ${docPath}`);
   for (const line of NEXT_STEPS[kind]) console.log(line);
-  const placeholder = PLACEHOLDERS[kind];
+  const placeholder = KINDS[kind].placeholder;
   console.log(`Run \`ahood ${strict ?? "skill"} publish <owner>/${placeholder}@<version>${name ? ` --path ${name}` : ""}\` when ready.`);
 }
