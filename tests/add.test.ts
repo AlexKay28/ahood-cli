@@ -422,17 +422,29 @@ describe("add", () => {
     expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
   });
 
-  it("uses the FIRST matching entry when an archive has two entries at the same normalized name, matching the server's files.find(...) lookup", async () => {
+  it("refuses an agent archive with two entries at the same canonical name instead of picking one (AlexKay28/ahood#792)", async () => {
     const archive = await tarGzEntries([
       ["AGENT.md", "# first\n"],
       ["AGENT.md", "# second\n"],
     ]);
     stubApi(archive, sha256(archive), [{ path: "AGENT.md" }], VERSION, "agent");
 
-    await add([`${OWNER}/${SKILL}`]);
+    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/more than one entry for "AGENT.md"/);
+    expect(existsSync(join(dir, agentPath(OWNER, SKILL)))).toBe(false);
+    expect(existsSync(join(dir, LOCKFILE_PATH))).toBe(false);
+  });
 
-    const dest = join(dir, agentPath(OWNER, SKILL));
-    expect(readFileSync(dest, "utf-8")).toBe("# first\n");
+  it("refuses a skill archive hiding a ././SKILL.md duplicate and installs nothing (AlexKay28/ahood#792)", async () => {
+    // The server reads the FIRST SKILL.md; the old extractor wrote the LAST.
+    const archive = await tarGzEntries([
+      ["SKILL.md", "# reviewed\n"],
+      ["././SKILL.md", "# hidden\n"],
+    ]);
+    stubApi(archive, sha256(archive));
+
+    await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/unsafe archive entry/);
+    expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
+    expect(existsSync(join(dir, LOCKFILE_PATH))).toBe(false);
   });
 
   it("does not print the scripts/ warning for an agent install, even if the manifest lists a scripts/ path", async () => {

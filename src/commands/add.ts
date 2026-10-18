@@ -16,6 +16,7 @@ import {
 } from "../lockfile.js";
 import { promptSecret } from "../secret-prompt.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
+import { assertCanonicalEntryPaths, tarEntryPath } from "../archive-entries.js";
 import { UsageError } from "../usage-error.js";
 import { assertKind, describeKind, isPinnedFileKind, KINDS, strictKind, type CliKind, type KindScope, type PinnedFileKind } from "../kinds.js";
 
@@ -131,6 +132,11 @@ export async function extractTarGz(buffer: Buffer, destDir: string): Promise<voi
     );
   }
 
+  // Every entry path is canonical and unique before the first write
+  // (AlexKay28/ahood#792): otherwise `././SKILL.md` lands on SKILL.md and the
+  // last of the two wins, while the server validated the first.
+  await assertCanonicalEntryPaths(decompressed);
+
   const extract = tarStream.extract();
   const resolvedDest = resolve(destDir);
   let entryCount = 0;
@@ -152,7 +158,7 @@ export async function extractTarGz(buffer: Buffer, destDir: string): Promise<voi
       // segments (and, on Windows, drive-absolute and backslash-separated
       // names) so the comparison catches every escape shape, not just a
       // literal leading "../".
-      const entryPath = header.name.replace(/^\.\//, "");
+      const entryPath = tarEntryPath(header.name);
       const fullPath = resolve(destDir, entryPath);
       if (fullPath !== resolvedDest && !fullPath.startsWith(resolvedDest + sep)) {
         stream.resume();
@@ -239,27 +245,21 @@ export async function extractSingleFileContent(buffer: Buffer, entryName: string
       { cause: error },
     );
   }
+  // A duplicate or non-canonical entry anywhere refuses the archive, rather
+  // than this reader and extractTarGz picking different copies of one file
+  // (AlexKay28/ahood#792; this used to take the first, extractTarGz the last).
+  await assertCanonicalEntryPaths(decompressed);
+
   const extract = tarStream.extract();
   let found: Buffer | null = null;
   await new Promise<void>((resolvePromise, reject) => {
     extract.on("entry", (header, stream, next) => {
-      // Normalize a leading "./" the same way extractTarGz and the server's
-      // extract-and-checksum.ts normalizeEntryPath do -- a plain `tar czf`
-      // commonly prefixes entries with "./", which would otherwise pass
-      // server-side validation/publish but then fail to install here with
-      // "AGENT.md not found" (ahood-cli final review finding #3).
-      const normalizedName = header.name.replace(/^\.\//, "");
-      if (normalizedName !== entryName) {
-        stream.resume();
-        next();
-        return;
-      }
-      // Only take the FIRST matching entry, mirroring the server side's
-      // `files.find(...)` lookup -- otherwise a tar with two entries at the
-      // same normalized name would resolve to whichever one happens to come
-      // last here, diverging from what the server validated against
-      // (ahood-cli final review finding #4).
-      if (found !== null) {
+      // Drop tar's one leading "./" the same way extractTarGz and the server
+      // do -- a plain `tar czf` commonly prefixes entries with "./", which
+      // would otherwise pass server-side validation/publish but then fail to
+      // install here with "AGENT.md not found" (ahood-cli final review
+      // finding #3).
+      if (header.type === "directory" || tarEntryPath(header.name) !== entryName) {
         stream.resume();
         next();
         return;
