@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { hostname } from "node:os";
+import type { PinnedFileKind } from "./kind-info.js";
 
 // mcp_config_hash is only ever set for a kind='mcp' entry (add.ts's
 // installMcpEntry) -- a fingerprint of exactly what was written into
@@ -20,10 +21,11 @@ import { hostname } from "node:os";
 // one before deleting or overwriting it. Absent for skill/agent entries,
 // and absent for any mcp entry installed before this field existed.
 //
-// kind is written only for a doc pin (ahood-cli#182). The other kinds are
-// told apart by what they leave on disk (kinds.ts localInstalledKind), and
-// their pins keep the exact shape they have always had.
-export type LockEntry = { version: string; checksum_sha256: string; mcp_config_hash?: string; kind?: "doc" };
+// kind is written only for a pinned-file pin: doc (ahood-cli#182) and project
+// (#185). The other kinds are told apart by what they leave on disk
+// (kinds.ts localInstalledKind), and their pins keep the exact shape they
+// have always had.
+export type LockEntry = { version: string; checksum_sha256: string; mcp_config_hash?: string; kind?: PinnedFileKind };
 export type Lockfile = Record<string, LockEntry>;
 
 export function readLockfile(path: string): Lockfile {

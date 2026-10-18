@@ -219,6 +219,53 @@ describe("ahood doc command group (ahood-cli#182)", () => {
   });
 });
 
+describe("ahood project command group (ahood-cli#185)", () => {
+  it("`ahood --help` lists `ahood project <command>`; `project --help` and `help project` print project help", () => {
+    expect(run(["--help"]).stdout.toString()).toContain("ahood project <command>");
+    for (const args of [["project", "--help"], ["help", "project"]]) {
+      const { stdout, status } = run(args);
+      expect(status).toBe(0);
+      const text = stdout.toString();
+      expect(text).toContain("ahood project -- project guides (PROJECT.md) in the ahood registry");
+      expect(text).toContain("ahood project add <owner>/<slug>[@version]");
+      expect(text).toContain("ahood project init [name] [--project <git-remote> | --no-project]");
+      expect(text).toContain("ahood project [--remote <git-remote>] [--json]");
+      expect(text).toContain(".claude/project.md");
+      expect(text).toContain("never touches CLAUDE.md or AGENTS.md");
+    }
+    expect(run(["project", "read", "--help"]).stdout.toString()).toMatch(/^ahood project read <owner>\/<slug>/);
+  });
+
+  it("bare `ahood project` outside a git repository is a usage error (exit 2) sent nowhere, writing nothing", () => {
+    const home = mkdtempSync(path.join(tmpdir(), "ahood-project-home-"));
+    const cwd = mkdtempSync(path.join(tmpdir(), "ahood-project-cwd-"));
+    try {
+      const { status, stderr } = run(["project"], { cwd, env: offlineEnv(home) });
+      expect(status).toBe(2);
+      expect(stderr).toContain("No git remote found");
+      expect(readdirSync(cwd)).toEqual([]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("completion offers project and its verbs, without the bare entry's flags", () => {
+    const bash = run(["completion", "bash"]).stdout.toString();
+    expect(bash).toMatch(/local top_words="[^"]*\bproject\b/);
+    const words = bash.match(/local project_words="([^"]*)"/)![1].split(" ");
+    expect(words).toEqual(expect.arrayContaining(["read", "init", "publish", "add", "update", "remove", "show"]));
+    expect(words.some((w) => !/^[a-z]/.test(w))).toBe(false);
+  });
+
+  it("the self-skill documents the project group", () => {
+    const content = readFileSync(skillSource, "utf8");
+    expect(content).toContain("ahood project add");
+    expect(content).toContain(".claude/project.md");
+    expect(content).toContain("PROJECT.md");
+  });
+});
+
 describe("ahood help useme", () => {
   it("prints the bundled SKILL.md byte-for-byte, offline, unauthenticated, writing nothing", () => {
     const home = mkdtempSync(path.join(tmpdir(), "ahood-useme-home-"));

@@ -4,6 +4,7 @@ import {
   AGENT_COMMANDS_HELP,
   MCP_COMMANDS_HELP,
   DOC_COMMANDS_HELP,
+  PROJECT_COMMANDS_HELP,
   GROUP_COMMANDS_HELP,
   SNAP_COMMANDS_HELP,
   COMMAND_ALIASES,
@@ -14,13 +15,14 @@ import { UsageError } from "../usage-error.js";
 const USAGE = "Usage: ahood completion <bash|zsh|fish>";
 
 // Every entity noun with its own verb list, in the order completion offers
-// them. Registry nouns (skill, agent, mcp -- ahood-cli#172; doc -- #182) come first; group
+// them. Registry nouns (skill, agent, mcp -- ahood-cli#172; doc -- #182; project -- #185) come first; group
 // and snap were already real nouns but had no completion at all before.
 const NOUNS: Array<[string, CommandHelp[]]> = [
   ["skill", SKILL_COMMANDS_HELP],
   ["agent", AGENT_COMMANDS_HELP],
   ["mcp", MCP_COMMANDS_HELP],
   ["doc", DOC_COMMANDS_HELP],
+  ["project", PROJECT_COMMANDS_HELP],
   ["group", GROUP_COMMANDS_HELP],
   ["snap", SNAP_COMMANDS_HELP],
 ];
@@ -37,10 +39,10 @@ function topLevelNames(): string[] {
 
 // Position 2+, once a noun has been typed: that noun's verbs, plus alias
 // names (e.g. "show" for "view") wherever the aliased verb exists, so
-// completion offers every name a user might type. A bare `ahood mcp` entry
-// has no verb word and contributes nothing.
+// completion offers every name a user might type. A bare `ahood mcp` or
+// `ahood project [--remote ...]` entry has no verb word and contributes nothing.
 function verbNames(entries: CommandHelp[]): string[] {
-  const primary = entries.map((c) => c.usage.split(" ")[2] ?? "");
+  const primary = entries.map((c) => c.usage.split(" ")[2] ?? "").filter((word) => /^[a-z]/.test(word));
   const aliases = Object.keys(COMMAND_ALIASES).filter((alias) => primary.includes(COMMAND_ALIASES[alias]));
   return unique([...primary, ...aliases]);
 }

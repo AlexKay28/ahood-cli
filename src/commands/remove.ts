@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { confirm } from "../confirm.js";
 import { readLockfile, removeLockfileEntry, withLock, writeJsonFileAtomic, type LockEntry } from "../lockfile.js";
-import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, docPath, MCP_CONFIG_PATH } from "../spec.js";
+import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, docPath, pinnedFilePath, MCP_CONFIG_PATH } from "../spec.js";
 import { readMcpConfig, matchesMcpConfigHash } from "./add.js";
 import { UsageError } from "../usage-error.js";
 import {
@@ -9,6 +9,7 @@ import {
   ensureRemoteKind,
   KindMismatchError,
   describeKind,
+  isPinnedFileKind,
   localInstalledKind,
   strictKind,
   type KindScope,
@@ -57,10 +58,12 @@ export async function remove(args: string[], scope?: KindScope): Promise<void> {
   // never a directory under .claude/skills/ -- distinct from the dir check above.
   const agentFile = agentPath(owner, skill);
   const agentExisted = existsSync(agentFile);
-  // A doc installs as one flat file under .claude/docs/ (ahood-cli#182).
-  const docFile = docPath(owner, skill);
-  const docExisted = existsSync(docFile);
   const lockEntry = readLockfile(LOCKFILE_PATH)[key];
+  // A doc or project guide installs as one pinned file (ahood-cli#182, #185).
+  // A doc's path is derived from its own key, so it is found even without a
+  // pin; the project guide's path is shared, so only this key's pin claims it.
+  const pinnedFile = isPinnedFileKind(lockEntry?.kind) ? pinnedFilePath(lockEntry.kind, owner, skill) : docPath(owner, skill);
+  const pinnedFileExisted = existsSync(pinnedFile);
   const hadLockfileEntry = lockEntry !== undefined;
   // A pin whose install left nothing on disk is the defining shape of an
   // mcp-kind install: its only footprint is this pin plus a live .mcp.json
@@ -69,9 +72,10 @@ export async function remove(args: string[], scope?: KindScope): Promise<void> {
   // before that field did (lockfile.ts: "absent for any mcp entry installed
   // before this field existed") and it is computed HERE, above the .mcp.json
   // read -- so it survives the case where that read throws (ahood-cli#143).
-  const hadNoOnDiskFootprint = !dirExisted && !agentExisted && !docExisted && lockEntry?.kind !== "doc" && hadLockfileEntry;
+  const hadNoOnDiskFootprint =
+    !dirExisted && !agentExisted && !pinnedFileExisted && !isPinnedFileKind(lockEntry?.kind) && hadLockfileEntry;
 
-  if (!dirExisted && !agentExisted && !docExisted && !hadLockfileEntry) {
+  if (!dirExisted && !agentExisted && !pinnedFileExisted && !hadLockfileEntry) {
     console.error(`${key} was not installed -- nothing to remove.`);
     process.exitCode = 1;
     return;
@@ -108,7 +112,7 @@ export async function remove(args: string[], scope?: KindScope): Promise<void> {
   // the pin behind for a file that no longer existed (ahood-cli#142).
   if (dirExisted) rmSync(dir, { recursive: true, force: true });
   if (agentExisted) rmSync(agentFile, { force: true });
-  if (docExisted) rmSync(docFile, { force: true });
+  if (pinnedFileExisted) rmSync(pinnedFile, { force: true });
 
   // An mcp-kind install has no directory or agent file on disk -- its only
   // footprint is the lockfile entry (cleared below, once this block has run)

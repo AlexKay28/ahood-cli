@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { UsageError } from "./usage-error.js";
+import type { PinnedFileKind } from "./kind-info.js";
 
 // Owner and skill segments become filesystem path components (.claude/skills/<owner>@<skill>)
 // and URL path segments, so both are restricted to a safe charset that cannot contain "..",
@@ -145,4 +146,15 @@ export function docPath(owner: string, doc: string): string {
   validateSegment(owner, "owner", spec);
   validateSegment(doc, "skill", spec);
   return join(DOCS_ROOT, `${owner}@${doc}.md`);
+}
+
+// A project guide installs to one fixed path per repository (ahood-cli#185),
+// beside CLAUDE.md/AGENTS.md rather than inside them, so ahood never edits a
+// file the user owns. Being shared, the path is claimed by exactly one pin:
+// add.ts refuses a second guide while another is pinned.
+export const PROJECT_GUIDE_PATH = join(".claude", "project.md");
+
+// Where a pinned-file kind's install lives (kind-info.ts PINNED_FILE_KINDS).
+export function pinnedFilePath(kind: PinnedFileKind, owner: string, slug: string): string {
+  return kind === "doc" ? docPath(owner, slug) : PROJECT_GUIDE_PATH;
 }

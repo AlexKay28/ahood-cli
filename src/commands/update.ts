@@ -2,7 +2,7 @@ import { LOCKFILE_PATH, parseOwnerSkill } from "../spec.js";
 import { readLockfile } from "../lockfile.js";
 import { add, fetchVersionMeta, readMcpConfig, updateMcpEntry } from "./add.js";
 import { UsageError } from "../usage-error.js";
-import { assertKind, isCliKind, KINDS, localInstalledKind, strictKind, type KindScope } from "../kinds.js";
+import { assertKind, isCliKind, isPinnedFileKind, KINDS, localInstalledKind, strictKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]";
 
@@ -236,11 +236,11 @@ export async function update(args: string[], scope?: KindScope): Promise<void> {
       }
       // no @version -- resolves to latest again. A strict scope is passed on so
       // add() re-checks the kind it resolves itself before writing anything.
-      // A doc pin under legacy `ahood skill update` is moved forward through
-      // the doc scope (ahood-cli#182): legacy add refuses docs, but legacy
-      // update has always covered every installed pin.
+      // A doc or project pin under legacy `ahood skill update` is moved
+      // forward through its own scope (ahood-cli#182, #185): legacy add
+      // refuses those kinds, but legacy update has always covered every pin.
       if (kind) await add([ownerSlashSkill], scope);
-      else if (meta.kind === "doc") await add([ownerSlashSkill], { noun: "doc", kind: "doc" });
+      else if (isPinnedFileKind(meta.kind)) await add([ownerSlashSkill], { noun: meta.kind, kind: meta.kind });
       else await add([ownerSlashSkill]);
     } catch (error) {
       // One skill being removed/yanked/unreachable must not stop every other

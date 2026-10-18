@@ -6,7 +6,7 @@ import { apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
 import { flagValue } from "../flags.js";
 import { parseOwnerSkill, SEMVER_RE, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
-import { assertKind, strictKind, type CliKind, type KindScope } from "../kinds.js";
+import { assertKind, CLI_KINDS, isCliKind, KINDS, strictKind, type CliKind, type KindScope } from "../kinds.js";
 
 // `ahood agent publish` / `ahood mcp publish` (ahood-cli#172): an existing
 // entry of another kind must be refused before anything is packed, created,
@@ -56,7 +56,7 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
 }
 
 const USAGE =
-  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]\n" +
+  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]\n" +
   "   or: ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
@@ -301,8 +301,8 @@ function parsePublishArgs(args: string[]): {
   if (!SEMVER_RE.test(version)) {
     throw new UsageError(`--version must be a semver like 1.2.3 (got "${version}").\n${USAGE}`);
   }
-  if (kind !== undefined && kind !== "skill" && kind !== "agent" && kind !== "mcp" && kind !== "doc") {
-    throw new UsageError(`--kind must be "skill", "agent", "mcp", or "doc" (got "${kind}").\n${USAGE}`);
+  if (kind !== undefined && !isCliKind(kind)) {
+    throw new UsageError(`--kind must be ${orList(CLI_KINDS.map((k) => `"${k}"`))} (got "${kind}").\n${USAGE}`);
   }
   // Validated here, before any network call (including the tar/gzip of the
   // skill directory) -- these only ever reach the server via
@@ -402,6 +402,37 @@ async function initVersion(
   }
 }
 
+// "a, b, or c" -- for messages that enumerate every kind.
+function orList(items: string[]): string {
+  return items.length <= 2 ? items.join(" or ") : `${items.slice(0, -1).join(", ")}, or ${items.at(-1)}`;
+}
+
+// Which kind a publish folder is, from the root docs it holds (KINDS[k].
+// rootDoc), so a new kind needs no branch here. An explicit kind must have
+// its root doc. With none, exactly one root doc must be present; SKILL.md
+// alone returns undefined, the pre-kind behaviour (the server defaults to
+// skill). Inference: agent/mcp (ahood-cli#172), doc (#182), project (#185).
+function resolvePublishKind(path: string, kind: CliKind | undefined, via: string): CliKind | undefined {
+  if (kind !== undefined) {
+    const rootDocPath = join(path, KINDS[kind].rootDoc);
+    if (!existsSync(rootDocPath)) {
+      throw new Error(`No ${KINDS[kind].rootDoc} found at ${rootDocPath} -- ${via} must point at a folder containing ${KINDS[kind].rootDoc}.`);
+    }
+    return kind;
+  }
+  const present = CLI_KINDS.filter((k) => existsSync(join(path, KINDS[k].rootDoc)));
+  const rootDocs = CLI_KINDS.map((k) => KINDS[k].rootDoc);
+  if (present.length > 1) {
+    throw new Error(
+      `Multiple root files found at ${path} (${present.map((k) => KINDS[k].rootDoc).join(", ")}) -- pass ${orList(CLI_KINDS.map((k) => `--kind ${k}`))} to disambiguate.`,
+    );
+  }
+  if (present.length === 0) {
+    throw new Error(`No ${orList(rootDocs)} found at ${path} -- publish must point at a ${orList(CLI_KINDS)} folder's root.`);
+  }
+  return present[0] === "skill" ? undefined : present[0];
+}
+
 // --json mode (ahood-cli#57): a CI/script caller needs one machine-readable
 // object on stdout, not the human progress lines below scraped with a
 // regex. jsonOutput therefore gates every intermediate console.log in this
@@ -422,49 +453,9 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
     const kind = scopedKind ?? parsed.kind;
     const via = scopedKind ? `ahood ${scope!.noun} publish` : `publish --kind ${kind}`;
 
-    const skillMdPath = join(path, "SKILL.md");
-    const agentMdPath = join(path, "AGENT.md");
-    const serverJsonPath = join(path, "server.json");
-    const docMdPath = join(path, "DOC.md");
+    const skillMdPath = join(path, KINDS.skill.rootDoc);
     const hasSkillMd = existsSync(skillMdPath);
-    const hasAgentMd = existsSync(agentMdPath);
-    const hasServerJson = existsSync(serverJsonPath);
-    const hasDocMd = existsSync(docMdPath);
-
-    let resolvedKind = kind;
-    if (kind === "doc") {
-      if (!hasDocMd) throw new Error(`No DOC.md found at ${docMdPath} -- ${via} must point at a folder containing DOC.md.`);
-    } else if (kind === "agent") {
-      if (!hasAgentMd) throw new Error(`No AGENT.md found at ${agentMdPath} -- ${via} must point at a folder containing AGENT.md.`);
-    } else if (kind === "skill") {
-      if (!hasSkillMd) throw new Error(`No SKILL.md found at ${skillMdPath} -- ${via} must point at a folder containing SKILL.md.`);
-    } else if (kind === "mcp") {
-      if (!hasServerJson) throw new Error(`No server.json found at ${serverJsonPath} -- ${via} must point at a folder containing server.json.`);
-    } else {
-      // kind === undefined -- infer from whichever root file(s) are actually present
-      const present = [
-        hasSkillMd && "SKILL.md",
-        hasAgentMd && "AGENT.md",
-        hasServerJson && "server.json",
-        hasDocMd && "DOC.md",
-      ].filter(Boolean) as string[];
-      if (present.length > 1) {
-        throw new Error(
-          `Multiple root files found at ${path} (${present.join(", ")}) -- pass --kind skill, --kind agent, --kind mcp, or --kind doc to disambiguate.`,
-        );
-      }
-      if (present.length === 0) {
-        throw new Error(`No SKILL.md, AGENT.md, server.json, or DOC.md found at ${path} -- publish must point at a skill, agent, mcp, or doc folder's root.`);
-      }
-      if (hasAgentMd) {
-        resolvedKind = "agent"; // inferred: only AGENT.md present, no --kind needed
-      } else if (hasServerJson) {
-        resolvedKind = "mcp"; // inferred: only server.json present, no --kind needed
-      } else if (hasDocMd) {
-        resolvedKind = "doc"; // inferred: only DOC.md present (ahood-cli#182)
-      }
-      // else: hasSkillMd only -- resolvedKind stays undefined (unchanged existing behavior, server defaults to 'skill')
-    }
+    const resolvedKind = resolvePublishKind(path, kind as CliKind | undefined, via);
 
     // ahood-cli#93: fires for an explicit --kind skill, and for the
     // inferred-skill case above (resolvedKind left undefined because

@@ -20,7 +20,8 @@ import { versions } from "./commands/versions.js";
 import { diff } from "./commands/diff.js";
 import { completion } from "./commands/completion.js";
 import { mcp } from "./commands/mcp.js";
-import { extractKindFlag, resolveScope, type CliKind, type KindScope } from "./kinds.js";
+import { CLI_KINDS, extractKindFlag, isCliKind, resolveScope, type CliKind, type KindScope } from "./kinds.js";
+import { findProjectGuides } from "./commands/project-guides.js";
 import { readUseme } from "./useme.js";
 import { UsageError } from "./usage-error.js";
 import { init } from "./commands/init.js";
@@ -49,8 +50,8 @@ import { ApiError } from "./http.js";
 import { exitCodeFor } from "./exit-code.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
 
-// Every registry verb, reached as `ahood skill <verb>`, `ahood agent <verb>`,
-// `ahood mcp <verb>` or `ahood doc <verb>` -- one handler per verb shared by
+// Every registry verb, reached as `ahood <noun> <verb>` for every registry
+// noun (skill, agent, mcp, doc, project) -- one handler per verb shared by
 // every noun
 // (see dispatchRegistry() below), never a copy per kind. "show" is an alias
 // for "view" (issue #30). A handler gets a second, KindScope argument only
@@ -128,6 +129,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   skill: dispatchSkill,
   agent: dispatchAgent,
   doc: dispatchDoc,
+  project: dispatchProject,
   group: dispatchGroup,
   snap: dispatchSnap,
 };
@@ -140,9 +142,9 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
 // here just means "a command that owns its own sub-verb dispatch", the same
 // sense "skill" already used before "group" (the entity) existed. "snap"
 // joins this set for the exact same reason (ahood-cli#107).
-// "agent" and "mcp" join it as registry nouns (ahood-cli#172), "doc" too
-// (ahood-cli#182).
-const GROUP_COMMANDS = new Set(["skill", "agent", "mcp", "doc", "group", "snap"]);
+// Every registry noun joins it (ahood-cli#172), taken from the kind table so
+// a new kind (doc #182, project #185) needs no edit here.
+const GROUP_COMMANDS = new Set<string>([...CLI_KINDS, "group", "snap"]);
 
 function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
@@ -185,7 +187,7 @@ function closestSnapVerb(input: string): string | undefined {
   return closestOf(input, Object.keys(SNAP_VERBS));
 }
 
-// `ahood <noun> <verb> [...]` for every registry noun (skill, agent, mcp, doc) --
+// `ahood <noun> <verb> [...]` for every registry noun (kind-info.ts KINDS) --
 // owns its own help handling at both the noun level (`ahood agent` /
 // `ahood agent --help`) and the per-verb level (`ahood agent <verb> --help`),
 // since neither should fall through to main()'s generic top-level --help
@@ -257,6 +259,19 @@ async function dispatchAgent(args: string[]): Promise<void> {
 
 async function dispatchDoc(args: string[]): Promise<void> {
   await dispatchRegistry("doc", args);
+}
+
+// `ahood project` (ahood-cli#185): with no verb -- nothing, or only its own
+// flags -- it lists the project guides for this repository's git remote
+// (commands/project-guides.ts). Everything else is the shared registry
+// dispatch, help included.
+async function dispatchProject(args: string[]): Promise<void> {
+  const first = args[0];
+  if (first === undefined || (first.startsWith("--") && first !== "--help")) {
+    await findProjectGuides(args);
+    return;
+  }
+  await dispatchRegistry("project", args);
 }
 
 // `ahood mcp` keeps its original contract byte-for-byte: with NO arguments it
@@ -371,7 +386,7 @@ async function main() {
       process.stdout.write(content);
       return;
     }
-    if (sub === "skill" || sub === "agent" || sub === "mcp" || sub === "doc") {
+    if (isCliKind(sub)) {
       const verb = args[1];
       const entry = verb ? findCommandHelp(sub, verb) : undefined;
       console.log(entry ? formatCommandHelp(entry) : formatKindHelp(sub));
@@ -457,4 +472,4 @@ if (isEntrypoint) {
 }
 
 // Exported for tests only -- the CLI itself only ever calls main() above.
-export { main, dispatchSkill, dispatchAgent, dispatchDoc, dispatchMcp, dispatchRegistry, dispatchGroup, dispatchSnap, COMMANDS, SKILL_COMMANDS, GROUP_VERBS, SNAP_VERBS };
+export { main, dispatchSkill, dispatchAgent, dispatchDoc, dispatchProject, dispatchMcp, dispatchRegistry, dispatchGroup, dispatchSnap, COMMANDS, SKILL_COMMANDS, GROUP_VERBS, SNAP_VERBS };

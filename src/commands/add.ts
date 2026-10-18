@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import * as tarStream from "tar-stream";
 import { gunzipSync } from "node:zlib";
 import { apiFetch, apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
-import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, docPath, AGENTS_ROOT, MCP_CONFIG_PATH } from "../spec.js";
+import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, pinnedFilePath, AGENTS_ROOT, MCP_CONFIG_PATH } from "../spec.js";
 import {
   readLockfile,
   withLock,
@@ -17,7 +17,7 @@ import {
 import { promptSecret } from "../secret-prompt.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
-import { assertKind, strictKind, type KindScope } from "../kinds.js";
+import { assertKind, describeKind, isPinnedFileKind, KINDS, strictKind, type CliKind, type KindScope, type PinnedFileKind } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill add <owner>/<skill>[@version]";
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB compressed
@@ -36,7 +36,7 @@ export type VersionMeta = {
   checksum_sha256: string;
   yanked_at: string | null;
   changelog_md?: string | null;
-  kind?: "skill" | "agent" | "mcp" | "doc";
+  kind?: CliKind;
 };
 
 // Shared wording for the checksum-pin tamper-detection guard, used both by
@@ -68,7 +68,7 @@ export async function fetchVersionMeta(owner: string, skill: string, version: st
     // no error anywhere (ahood-cli final review finding #1).
     const { skill_versions, kind } = await apiJson<{
       skill_versions: Omit<VersionMeta, "yanked_at" | "kind"> | null;
-      kind?: "skill" | "agent" | "mcp" | "doc";
+      kind?: CliKind;
     }>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`);
     if (!skill_versions) throw new Error(`${owner}/${skill} has no published version`);
     return { ...skill_versions, kind, yanked_at: null };
@@ -975,27 +975,28 @@ export async function downloadVerifiedArchive(owner: string, skill: string, meta
   return buffer;
 }
 
-// `ahood doc add` (ahood-cli#182): only DOC.md is extracted, written
-// atomically to .claude/docs/<owner>@<doc>.md, and pinned with kind "doc" so
+// `ahood doc add` (ahood-cli#182) and `ahood project add` (#185): only the
+// root doc (DOC.md / PROJECT.md) is extracted, written atomically to the
+// kind's pinned file (spec.ts pinnedFilePath), and pinned with its kind so
 // remove/update can tell the pin apart without asking the registry. If the
 // pin can't be written, the file goes back to what it was: the previous
 // version's content on an update, nothing on a fresh install.
-async function installDoc(owner: string, skill: string, meta: VersionMeta, buffer: Buffer): Promise<void> {
+async function installPinnedFile(kind: PinnedFileKind, owner: string, skill: string, meta: VersionMeta, buffer: Buffer): Promise<void> {
   const key = `${owner}/${skill}`;
-  const content = await extractSingleFileContent(buffer, "DOC.md");
-  const destPath = docPath(owner, skill);
+  const content = await extractSingleFileContent(buffer, KINDS[kind].rootDoc);
+  const destPath = pinnedFilePath(kind, owner, skill);
   const previous = existsSync(destPath) ? readFileSync(destPath) : undefined;
   writeFileAtomic(destPath, content);
   try {
     writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
       version: meta.version,
       checksum_sha256: meta.checksum_sha256,
-      kind: "doc",
+      kind,
     });
   } catch (error) {
     rollbackOrWarn(
       () => (previous === undefined ? rmSync(destPath, { force: true }) : writeFileAtomic(destPath, previous)),
-      `WARNING: could not restore ${destPath} after ${key}'s install failed -- it may not match its ${LOCKFILE_PATH} pin. Run \`ahood doc remove ${key}\` to clean it up.`,
+      `WARNING: could not restore ${destPath} after ${key}'s install failed -- it may not match its ${LOCKFILE_PATH} pin. Run \`ahood ${kind} remove ${key}\` to clean it up.`,
     );
     if (error instanceof LockfileChecksumConflictError) {
       throw new Error(checksumConflictMessage(key, meta, error.existing));
@@ -1003,6 +1004,31 @@ async function installDoc(owner: string, skill: string, meta: VersionMeta, buffe
     throw error;
   }
   console.log(`Installed ${key}@${meta.version} to ${destPath}`);
+}
+
+// Refuses a pinned-file install before the download when its path is not
+// this key's to write: a file no pin claims was not written by ahood, and a
+// path another pin claims (a second project guide) belongs to that pin.
+function assertPinnedFileIsOurs(kind: PinnedFileKind, owner: string, skill: string): void {
+  const key = `${owner}/${skill}`;
+  const destPath = pinnedFilePath(kind, owner, skill);
+  const holder = Object.entries(readLockfile(LOCKFILE_PATH)).find(([pinKey, pin]) => {
+    if (!isPinnedFileKind(pin.kind)) return false;
+    const [pinOwner, pinSlug] = pinKey.split("/");
+    return pinnedFilePath(pin.kind, pinOwner, pinSlug) === destPath;
+  })?.[0];
+  if (holder !== undefined && holder !== key) {
+    throw new Error(
+      `${holder} is already installed at ${destPath} -- refusing to replace it with ${key}. ` +
+        `Run \`ahood ${kind} remove ${holder}\` first.`,
+    );
+  }
+  if (holder === undefined && existsSync(destPath)) {
+    throw new Error(
+      `${destPath} already exists and is not pinned as ${key} in ${LOCKFILE_PATH} -- refusing to overwrite it. ` +
+        "Move or delete it first.",
+    );
+  }
 }
 
 export async function add(args: string[], scope?: KindScope): Promise<void> {
@@ -1016,29 +1042,21 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
   // refused here, before the download, the lockfile and every write below.
   // Both metadata routes report the entry's kind, so this costs no request.
   assertKind(scope, key, meta.kind, "add", "install");
-  // Legacy cross-kind `ahood skill add` of a doc stays refused (ahood-cli#175):
-  // it used to fall through to the skill path and extract a doc into
-  // .claude/skills/<owner>@<slug>/ with no SKILL.md -- not a working skill,
-  // with nothing telling the user. Docs install only through the doc scope
-  // (`ahood doc add`, ahood-cli#182), which writes the one flat file below.
-  // Refused before the download, the lockfile and any write. Entries with NO
-  // kind keep the legacy skill behaviour.
-  const docInstall = meta.kind === "doc" && strictKind(scope) === "doc";
-  if (meta.kind === "doc" && !docInstall) {
+  // Legacy cross-kind `ahood skill add` of a doc or project guide stays
+  // refused (ahood-cli#175, #185): it used to fall through to the skill path
+  // and extract it into .claude/skills/<owner>@<slug>/ with no SKILL.md --
+  // not a working skill, with nothing telling the user. These kinds install
+  // only through their own scope (`ahood doc add`, `ahood project add`),
+  // which writes the one pinned file below. Refused before the download, the
+  // lockfile and any write. Entries with NO kind keep the legacy behaviour.
+  const pinnedKind = isPinnedFileKind(meta.kind) ? meta.kind : undefined;
+  if (pinnedKind !== undefined && strictKind(scope) !== pinnedKind) {
     throw new UsageError(
-      `${key} is a doc (a documentation page), not a skill. ` +
-        `Install it with \`ahood doc add ${key}\`, or read it without installing with \`ahood doc read ${key}\`.`,
+      `${key} is ${describeKind(pinnedKind)} (${KINDS[pinnedKind].about}), not a skill. ` +
+        `Install it with \`ahood ${pinnedKind} add ${key}\`, or read it without installing with \`ahood ${pinnedKind} read ${key}\`.`,
     );
   }
-  // No-overwrite: a file already at the doc's path that this project's
-  // lockfile does not pin as this doc was not written by ahood, so it is
-  // left alone. Checked before the download, like every refusal above.
-  if (docInstall && existsSync(docPath(owner, skill)) && readLockfile(LOCKFILE_PATH)[key]?.kind !== "doc") {
-    throw new Error(
-      `${docPath(owner, skill)} already exists and is not pinned as ${key} in ${LOCKFILE_PATH} -- refusing to overwrite it. ` +
-        "Move or delete it first.",
-    );
-  }
+  if (pinnedKind !== undefined) assertPinnedFileIsOurs(pinnedKind, owner, skill);
 
   // A lockfile entry records the checksum this exact version was installed
   // with; if a later fetch of the "same" version disagrees, either the
@@ -1066,7 +1084,7 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
   // manifest can never actually land on disk there -- the warning would be
   // both mislabeled ("skill") and about a risk that can't materialize
   // (ahood-cli final review finding #5).
-  if (meta.kind !== "agent" && meta.kind !== "mcp" && meta.kind !== "doc" && meta.manifest.some((f) => f.path.startsWith("scripts/"))) {
+  if (meta.kind !== "agent" && meta.kind !== "mcp" && pinnedKind === undefined && meta.manifest.some((f) => f.path.startsWith("scripts/"))) {
     console.warn("WARNING: this skill includes a scripts/ directory. Review its contents before use.");
   }
 
@@ -1105,8 +1123,8 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
     return;
   }
 
-  if (docInstall) {
-    await installDoc(owner, skill, meta, buffer);
+  if (pinnedKind !== undefined) {
+    await installPinnedFile(pinnedKind, owner, skill, meta, buffer);
     return;
   }
 
