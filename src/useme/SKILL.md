@@ -1,6 +1,6 @@
 ---
 name: ahood
-description: How to use the ahood CLI (@ahood/cli), the registry for reusable AI-agent skills, subagent definitions (AGENT.md), MCP server manifests (server.json), docs (DOC.md), and project guides (PROJECT.md). Load BEFORE running any ahood command; before writing a non-trivial reusable skill, subagent, or MCP integration from scratch (search the registry first); when installing, updating, removing, publishing, sharing, or unpublishing one; when wiring ahood into an MCP host; or when setting up headless/CI access with AHOOD_TOKEN. Triggers - ahood, skill registry, is there a skill for this, install a skill, install an agent, add an MCP server, read a doc, project guide, publish a skill, ahood mcp, ahood doc, ahood project, AHOOD_TOKEN.
+description: How to use the ahood CLI (@ahood/cli), the registry for reusable AI-agent skills, subagent definitions (AGENT.md), MCP server manifests (server.json), docs (DOC.md), project guides (PROJECT.md), and loops (LOOP.md). Load BEFORE running any ahood command; before writing a non-trivial reusable skill, subagent, MCP integration, or recurring-session procedure from scratch (search the registry first); when installing, updating, removing, publishing, sharing, or unpublishing one; when wiring ahood into an MCP host; or when setting up headless/CI access with AHOOD_TOKEN. Triggers - ahood, skill registry, is there a skill for this, install a skill, install an agent, add an MCP server, read a doc, project guide, loop, recurring agentic session procedure, publish a skill, ahood mcp, ahood doc, ahood project, ahood loop, AHOOD_TOKEN.
 ---
 
 # ahood
@@ -13,7 +13,7 @@ and only moves when someone runs an update.
 This guide ships inside the CLI itself (`ahood help useme`), so it matches the installed
 version (`ahood --version`). It needs no login or network to print.
 
-## Five kinds, five command groups
+## Six kinds, six command groups
 
 | Kind | Root file | Installs to | Commands |
 |---|---|---|---|
@@ -22,19 +22,20 @@ version (`ahood --version`). It needs no login or network to print.
 | mcp | `server.json` | an entry merged into `.mcp.json` | `ahood mcp <verb>` |
 | doc | `DOC.md` | `.claude/docs/<owner>@<doc>.md` | `ahood doc <verb>` |
 | project | `PROJECT.md` | `.claude/project.md` (one per repository) | `ahood project <verb>` |
+| loop | `LOOP.md` | `.claude/loops/<owner>@<loop>.md` | `ahood loop <verb>` |
 
-All five groups take the same verbs: `search`, `list`, `view`/`show`, `read`, `versions`,
+All six groups take the same verbs: `search`, `list`, `view`/`show`, `read`, `versions`,
 `diff`, `add`, `update`, `outdated`, `remove`, `edit`, `unpublish`, `star`, `unstar`,
 `share`, `unshare`, `init`, `publish`.
 
-- `ahood agent <verb>`, `ahood mcp <verb>`, `ahood doc <verb>` and `ahood project <verb>` act on their own kind only.
+- `ahood agent <verb>`, `ahood mcp <verb>`, `ahood doc <verb>`, `ahood project <verb>` and `ahood loop <verb>` act on their own kind only.
   A target of another kind is refused (exit 2) before anything is downloaded, prompted for,
   written, or sent, and the error names the kind it found and the right command.
 - `ahood skill <verb>` is the **legacy, cross-kind** group in this CLI release: `skill search`
   and `skill list` include every kind, and `skill add`/`skill update` install whatever kind
-  they resolve, except a doc or project guide: `skill add` refuses one and points at
-  `ahood doc add` / `ahood project add`.
-  Add `--kind skill` (or `agent`, `mcp`, `doc`, `project`) to any verb to scope it to one kind;
+  they resolve, except a doc, project guide, or loop: `skill add` refuses one and points at
+  `ahood doc add` / `ahood project add` / `ahood loop add`.
+  Add `--kind skill` (or `agent`, `mcp`, `doc`, `project`, `loop`) to any verb to scope it to one kind;
   `--kind all` spells out the legacy behavior. Prefer the kind-specific form in anything new --
   a future major version makes `ahood skill` skills-only.
 - A doc is a documentation page. `ahood doc read alice/setup-guide` prints it without
@@ -44,6 +45,11 @@ All five groups take the same verbs: `search`, `list`, `view`/`show`, `read`, `v
   `ahood project` inside a repository to list the guides naming its git remote;
   `ahood project add alice/acme-api` saves one to `.claude/project.md` (pinned, one per
   repository) and never touches `CLAUDE.md` or `AGENTS.md` -- point those at it yourself.
+- A loop is a pseudocode-and-rules procedure for running a recurring kind of agentic session
+  (a code review pass, a migration sweep, ...), reusable across repositories -- unlike a
+  project guide, `LOOP.md` has no repository field. `ahood loop read alice/code-review-pass`
+  prints it without installing anything; `ahood loop add alice/code-review-pass` saves it as
+  one pinned file under `.claude/loops/`, managed like any other pin.
 
 ## Find, inspect, then install
 
@@ -93,7 +99,7 @@ ahood skill update --dry-run --json    # preview, machine-readable
 ahood agent remove alice/code-reviewer # local uninstall; prompts unless --yes
 ```
 
-With no target, `agent`/`mcp`/`doc`/`project` `update` and `outdated` consider only installed pins of that
+With no target, `agent`/`mcp`/`doc`/`project`/`loop` `update` and `outdated` consider only installed pins of that
 kind; the legacy `skill update` covers every pin. Updates only affect the current project.
 An `.mcp.json` entry you edited by hand is refused rather than overwritten.
 
@@ -107,13 +113,14 @@ ahood agent init code-reviewer         # ./code-reviewer/AGENT.md
 ahood mcp init github-server           # ./github-server/server.json (placeholder URL)
 ahood doc init setup-guide             # ./setup-guide/DOC.md
 ahood project init acme-api            # ./acme-api/PROJECT.md, `project:` filled from git origin
+ahood loop init code-review-pass       # ./code-review-pass/LOOP.md
 
 ahood agent publish alice/code-reviewer@1.0.0 --path code-reviewer --name "Code Reviewer"
 ahood skill publish alice/pdf-tools@1.1.0 --path pdf-tools --changelog "Adds split"
 ```
 
 - `--name` is required only on the first publish, which creates the entry under your
-  account. `agent publish`/`mcp publish`/`doc publish`/`project publish` imply the kind and refuse a contradictory `--kind`
+  account. `agent publish`/`mcp publish`/`doc publish`/`project publish`/`loop publish` imply the kind and refuse a contradictory `--kind`
   or an existing entry of another kind before uploading anything.
 - **New entries are private.** Make one discoverable explicitly:
   `ahood skill edit alice/pdf-tools --visibility public`.

@@ -154,7 +154,23 @@ export function docPath(owner: string, doc: string): string {
 // add.ts refuses a second guide while another is pinned.
 export const PROJECT_GUIDE_PATH = join(".claude", "project.md");
 
+// A loop installs as one flat file, .claude/loops/<owner>@<loop>.md
+// (ahood-cli, ahood#858) -- the same shape as docPath above, not
+// PROJECT_GUIDE_PATH's single fixed path, since a loop is explicitly
+// portable across repositories rather than scoped to one (see
+// docs/adr/backend/0015-loop-artifact-kind.md in the ahood repo).
+export const LOOPS_ROOT = join(".claude", "loops");
+
+export function loopPath(owner: string, loop: string): string {
+  const spec = `${owner}/${loop}`;
+  validateSegment(owner, "owner", spec);
+  validateSegment(loop, "skill", spec);
+  return join(LOOPS_ROOT, `${owner}@${loop}.md`);
+}
+
 // Where a pinned-file kind's install lives (kind-info.ts PINNED_FILE_KINDS).
 export function pinnedFilePath(kind: PinnedFileKind, owner: string, slug: string): string {
-  return kind === "doc" ? docPath(owner, slug) : PROJECT_GUIDE_PATH;
+  if (kind === "doc") return docPath(owner, slug);
+  if (kind === "loop") return loopPath(owner, slug);
+  return PROJECT_GUIDE_PATH;
 }

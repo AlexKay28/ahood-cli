@@ -51,7 +51,7 @@ import { exitCodeFor } from "./exit-code.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
 
 // Every registry verb, reached as `ahood <noun> <verb>` for every registry
-// noun (skill, agent, mcp, doc, project) -- one handler per verb shared by
+// noun (skill, agent, mcp, doc, project, loop) -- one handler per verb shared by
 // every noun
 // (see dispatchRegistry() below), never a copy per kind. "show" is an alias
 // for "view" (issue #30). A handler gets a second, KindScope argument only
@@ -130,6 +130,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   agent: dispatchAgent,
   doc: dispatchDoc,
   project: dispatchProject,
+  loop: dispatchLoop,
   group: dispatchGroup,
   snap: dispatchSnap,
 };
@@ -143,7 +144,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
 // sense "skill" already used before "group" (the entity) existed. "snap"
 // joins this set for the exact same reason (ahood-cli#107).
 // Every registry noun joins it (ahood-cli#172), taken from the kind table so
-// a new kind (doc #182, project #185) needs no edit here.
+// a new kind (doc #182, project #185, loop ahood#858) needs no edit here.
 const GROUP_COMMANDS = new Set<string>([...CLI_KINDS, "group", "snap"]);
 
 function levenshtein(a: string, b: string): number {
@@ -176,8 +177,8 @@ function closestCommand(input: string): string | undefined {
 }
 
 // Plural alias (ahood-cli#190): `ahood skills`, `ahood agents`, `ahood mcps`,
-// `ahood docs`, `ahood projects` (and the future `ahood loops`) dispatch
-// exactly as the singular kind would. A straight trailing-`s` strip-and-match
+// `ahood docs`, `ahood projects`, `ahood loops` dispatch exactly as the
+// singular kind would. A straight trailing-`s` strip-and-match
 // against the KINDS registry is enough -- every current and planned kind
 // pluralizes this way, and no COMMANDS key ends in "s" (checked below), so a
 // real top-level command can never be shadowed by this. Scoped to CLI_KINDS
@@ -272,6 +273,14 @@ async function dispatchAgent(args: string[]): Promise<void> {
 
 async function dispatchDoc(args: string[]): Promise<void> {
   await dispatchRegistry("doc", args);
+}
+
+// `ahood loop` (ahood-cli, ahood#858): a loop is portable across
+// repositories (unlike `project`), so it has no bare-command listing of its
+// own -- every verb is the shared registry dispatch, help included, the
+// same shape as dispatchDoc above.
+async function dispatchLoop(args: string[]): Promise<void> {
+  await dispatchRegistry("loop", args);
 }
 
 // `ahood project` (ahood-cli#185): with no verb -- nothing, or only its own
@@ -492,4 +501,4 @@ if (isEntrypoint) {
 }
 
 // Exported for tests only -- the CLI itself only ever calls main() above.
-export { main, dispatchSkill, dispatchAgent, dispatchDoc, dispatchProject, dispatchMcp, dispatchRegistry, dispatchGroup, dispatchSnap, COMMANDS, SKILL_COMMANDS, GROUP_VERBS, SNAP_VERBS };
+export { main, dispatchSkill, dispatchAgent, dispatchDoc, dispatchProject, dispatchLoop, dispatchMcp, dispatchRegistry, dispatchGroup, dispatchSnap, COMMANDS, SKILL_COMMANDS, GROUP_VERBS, SNAP_VERBS };

@@ -30,7 +30,14 @@ export type Entry = {
 
 export type Call = { method: string; url: string; body?: string };
 
-export const ROOT_DOCS: Record<string, string> = { skill: "SKILL.md", agent: "AGENT.md", mcp: "server.json", doc: "DOC.md", project: "PROJECT.md" };
+export const ROOT_DOCS: Record<string, string> = {
+  skill: "SKILL.md",
+  agent: "AGENT.md",
+  mcp: "server.json",
+  doc: "DOC.md",
+  project: "PROJECT.md",
+  loop: "LOOP.md",
+};
 
 export async function entry(kind: string | undefined, version = "1.0.0", contentKind = kind ?? "skill"): Promise<Entry> {
   const rootDoc = ROOT_DOCS[contentKind];

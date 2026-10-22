@@ -189,9 +189,9 @@ Shared alice/pdf-tools with design-team.
 Sharing is additive -- it doesn't change `alice/pdf-tools`'s own public/private visibility, it just makes it visible to everyone in `design-team` too. On the other side, whoever received the link runs `ahood group join <the link>` to join.
 </details>
 
-## Kinds: skills, agents, MCP servers, docs, and project guides
+## Kinds: skills, agents, MCP servers, docs, project guides, and loops
 
-The registry holds five kinds of artifact, each with its own command group. All five take the same verbs (`search`, `list`, `view`/`show`, `read`, `versions`, `diff`, `add`, `update`, `outdated`, `remove`, `edit`, `unpublish`, `star`, `unstar`, `share`, `unshare`, `init`, `publish`), run by the same code:
+The registry holds six kinds of artifact, each with its own command group. All six take the same verbs (`search`, `list`, `view`/`show`, `read`, `versions`, `diff`, `add`, `update`, `outdated`, `remove`, `edit`, `unpublish`, `star`, `unstar`, `share`, `unshare`, `init`, `publish`), run by the same code:
 
 | Kind | Root file | `add` installs to | Group |
 | --- | --- | --- | --- |
@@ -200,6 +200,7 @@ The registry holds five kinds of artifact, each with its own command group. All 
 | mcp | `server.json` | an entry merged into `.mcp.json` | `ahood mcp <verb>` |
 | doc | `DOC.md` | `.claude/docs/<owner>@<doc>.md` | `ahood doc <verb>` |
 | project | `PROJECT.md` | `.claude/project.md` (one per repository) | `ahood project <verb>` |
+| loop | `LOOP.md` | `.claude/loops/<owner>@<loop>.md` | `ahood loop <verb>` |
 
 ```
 $ ahood agent search review
@@ -212,15 +213,18 @@ $ ahood doc add alice/setup-guide       # ./.claude/docs/alice@setup-guide.md, p
 $ ahood project                         # project guides for this repo's git remote
 $ ahood project add alice/acme-api      # ./.claude/project.md, pinned
 $ ahood project init acme-api           # ./acme-api/PROJECT.md, `project:` filled from git origin
+$ ahood loop read alice/code-review-pass    # print a loop without installing it
+$ ahood loop add alice/code-review-pass     # ./.claude/loops/alice@code-review-pass.md, pinned
 $ ahood agent add alice/pdf-tools
 alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood skill add alice/pdf-tools` instead.
 ```
 
-- **`ahood agent`, `ahood mcp`, `ahood doc` and `ahood project` are strict.** A target of another kind is refused -- exit code `2`, naming the kind it found -- before anything is downloaded, prompted for, written, or sent. That covers `add`, `update`, `remove`, `edit`, `unpublish`, `share`/`unshare`, `star`/`unstar`, and `publish` (an existing entry of another kind is refused before anything is packed or uploaded); the read-only verbs refuse too, rather than show the wrong kind. `search` asks the registry for that kind only, `list` keeps only that kind of your own entries, and `update`/`outdated` with no argument consider only installed pins of that kind. `agent publish`/`mcp publish`/`doc publish`/`project publish` imply their kind and reject a contradictory `--kind`.
-- **Missing or unexpected kind metadata is refused, never guessed.** If the registry's answer carries no kind (or one this CLI doesn't handle), a kind-scoped command stops with exit `1` and points at the legacy form. `remove` reads the kind from the project's own files (the skill directory, the agent file, the mcp fingerprint in the lockfile, or a doc or project pin's recorded `kind`) and asks the registry only when those can't tell; if neither can, nothing is removed.
-- **`ahood skill` is legacy and cross-kind in this release.** `ahood skill search` and `ahood skill list` include every kind, and `ahood skill add`/`update`/`remove`/... act on whatever kind the target is, exactly as before -- including `--json` output and exit codes -- so existing scripts keep working. The exceptions are a doc and a project guide: `ahood skill add` refuses them and points at `ahood doc add` / `ahood project add`. Add `--kind skill|agent|mcp|doc|project` to any `ahood skill` verb (except `publish`, whose `--kind` keeps its original meaning) to scope it, or `--kind all` to spell out the cross-kind behavior.
-- **Docs install as one pinned file.** `ahood doc add` saves a doc's `DOC.md` to `.claude/docs/<owner>@<doc>.md` and pins it in `.claude/skills.lock.json` with `"kind": "doc"`. It refuses to overwrite a file at that path that isn't pinned as that doc. `ahood doc update`/`outdated`/`remove` manage those pins like any other kind. Kind dispatch is table-driven (`src/kind-info.ts`).
+- **`ahood agent`, `ahood mcp`, `ahood doc`, `ahood project` and `ahood loop` are strict.** A target of another kind is refused -- exit code `2`, naming the kind it found -- before anything is downloaded, prompted for, written, or sent. That covers `add`, `update`, `remove`, `edit`, `unpublish`, `share`/`unshare`, `star`/`unstar`, and `publish` (an existing entry of another kind is refused before anything is packed or uploaded); the read-only verbs refuse too, rather than show the wrong kind. `search` asks the registry for that kind only, `list` keeps only that kind of your own entries, and `update`/`outdated` with no argument consider only installed pins of that kind. `agent publish`/`mcp publish`/`doc publish`/`project publish`/`loop publish` imply their kind and reject a contradictory `--kind`.
+- **Missing or unexpected kind metadata is refused, never guessed.** If the registry's answer carries no kind (or one this CLI doesn't handle), a kind-scoped command stops with exit `1` and points at the legacy form. `remove` reads the kind from the project's own files (the skill directory, the agent file, the mcp fingerprint in the lockfile, or a doc, project, or loop pin's recorded `kind`) and asks the registry only when those can't tell; if neither can, nothing is removed.
+- **`ahood skill` is legacy and cross-kind in this release.** `ahood skill search` and `ahood skill list` include every kind, and `ahood skill add`/`update`/`remove`/... act on whatever kind the target is, exactly as before -- including `--json` output and exit codes -- so existing scripts keep working. The exceptions are a doc, a project guide, and a loop: `ahood skill add` refuses them and points at `ahood doc add` / `ahood project add` / `ahood loop add`. Add `--kind skill|agent|mcp|doc|project|loop` to any `ahood skill` verb (except `publish`, whose `--kind` keeps its original meaning) to scope it, or `--kind all` to spell out the cross-kind behavior.
+- **Docs and loops install as one pinned file per owner/slug.** `ahood doc add` saves a doc's `DOC.md` to `.claude/docs/<owner>@<doc>.md` and pins it in `.claude/skills.lock.json` with `"kind": "doc"`; `ahood loop add` does the same for a loop's `LOOP.md`, to `.claude/loops/<owner>@<loop>.md` with `"kind": "loop"`. Both refuse to overwrite a file at that path that isn't pinned as that entry. `update`/`outdated`/`remove` manage those pins like any other kind. Kind dispatch is table-driven (`src/kind-info.ts`).
 - **A project guide is one pinned file per repository.** `ahood project add` saves the guide's `PROJECT.md` to `.claude/project.md` and pins it with `"kind": "project"`. It never touches `CLAUDE.md` or `AGENTS.md` (point those at `.claude/project.md` yourself), refuses to overwrite an unpinned `.claude/project.md`, and refuses a second guide while another is pinned (`ahood project remove` it first). `ahood project init` fills the optional `project` frontmatter field from `git remote get-url origin`, normalized to `host/owner/repo` exactly as the registry does (credentials stripped; `--project <remote>` or `--no-project` to override). Bare `ahood project` lists the guides you can see for this repository's remote, through the hosted `get_project_guide` MCP tool.
+- **A loop is a reusable procedure, not scoped to one repository.** It is pseudocode and rules for running a recurring kind of agentic session (a code review pass, a migration sweep, ...), meant to be installed the same way in many different projects -- unlike a project guide, `LOOP.md` has no `project` remote field, just `DOC.md`'s plain `name`/`description` frontmatter. `ahood loop init` has no `--project`/`--no-project` flags for that reason.
 
 **Migration plan for a strict `ahood skill`.** A future major version will make `ahood skill <verb>` skills-only by default, matching `agent` and `mcp`. Until then: (1) this release adds the strict groups and `--kind`, and labels `ahood skill` as legacy in `--help`; (2) a following minor release prints a stderr deprecation note when an `ahood skill` command actually touches a non-skill entry (stdout and `--json` unchanged); (3) the major release flips the default, keeping `ahood skill <verb> --kind all` as the explicit cross-kind escape hatch. Scripts that want today's behavior forever can pass `--kind all` now.
 
@@ -361,6 +365,29 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood project unshare <owner>/<slug> --group <group>` | Stop sharing a project guide you own with a group. |
 | `ahood project init [name] [--project <git-remote> \| --no-project]` | Scaffold a new project guide folder with a minimal, valid PROJECT.md. |
 | `ahood project publish <owner>/<slug>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of a project guide from a folder containing PROJECT.md, creating it first if it doesn't exist yet. |
+
+### Loop
+
+| Command | What it does |
+| --- | --- |
+| `ahood loop search <query> [--json] [--limit <n>]` | Search published loops. |
+| `ahood loop view\|show <owner>/<loop> [--json] [--web]` | Show a single loop's details without installing it (alias: ahood loop show). |
+| `ahood loop read <owner>/<loop> [--json]` | Print a published loop's LOOP.md, without installing it. |
+| `ahood loop versions <owner>/<loop> [--json]` | List a loop's published-version history. |
+| `ahood loop diff <owner>/<loop> <versionA> <versionB> [--json]` | Show what changed between two published versions of a loop. |
+| `ahood loop list [--json]` | List your own loops, public and private. |
+| `ahood loop add <owner>/<loop>[@version]` | Install a loop into .claude/loops/<owner>@<loop>.md, pinned in the lockfile. |
+| `ahood loop update [<owner>/<loop> ...] [--dry-run] [--json]` | Move loop pins forward to the latest version. |
+| `ahood loop outdated [<owner>/<loop> ...] [--json]` | Read-only staleness check for installed loops. |
+| `ahood loop remove <owner>/<loop> [--yes]` | Uninstall and unpin a loop (local only, prompts unless --yes is passed). |
+| `ahood loop edit <owner>/<loop> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a loop you own, changing only the flags you pass. |
+| `ahood loop unpublish <owner>/<loop>[@version] [--yes]` | Delete a loop from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
+| `ahood loop star <owner>/<loop>` | Star a loop. |
+| `ahood loop unstar <owner>/<loop>` | Remove your star from a loop. |
+| `ahood loop share <owner>/<loop> --group <group>` | Share a loop you own with a group, without changing its visibility. |
+| `ahood loop unshare <owner>/<loop> --group <group>` | Stop sharing a loop you own with a group. |
+| `ahood loop init [name]` | Scaffold a new loop folder with a minimal, valid LOOP.md. |
+| `ahood loop publish <owner>/<loop>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of a loop from a folder containing LOOP.md, creating it first if it doesn't exist yet. |
 
 ### Group
 
