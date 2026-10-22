@@ -126,6 +126,63 @@ describe("ahood snap dispatch (built CLI)", () => {
   });
 });
 
+describe("plural kind alias (ahood-cli#190)", () => {
+  // `ahood <kind>s` dispatches exactly as `ahood <kind>` would, for every
+  // existing kind -- same group help, same unknown-verb error, same --help
+  // interception path (the GROUP_COMMANDS check keys off the resolved
+  // singular, not the literal word typed).
+  for (const kind of ["skill", "agent", "mcp", "doc", "project"]) {
+    it(`\`ahood ${kind}s\` prints the same group help as \`ahood ${kind}\``, () => {
+      const plural = runCli([`${kind}s`]);
+      const singular = runCli([kind]);
+      expect(plural.status).toBe(singular.status);
+      expect(plural.stdout).toBe(singular.stdout);
+    });
+
+    it(`\`ahood ${kind}s --help\` prints the same help as \`ahood ${kind} --help\` (not the generic top-level help)`, () => {
+      const plural = runCli([`${kind}s`, "--help"]);
+      const singular = runCli([kind, "--help"]);
+      expect(plural.status).toBe(0);
+      expect(plural.stdout).toBe(singular.stdout);
+    });
+
+    it(`an unknown verb under \`ahood ${kind}s\` fails exactly like under \`ahood ${kind}\``, () => {
+      const plural = runCli([`${kind}s`, "badverb"]);
+      const singular = runCli([kind, "badverb"]);
+      expect(plural.status).toBe(2);
+      expect(plural.stderr).toBe(singular.stderr);
+    });
+  }
+
+  it("`ahood projects search ...` behaves identically to `ahood project search ...`", () => {
+    const plural = runCli(["projects", "search", "--help"]);
+    const singular = runCli(["project", "search", "--help"]);
+    expect(plural.status).toBe(0);
+    expect(plural.stdout).toBe(singular.stdout);
+  });
+
+  it("a genuine near-miss typo (`ahood projcts`) still gets the existing did-you-mean suggestion, not a false plural match", () => {
+    const { stderr, status } = runCli(["projcts"]);
+    expect(status).toBe(2);
+    expect(stderr).toContain("Unknown command: projcts");
+    expect(stderr).toContain("Did you mean 'project'?");
+  });
+
+  it("no top-level command collides with a plural kind alias", async () => {
+    const { COMMANDS } = await import("../src/index.js");
+    const collisions = Object.keys(COMMANDS).filter((name) => name.endsWith("s"));
+    expect(collisions).toEqual([]);
+  });
+
+  it("`ahood snaps`/`ahood groups` are not kind plurals and still fail as unknown commands (group/snap are entities, not kinds)", () => {
+    for (const bad of ["snaps", "groups"]) {
+      const { status, stderr } = runCli([bad]);
+      expect(status).toBe(2);
+      expect(stderr).toContain(`Unknown command: ${bad}`);
+    }
+  });
+});
+
 describe("invocation via a symlink (how npm's installed `ahood` bin actually works)", () => {
   // Regression test for a real incident: npm's installed bin is a symlink
   // to dist/index.js (`npm install -g` / npx both create one), not a copy.

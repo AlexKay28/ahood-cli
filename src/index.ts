@@ -175,6 +175,19 @@ function closestCommand(input: string): string | undefined {
   return closestOf(input, Object.keys(COMMANDS));
 }
 
+// Plural alias (ahood-cli#190): `ahood skills`, `ahood agents`, `ahood mcps`,
+// `ahood docs`, `ahood projects` (and the future `ahood loops`) dispatch
+// exactly as the singular kind would. A straight trailing-`s` strip-and-match
+// against the KINDS registry is enough -- every current and planned kind
+// pluralizes this way, and no COMMANDS key ends in "s" (checked below), so a
+// real top-level command can never be shadowed by this. Scoped to CLI_KINDS
+// only, not "group"/"snap" (those are separate entities, not kinds).
+function pluralKindAlias(word: string): CliKind | undefined {
+  if (!word.endsWith("s")) return undefined;
+  const singular = word.slice(0, -1);
+  return isCliKind(singular) ? singular : undefined;
+}
+
 function closestSkillCommand(input: string): string | undefined {
   return closestOf(input, Object.keys(SKILL_COMMANDS));
 }
@@ -416,7 +429,14 @@ async function main() {
     return;
   }
 
-  const handler = COMMANDS[command];
+  // Resolve a plural kind alias (ahood-cli#190) before the generic lookup, so
+  // everything downstream -- the handler itself and the GROUP_COMMANDS
+  // --help interception below -- treats `ahood projects` exactly like
+  // `ahood project`. Only applies when `command` isn't already a real
+  // command (so it never shadows one).
+  const resolvedCommand = COMMANDS[command] ? command : (pluralKindAlias(command) ?? command);
+
+  const handler = COMMANDS[resolvedCommand];
   if (!handler) {
     console.error(`Unknown command: ${command}`);
     // Every previously-flat skill command moved under `ahood skill <verb>`
@@ -437,8 +457,8 @@ async function main() {
   // GROUP_COMMANDS despite the name, unrelated to the "group" entity itself)
   // own their own --help handling at both the entity and per-verb level --
   // don't intercept here.
-  if (!GROUP_COMMANDS.has(command) && (args.includes("--help") || args.includes("-h"))) {
-    const entry = findCommandHelp(command);
+  if (!GROUP_COMMANDS.has(resolvedCommand) && (args.includes("--help") || args.includes("-h"))) {
+    const entry = findCommandHelp(resolvedCommand);
     console.log(entry ? formatCommandHelp(entry) : formatHelp());
     return;
   }
