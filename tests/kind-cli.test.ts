@@ -266,6 +266,61 @@ describe("ahood project command group (ahood-cli#185)", () => {
   });
 });
 
+describe("ahood loop command group (ahood-cli, ahood#858)", () => {
+  it("`ahood --help` lists `ahood loop <command>`; `ahood loop`, `--help` and `help loop` print loop help", () => {
+    expect(run(["--help"]).stdout.toString()).toContain("ahood loop <command>");
+    for (const args of [["loop"], ["loop", "--help"], ["help", "loop"]]) {
+      const { stdout, status } = run(args);
+      expect(status).toBe(0);
+      const text = stdout.toString();
+      expect(text).toContain("ahood loop -- loops (LOOP.md) in the ahood registry");
+      expect(text).toContain("ahood loop read <owner>/<loop>");
+      expect(text).toContain("ahood loop init [name]");
+      expect(text).toContain("ahood loop add <owner>/<loop>[@version]");
+      expect(text).toContain(".claude/loops/<owner>@<loop>.md");
+    }
+    expect(run(["loop", "read", "--help"]).stdout.toString()).toMatch(/^ahood loop read <owner>\/<loop>/);
+    expect(run(["help", "loop", "publish"]).stdout.toString()).toMatch(/^ahood loop publish <owner>\/<loop>@<version>/);
+  });
+
+  it("`ahood loop add alice/..` is refused (exit 2) before any request, writing nothing", () => {
+    const home = mkdtempSync(path.join(tmpdir(), "ahood-loop-home-"));
+    const cwd = mkdtempSync(path.join(tmpdir(), "ahood-loop-cwd-"));
+    try {
+      // Exit 2, not 6: refused before any request to the unreachable registry.
+      const { status, stderr } = run(["loop", "add", "alice/.."], { cwd, env: offlineEnv(home) });
+      expect(status).toBe(2);
+      expect(stderr).toContain('Invalid skill ".."');
+      expect(readdirSync(cwd)).toEqual([]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("an unknown loop verb fails with a suggestion; completion offers loop and all its verbs", () => {
+    const bad = run(["loop", "raed", "x"]);
+    expect(bad.status).toBe(2);
+    expect(bad.stderr).toContain("Unknown loop command: raed");
+    expect(bad.stderr).toContain("Did you mean 'read'?");
+    const bash = run(["completion", "bash"]).stdout.toString();
+    expect(bash).toMatch(/local top_words="[^"]*\bloop\b/);
+    const loopWords = bash.match(/local loop_words="([^"]*)"/)![1].split(" ");
+    expect(loopWords).toEqual(
+      expect.arrayContaining(["search", "list", "view", "show", "read", "init", "publish", "add", "update", "outdated", "remove"]),
+    );
+    expect(bash).toMatch(/local help_words="[^"]*\bloop\b/);
+  });
+
+  it("the self-skill documents the loop group", () => {
+    const content = readFileSync(skillSource, "utf8");
+    expect(content).toContain("ahood loop read");
+    expect(content).toContain("ahood loop add");
+    expect(content).toContain(".claude/loops/<owner>@<loop>.md");
+    expect(content).toContain("LOOP.md");
+  });
+});
+
 describe("ahood help useme", () => {
   it("prints the bundled SKILL.md byte-for-byte, offline, unauthenticated, writing nothing", () => {
     const home = mkdtempSync(path.join(tmpdir(), "ahood-useme-home-"));

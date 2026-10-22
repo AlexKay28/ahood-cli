@@ -148,12 +148,33 @@ traps. Plain Markdown; \`ahood project add\` saves this whole file to .claude/pr
 `;
 }
 
+// LOOP.md, for `ahood loop init` (ahood-cli, ahood#858). The backend's
+// validator (lib/publish/parse-loop-frontmatter.ts) is DOC.md's exact flat
+// reader -- no extra field, unlike PROJECT.md's optional `project` remote,
+// since a loop is explicitly portable across repositories rather than
+// scoped to one. Same rules as buildDocMd apply: nothing above the opening
+// `---`, and no colon in a comment line inside the frontmatter.
+function buildLoopMd(name: string): string {
+  return `---
+name: ${name}
+description: TODO -- one line saying what kind of recurring agentic session this loop is for.
+---
+
+# ${name}
+
+TODO -- the pseudocode and rules for running this kind of session: the steps, the order,
+and what to do at each decision point. Plain Markdown; \`ahood loop add\` saves this whole
+file to .claude/loops/<owner>@<loop>.md.
+`;
+}
+
 const TEMPLATES: Record<CliKind, (name: string, project?: string) => string> = {
   skill: buildSkillMd,
   agent: buildAgentMd,
   mcp: buildServerJson,
   doc: buildDocMd,
   project: buildProjectMd,
+  loop: buildLoopMd,
 };
 
 const NEXT_STEPS: Record<CliKind, string[]> = {
@@ -166,6 +187,7 @@ const NEXT_STEPS: Record<CliKind, string[]> = {
   ],
   doc: ["Fill in the description, then write the doc below the frontmatter."],
   project: ["Fill in the description, then write the guide below the frontmatter."],
+  loop: ["Fill in the description, then write the loop's pseudocode and rules below the frontmatter."],
 };
 
 // `project init`'s flags for the `project` field (ahood-cli#185), parsed and

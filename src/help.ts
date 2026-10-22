@@ -417,6 +417,11 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
 export const AGENT_COMMANDS_HELP: CommandHelp[] = registryCommandsHelp("agent");
 export const DOC_COMMANDS_HELP: CommandHelp[] = registryCommandsHelp("doc");
 
+// `ahood loop` (ahood-cli, ahood#858): the shared verbs, no extras -- a loop
+// is portable across repositories (unlike `project`), so it needs none of
+// PROJECT_COMMANDS_HELP's bare-listing or `--project` flag additions below.
+export const LOOP_COMMANDS_HELP: CommandHelp[] = registryCommandsHelp("loop");
+
 // `ahood project` (ahood-cli#185): the shared verbs, with init's `project`
 // field flags, plus bare `ahood project` -- the guides for this repository.
 export const PROJECT_COMMANDS_HELP: CommandHelp[] = [
@@ -674,6 +679,7 @@ const ENTITY_COMMANDS_HELP: Record<string, CommandHelp[]> = {
   mcp: MCP_COMMANDS_HELP,
   doc: DOC_COMMANDS_HELP,
   project: PROJECT_COMMANDS_HELP,
+  loop: LOOP_COMMANDS_HELP,
   group: GROUP_COMMANDS_HELP,
   snap: SNAP_COMMANDS_HELP,
 };
@@ -888,12 +894,28 @@ export function formatProjectHelp(): string {
   );
 }
 
+export function formatLoopHelp(): string {
+  return formatRegistryKindHelp(
+    "ahood loop -- loops (LOOP.md) in the ahood registry",
+    [
+      "A loop is a pseudocode-and-rules procedure for running a recurring kind of agentic session",
+      "(a code review pass, a migration sweep, ...), reusable across repositories -- unlike a project",
+      "guide, it names no single repository. Every verb here acts on loops only: a target of another",
+      "kind is refused before anything is downloaded, prompted for, written, or sent. Installs land in",
+      ".claude/loops/<owner>@<loop>.md. To look at a loop without installing it, use `ahood loop read`.",
+    ],
+    LOOP_COMMANDS_HELP,
+    "loop",
+  );
+}
+
 const KIND_HELP: Record<CliKind, () => string> = {
   skill: formatSkillHelp,
   agent: formatAgentHelp,
   mcp: formatMcpHelp,
   doc: formatDocHelp,
   project: formatProjectHelp,
+  loop: formatLoopHelp,
 };
 
 export function formatKindHelp(noun: CliKind): string {
@@ -944,6 +966,8 @@ export function formatHelp(): string {
   const projectGroupUsage = "ahood project <command>";
   const projectGroupSummary =
     "The same verbs, for project guides (PROJECT.md) only; bare `ahood project` lists this repository's guides.";
+  const loopGroupUsage = "ahood loop <command>";
+  const loopGroupSummary = "The same verbs, for loops (LOOP.md) only -- run `ahood loop --help` for the full list.";
   const groupGroupUsage = "ahood group <command>";
   const groupGroupSummary =
     "Create private groups and share skills with them -- run `ahood group --help` for the full list.";
@@ -957,6 +981,7 @@ export function formatHelp(): string {
     { usage: mcpGroupUsage, summary: mcpGroupSummary },
     { usage: docGroupUsage, summary: docGroupSummary },
     { usage: projectGroupUsage, summary: projectGroupSummary },
+    { usage: loopGroupUsage, summary: loopGroupSummary },
     { usage: groupGroupUsage, summary: groupGroupSummary },
     { usage: snapGroupUsage, summary: snapGroupSummary },
   ]);
@@ -978,7 +1003,7 @@ export function formatHelp(): string {
     "",
     "Run `ahood <command> --help` (or `ahood help <command>`) for a single command's flags and examples.",
     "Run `ahood skill --help` for the full list of skill commands.",
-    "Run `ahood agent|mcp|doc|project --help` for the kind-scoped agent, MCP, doc and project guide commands.",
+    "Run `ahood agent|mcp|doc|project|loop --help` for the kind-scoped agent, MCP, doc, project guide and loop commands.",
     "Run `ahood group --help` for the full list of group commands.",
     "Run `ahood snap --help` for the full list of snap commands.",
     "Run `ahood --version` to print the installed CLI version.",

@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dispatchAgent, dispatchDoc, dispatchMcp, dispatchSkill } from "../src/index.js";
+import { dispatchAgent, dispatchDoc, dispatchLoop, dispatchMcp, dispatchSkill } from "../src/index.js";
 import {
   assertKind,
   extractKindFlag,
@@ -12,7 +12,7 @@ import {
   resolveScope,
 } from "../src/kinds.js";
 import { readLockfile, writeLockfileEntry } from "../src/lockfile.js";
-import { agentPath, docPath, skillDir, LOCKFILE_PATH } from "../src/spec.js";
+import { agentPath, docPath, loopPath, skillDir, LOCKFILE_PATH } from "../src/spec.js";
 import { UsageError } from "../src/usage-error.js";
 import { hashMcpServerConfig } from "../src/commands/add.js";
 
@@ -814,6 +814,361 @@ describe("ahood doc (ahood-cli#182)", () => {
       await expect(dispatchDoc(["init", "s"])).rejects.toThrow(/already a skill/);
       expect(existsSync(join("s", "DOC.md"))).toBe(false);
       await expect(dispatchDoc(["init", "../escape"])).rejects.toThrow(/outside the current directory/);
+      expect(existsSync(join(dir, "..", "escape"))).toBe(false);
+    });
+  });
+});
+
+// ahood-cli / ahood#858: `ahood loop <verb>`, the sixth registry noun. Every
+// verb is the same shared handler, strict for kind loop; a loop installs as
+// one flat file, .claude/loops/<owner>@<loop>.md, pinned with kind "loop" --
+// the same per-owner shape as `doc`, not PROJECT_GUIDE_PATH's single fixed
+// path, since a loop is explicitly portable across repositories rather than
+// scoped to one (ahood repo: docs/adr/backend/0015-loop-artifact-kind.md).
+//
+// LOOP.md's frontmatter is DOC.md's shape exactly: starts with a `---` line,
+// a closing `---` line followed by a newline, and non-empty flat `name` and
+// `description` fields -- no extra field, unlike PROJECT.md's optional
+// `project` remote.
+
+describe("ahood loop (ahood-cli, ahood#858)", () => {
+  let dir: string;
+  let originalCwd: string;
+  const saved = { HOME: process.env.HOME, AHOOD_API_URL: process.env.AHOOD_API_URL, AHOOD_TOKEN: process.env.AHOOD_TOKEN };
+
+  beforeEach(() => {
+    originalCwd = process.cwd();
+    dir = mkdtempSync(join(tmpdir(), "ahood-loop-test-"));
+    process.chdir(dir);
+    process.env.HOME = dir;
+    process.env.AHOOD_API_URL = API_URL;
+    delete process.env.AHOOD_TOKEN;
+    process.exitCode = 0;
+    vi.mocked(confirm).mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    process.chdir(originalCwd);
+    rmSync(dir, { recursive: true, force: true });
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    process.exitCode = 0;
+  });
+
+  function quiet() {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  }
+
+  it("the loop noun is strict for kind loop and refuses a contradictory --kind", () => {
+    expect(resolveScope("loop", undefined)).toEqual({ noun: "loop", kind: "loop" });
+    expect(resolveScope("loop", "loop")).toEqual({ noun: "loop", kind: "loop" });
+    expect(() => resolveScope("loop", "skill")).toThrow(/--kind skill contradicts it/);
+    expect(() => resolveScope("loop", "all")).toThrow(UsageError);
+    expect(resolveScope("skill", "loop")).toEqual({ noun: "skill", kind: "loop" });
+  });
+
+  describe("install: add, update, outdated, remove", () => {
+    const loopFile = join(".claude", "loops", "alice@sweep.md");
+
+    it("loop add writes LOOP.md to .claude/loops/<owner>@<loop>.md and pins it with kind loop", async () => {
+      quiet();
+      fakeRegistry({ "alice/sweep": await entry("loop") });
+      await dispatchLoop(["add", "alice/sweep"]);
+      expect(readFileSync(loopFile, "utf8")).toBe("---\nname: x\ndescription: d\n---\nbody\n");
+      const pin = readLockfile(LOCKFILE_PATH)["alice/sweep"];
+      expect(pin).toMatchObject({ version: "1.0.0", kind: "loop" });
+      expect(existsSync(join(".claude", "skills"))).toBe(false);
+      expect(existsSync(join(".claude", "agents"))).toBe(false);
+      expect(localInstalledKind("alice", "sweep", pin)).toBe("loop");
+    });
+
+    it("loop add of a pinned version installs that version", async () => {
+      quiet();
+      fakeRegistry({ "alice/sweep": await entry("loop", "1.2.0") });
+      await dispatchLoop(["add", "alice/sweep@1.2.0"]);
+      expect(readLockfile(LOCKFILE_PATH)["alice/sweep"]?.version).toBe("1.2.0");
+    });
+
+    it("refuses path traversal: the segment check runs before any request, and loopPath itself refuses", async () => {
+      const calls = fakeRegistry({});
+      for (const spec of ["alice/..", "../sweep", "alice/../../etc", "alice/.hidden"]) {
+        await expect(dispatchLoop(["add", spec])).rejects.toThrow(UsageError);
+      }
+      expect(calls).toEqual([]);
+      expect(() => loopPath("alice", "..")).toThrow(UsageError);
+      expect(() => loopPath("..", "sweep")).toThrow(UsageError);
+      expect(loopPath("alice", "sweep")).toBe(loopFile);
+      expect(readdirSync(dir)).toEqual([]);
+    });
+
+    it("refuses to overwrite a file at the loop's path that is not pinned as that loop, before downloading", async () => {
+      quiet();
+      mkdirSync(join(".claude", "loops"), { recursive: true });
+      writeFileSync(loopFile, "mine");
+      const calls = fakeRegistry({ "alice/sweep": await entry("loop") });
+      await expect(dispatchLoop(["add", "alice/sweep"])).rejects.toThrow(/already exists and is not pinned as alice\/sweep/);
+      expect(readFileSync(loopFile, "utf8")).toBe("mine");
+      expect(mutations(calls)).toEqual([]);
+      expect(existsSync(LOCKFILE_PATH)).toBe(false);
+    });
+
+    it("no-arg loop outdated/update consider only loop pins; loop update moves the loop forward", async () => {
+      quiet();
+      fakeRegistry({ "alice/sweep": await entry("loop"), "alice/rev": await entry("agent") });
+      await dispatchLoop(["add", "alice/sweep"]);
+      await dispatchAgent(["add", "alice/rev"]);
+
+      const calls = fakeRegistry({ "alice/sweep": await entry("loop", "2.0.0"), "alice/rev": await entry("agent", "2.0.0") });
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await dispatchLoop(["outdated", "--json"]);
+      const previews = JSON.parse(log.mock.calls.at(-1)![0] as string);
+      expect(previews.map((p: { skill: string }) => p.skill)).toEqual(["alice/sweep"]);
+      expect(calls.some((c) => c.url.includes("alice/rev"))).toBe(false);
+      expect(readLockfile(LOCKFILE_PATH)["alice/sweep"]?.version).toBe("1.0.0");
+
+      await dispatchLoop(["update"]);
+      const lock = readLockfile(LOCKFILE_PATH);
+      expect(lock["alice/sweep"]).toMatchObject({ version: "2.0.0", kind: "loop" });
+      expect(lock["alice/rev"]?.version).toBe("1.0.0");
+      expect(calls.some((c) => c.url.includes("alice/rev"))).toBe(false);
+    });
+
+    it("legacy no-arg skill update moves a loop pin forward too, through the loop install path", async () => {
+      quiet();
+      fakeRegistry({ "alice/sweep": await entry("loop") });
+      await dispatchLoop(["add", "alice/sweep"]);
+      fakeRegistry({ "alice/sweep": await entry("loop", "2.0.0") });
+      await dispatchSkill(["update"]);
+      expect(readLockfile(LOCKFILE_PATH)["alice/sweep"]).toMatchObject({ version: "2.0.0", kind: "loop" });
+      expect(existsSync(join(".claude", "skills"))).toBe(false);
+    });
+
+    it("loop remove deletes the file and the pin, offline", async () => {
+      quiet();
+      fakeRegistry({ "alice/sweep": await entry("loop") });
+      await dispatchLoop(["add", "alice/sweep"]);
+      const calls = fakeRegistry({});
+      await dispatchLoop(["remove", "alice/sweep", "--yes"]);
+      expect(existsSync(loopFile)).toBe(false);
+      expect(readLockfile(LOCKFILE_PATH)["alice/sweep"]).toBeUndefined();
+      expect(calls).toEqual([]);
+    });
+
+    it("agent remove of an installed loop, and loop remove of an installed agent, are refused before deleting", async () => {
+      quiet();
+      fakeRegistry({ "alice/sweep": await entry("loop"), "alice/rev": await entry("agent") });
+      await dispatchLoop(["add", "alice/sweep"]);
+      await dispatchAgent(["add", "alice/rev"]);
+      await expect(dispatchAgent(["remove", "alice/sweep", "--yes"])).rejects.toThrow(/alice\/sweep is a loop, not an agent/);
+      await expect(dispatchLoop(["remove", "alice/rev", "--yes"])).rejects.toThrow(/alice\/rev is an agent, not a loop/);
+      expect(existsSync(loopFile)).toBe(true);
+      expect(existsSync(agentPath("alice", "rev"))).toBe(true);
+      expect(Object.keys(readLockfile(LOCKFILE_PATH)).sort()).toEqual(["alice/rev", "alice/sweep"]);
+    });
+
+    it("legacy skill remove removes an installed loop too", async () => {
+      quiet();
+      fakeRegistry({ "alice/sweep": await entry("loop") });
+      await dispatchLoop(["add", "alice/sweep"]);
+      await dispatchSkill(["remove", "alice/sweep", "--yes"]);
+      expect(existsSync(loopFile)).toBe(false);
+      expect(readLockfile(LOCKFILE_PATH)["alice/sweep"]).toBeUndefined();
+    });
+
+    it("legacy `ahood skill add` of a loop is still refused before any download, now pointing at loop add", async () => {
+      quiet();
+      const calls = fakeRegistry({ "alice/sweep": await entry("loop") });
+      const error = await dispatchSkill(["add", "alice/sweep"]).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(UsageError);
+      expect((error as Error).message).toBe(
+        "alice/sweep is a loop (a reusable procedure for a recurring kind of agentic session, portable across repositories), not a skill. " +
+          "Install it with `ahood loop add alice/sweep`, or read it without installing with `ahood loop read alice/sweep`.",
+      );
+      expect(mutations(calls)).toEqual([]);
+      expect(readdirSync(dir)).toEqual([]);
+    });
+
+    it("`ahood skill add --kind loop` installs through the loop scope", async () => {
+      quiet();
+      fakeRegistry({ "alice/sweep": await entry("loop") });
+      await dispatchSkill(["add", "alice/sweep", "--kind", "loop"]);
+      expect(existsSync(loopFile)).toBe(true);
+    });
+
+    it("loop add of a skill, and agent/mcp add of a loop, are refused before any download or write", async () => {
+      quiet();
+      const calls = fakeRegistry({ "alice/pdf": await entry("skill"), "alice/sweep": await entry("loop") });
+      await expect(dispatchLoop(["add", "alice/pdf"])).rejects.toThrow(/alice\/pdf is a skill, not a loop -- refusing to install it/);
+      await expect(dispatchAgent(["add", "alice/sweep"])).rejects.toThrow(
+        /alice\/sweep is a loop, not an agent -- refusing to install it\. Use `ahood loop add alice\/sweep` instead\./,
+      );
+      await expect(dispatchMcp(["add", "alice/sweep@1.0.0"])).rejects.toThrow(KindMismatchError);
+      expect(mutations(calls)).toEqual([]);
+      expect(readdirSync(dir)).toEqual([]);
+    });
+  });
+
+  describe("read and author verbs work on a loop", () => {
+    it("search asks for ?kind=loop; list asks for the owner's loops only, same --json shape", async () => {
+      const rows = [
+        { slug: "a", name: "A", tagline: null, visibility: "public", kind: "skill", downloads_count: 0, stars_count: 0, profiles: { username: "alice" } },
+        { slug: "r", name: "R", tagline: null, visibility: "public", kind: "loop", downloads_count: 0, stars_count: 0, profiles: { username: "alice" } },
+      ];
+      const calls = fakeRegistry({}, rows);
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await dispatchLoop(["search", "review"]);
+      expect(new URL(calls[0].url).searchParams.get("kind")).toBe("loop");
+      await dispatchLoop(["list", "--json"]);
+      const listUrl = new URL(calls[1].url);
+      expect(listUrl.searchParams.get("mine")).toBe("true");
+      expect(listUrl.searchParams.get("kind")).toBe("loop");
+      expect(JSON.parse(log.mock.calls.at(-1)![0] as string)).toEqual([rows[1]]);
+    });
+
+    it("read prints the LOOP.md content; view, show, versions and diff go through", async () => {
+      quiet();
+      const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const calls = fakeRegistry({ "alice/sweep": await entry("loop") });
+      await dispatchLoop(["read", "alice/sweep"]);
+      // fake-registry.ts's versionRow fixture always serves the literal
+      // sentinel "doc" as skill_md_content, regardless of kind.
+      expect(stdout.mock.calls.map((c) => String(c[0])).join("")).toContain("doc");
+      await dispatchLoop(["view", "alice/sweep", "--json"]);
+      await dispatchLoop(["show", "alice/sweep", "--json"]);
+      await dispatchLoop(["versions", "alice/sweep"]);
+      await dispatchLoop(["diff", "alice/sweep", "1.0.0", "1.0.0"]);
+      // diff downloads both archives to compare LOOP.md; nothing else is sent.
+      expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
+      expect(vi.mocked(console.log)).toHaveBeenCalledWith("LOOP.md is unchanged between these versions.");
+    });
+
+    it("edit, star, unstar, share, unshare and unpublish reach their mutation", async () => {
+      quiet();
+      const calls = fakeRegistry({ "alice/sweep": await entry("loop") });
+      await dispatchLoop(["edit", "alice/sweep", "--tagline", "x"]);
+      await dispatchLoop(["star", "alice/sweep"]);
+      await dispatchLoop(["unstar", "alice/sweep"]);
+      await dispatchLoop(["share", "alice/sweep", "--group", "team"]);
+      await dispatchLoop(["unshare", "alice/sweep", "--group", "team"]);
+      await dispatchLoop(["unpublish", "alice/sweep", "--yes"]);
+      expect(mutations(calls).map((c) => c.method)).toEqual(["PATCH", "POST", "DELETE", "POST", "DELETE", "DELETE"]);
+    });
+  });
+
+  describe("wrong-kind targets are refused before any mutation, both directions", () => {
+    const verbs: Array<[string, (key: string) => string[]]> = [
+      ["edit", (k) => ["edit", k, "--tagline", "x"]],
+      ["unpublish", (k) => ["unpublish", k, "--yes"]],
+      ["star", (k) => ["star", k]],
+      ["unstar", (k) => ["unstar", k]],
+      ["share", (k) => ["share", k, "--group", "team"]],
+      ["unshare", (k) => ["unshare", k, "--group", "team"]],
+      ["read", (k) => ["read", k]],
+      ["view", (k) => ["view", k, "--json"]],
+      ["versions", (k) => ["versions", k]],
+      ["diff", (k) => ["diff", k, "1.0.0", "1.0.0"]],
+    ];
+    for (const [name, argv] of verbs) {
+      it(`loop ${name} of a skill, and agent/mcp ${name} of a loop`, async () => {
+        quiet();
+        const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+        const calls = fakeRegistry({ "alice/pdf": await entry("skill"), "alice/sweep": await entry("loop") });
+        await expect(dispatchLoop(argv("alice/pdf"))).rejects.toThrow(/alice\/pdf is a skill, not a loop -- .* Use `ahood skill /);
+        await expect(dispatchAgent(argv("alice/sweep"))).rejects.toThrow(/alice\/sweep is a loop, not an agent/);
+        await expect(dispatchMcp(argv("alice/sweep"))).rejects.toThrow(KindMismatchError);
+        await expect(dispatchSkill([...argv("alice/sweep"), "--kind", "skill"])).rejects.toThrow(KindMismatchError);
+        expect(mutations(calls)).toEqual([]);
+        expect(confirm).not.toHaveBeenCalled();
+        expect(stdout).not.toHaveBeenCalled();
+      });
+    }
+
+    it("loop publish onto an existing skill is refused before init/upload", async () => {
+      quiet();
+      mkdirSync("r");
+      writeFileSync(join("r", "LOOP.md"), "---\nname: r\ndescription: d\n---\n");
+      const calls = fakeRegistry({ "alice/pdf": await entry("skill") });
+      await expect(dispatchLoop(["publish", "alice/pdf@1.1.0", "--path", "r"])).rejects.toThrow(
+        /alice\/pdf is a skill, not a loop -- refusing to publish a new version of it/,
+      );
+      expect(mutations(calls)).toEqual([]);
+    });
+  });
+
+  describe("publish", () => {
+    it("loop publish of a new entry creates it with kind loop", async () => {
+      quiet();
+      mkdirSync("r");
+      writeFileSync(join("r", "LOOP.md"), "---\nname: r\ndescription: d\n---\n");
+      const calls = fakeRegistry({});
+      await dispatchLoop(["publish", "alice/r@1.0.0", "--path", "r", "--name", "R"]);
+      const create = calls.find((c) => c.method === "POST" && new URL(c.url).pathname === "/api/v1/skills");
+      expect(JSON.parse(create!.body!).kind).toBe("loop");
+    });
+
+    it("loop publish refuses a contradictory --kind and a folder without LOOP.md, before any request", async () => {
+      quiet();
+      const calls = fakeRegistry({});
+      await expect(dispatchLoop(["publish", "alice/r@1.0.0", "--kind", "skill"])).rejects.toThrow(/contradicts/);
+      mkdirSync("s");
+      writeFileSync(join("s", "SKILL.md"), "x");
+      await expect(dispatchLoop(["publish", "alice/r@1.0.0", "--path", "s"])).rejects.toThrow(
+        /No LOOP.md found .* ahood loop publish must point at a folder containing LOOP.md/,
+      );
+      expect(calls).toEqual([]);
+    });
+
+    it("legacy skill publish accepts --kind loop and infers loop from a LOOP.md-only folder", async () => {
+      quiet();
+      mkdirSync("r");
+      writeFileSync(join("r", "LOOP.md"), "---\nname: r\ndescription: d\n---\n");
+      let calls = fakeRegistry({});
+      await dispatchSkill(["publish", "alice/r@1.0.0", "--path", "r", "--name", "R"]);
+      let create = calls.find((c) => c.method === "POST" && new URL(c.url).pathname === "/api/v1/skills");
+      expect(JSON.parse(create!.body!).kind).toBe("loop");
+      vi.unstubAllGlobals();
+      calls = fakeRegistry({});
+      await dispatchSkill(["publish", "alice/r@1.0.0", "--path", "r", "--name", "R", "--kind", "loop"]);
+      create = calls.find((c) => c.method === "POST" && new URL(c.url).pathname === "/api/v1/skills");
+      expect(JSON.parse(create!.body!).kind).toBe("loop");
+    });
+  });
+
+  describe("init", () => {
+    it("writes a LOOP.md the backend's validator accepts and points at loop publish", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await dispatchLoop(["init", "Sweep Loop"]);
+      const loopMd = readFileSync(join("sweep-loop", "LOOP.md"), "utf8");
+      expect(backendAcceptsDocMd(loopMd)).toBe(true);
+      expect(loopMd.startsWith("---\nname: sweep-loop\ndescription: ")).toBe(true);
+      expect(log.mock.calls.flat().join("\n")).toContain("ahood loop publish <owner>/<loop>@<version> --path sweep-loop");
+
+      rmSync("sweep-loop", { recursive: true });
+      await dispatchLoop(["init"]);
+      expect(backendAcceptsDocMd(readFileSync("LOOP.md", "utf8"))).toBe(true);
+    });
+
+    it("refuses to overwrite, to mix kinds in one folder, or to escape the project", async () => {
+      quiet();
+      await dispatchLoop(["init", "r"]);
+      const before = readFileSync(join("r", "LOOP.md"), "utf8");
+      await expect(dispatchLoop(["init", "r"])).rejects.toThrow(/LOOP.md already exists/);
+      expect(readFileSync(join("r", "LOOP.md"), "utf8")).toBe(before);
+      await expect(dispatchAgent(["init", "r"])).rejects.toThrow(/already a loop/);
+      expect(existsSync(join("r", "AGENT.md"))).toBe(false);
+      await dispatchSkill(["init", "s", "--kind", "skill"]);
+      await expect(dispatchLoop(["init", "s"])).rejects.toThrow(/already a skill/);
+      expect(existsSync(join("s", "LOOP.md"))).toBe(false);
+      await expect(dispatchLoop(["init", "../escape"])).rejects.toThrow(/outside the current directory/);
       expect(existsSync(join(dir, "..", "escape"))).toBe(false);
     });
   });
