@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "ahood",
+  "description": "ahood's own Claude Code plugin marketplace -- lists the plugin that connects Claude Code to ahood's MCP server for searching, fetching, and publishing AI agent skills.",
+  "owner": {
+    "name": "ahood",
+    "url": "https://github.com/AlexKay28/ahood-cli"
+  },
+  "plugins": [
+    {
+      "name": "ahood",
+      "description": "Connect Claude Code to the ahood registry's MCP server -- search, fetch, read, and publish skills, agents, MCP servers, and docs mid-session, without leaving the editor.",
+      "author": {
+        "name": "ahood",
+        "url": "https://github.com/AlexKay28/ahood-cli"
+      },
+      "category": "productivity",
+      "source": "./plugins/ahood",
+      "homepage": "https://www.ahood.dev/docs#mcp"
+    }
+  ]
+}
