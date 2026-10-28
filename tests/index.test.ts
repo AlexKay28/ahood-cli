@@ -170,7 +170,9 @@ describe("plural kind alias (ahood-cli#190)", () => {
 
   it("no top-level command collides with a plural kind alias", async () => {
     const { COMMANDS } = await import("../src/index.js");
-    const collisions = Object.keys(COMMANDS).filter((name) => name.endsWith("s"));
+    // `status` (ahood#979) ends in "s" but its singular is no kind.
+    const { isCliKind } = await import("../src/kinds.js");
+    const collisions = Object.keys(COMMANDS).filter((name) => name.endsWith("s") && isCliKind(name.slice(0, -1)));
     expect(collisions).toEqual([]);
   });
 

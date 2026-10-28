@@ -15,6 +15,7 @@ import {
   type LockEntry,
 } from "../lockfile.js";
 import { promptSecret } from "../secret-prompt.js";
+import { recordInstallOrWarn } from "../installed.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
 import { assertCanonicalEntryPaths, tarEntryPath } from "../archive-entries.js";
 import { UsageError } from "../usage-error.js";
@@ -812,6 +813,7 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
     }
     throw error;
   }
+  recordInstallOrWarn({ owner, slug: skill, version: meta.version, kind: "mcp", checksum_sha256: meta.checksum_sha256 });
   console.log(`Installed ${owner}/${skill}@${meta.version} into ${MCP_CONFIG_PATH} as "${skill}"`);
   // Only the npm+npx package path ever carries secrets into `env` (headers
   // on a remote entry are static per v1's scope, per buildMcpServerConfig).
@@ -940,6 +942,7 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
     throw error;
   }
 
+  recordInstallOrWarn({ owner, slug: skill, version: meta.version, kind: "mcp", checksum_sha256: meta.checksum_sha256 });
   console.log(`Updated ${key} to ${meta.version}`);
   warnIfSecretsWereWritten(serverConfig, secretNames);
 }
@@ -1003,6 +1006,7 @@ async function installPinnedFile(kind: PinnedFileKind, owner: string, skill: str
     }
     throw error;
   }
+  recordInstallOrWarn({ owner, slug: skill, version: meta.version, kind, checksum_sha256: meta.checksum_sha256 });
   console.log(`Installed ${key}@${meta.version} to ${destPath}`);
 }
 
@@ -1094,7 +1098,7 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
     const content = await extractSingleFileContent(buffer, "AGENT.md");
     mkdirSync(AGENTS_ROOT, { recursive: true });
     const destPath = agentPath(owner, skill);
-    writeFileSync(destPath, content);
+    writeFileAtomic(destPath, content);
     try {
       writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, { version: meta.version, checksum_sha256: meta.checksum_sha256 });
     } catch (error) {
@@ -1114,6 +1118,7 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
       }
       throw error;
     }
+    recordInstallOrWarn({ owner, slug: skill, version: meta.version, kind: "agent", checksum_sha256: meta.checksum_sha256 });
     console.log(`Installed ${key}@${meta.version} to ${destPath}`);
     return;
   }
@@ -1151,5 +1156,6 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
     throw error;
   }
 
+  recordInstallOrWarn({ owner, slug: skill, version: meta.version, kind: "skill", checksum_sha256: meta.checksum_sha256 });
   console.log(`Installed ${key}@${meta.version} to ${destDir}`);
 }

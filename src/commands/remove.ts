@@ -4,6 +4,7 @@ import { readLockfile, removeLockfileEntry, withLock, writeJsonFileAtomic, type 
 import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, docPath, pinnedFilePath, MCP_CONFIG_PATH } from "../spec.js";
 import { readMcpConfig, matchesMcpConfigHash } from "./add.js";
 import { UsageError } from "../usage-error.js";
+import { forgetInstallOrWarn } from "../installed.js";
 import {
   assertKind,
   ensureRemoteKind,
@@ -193,6 +194,7 @@ export async function remove(args: string[], scope?: KindScope): Promise<void> {
   // now either been deleted or been diagnosed and warned about below, so the
   // pin has no surviving work left to surface (ahood-cli#142).
   removeLockfileEntry(LOCKFILE_PATH, key);
+  forgetInstallOrWarn(owner, skill);
 
   if (mcpConfigUnreadable !== undefined && (lockEntry?.mcp_config_hash !== undefined || hadNoOnDiskFootprint)) {
     // Two independent pieces of evidence, because mcp_config_hash alone is

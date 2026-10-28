@@ -20,6 +20,10 @@ import { versions } from "./commands/versions.js";
 import { diff } from "./commands/diff.js";
 import { completion } from "./commands/completion.js";
 import { mcp } from "./commands/mcp.js";
+import { status } from "./commands/status.js";
+import { sync } from "./commands/sync.js";
+import { pin, unpin } from "./commands/pin.js";
+import { review } from "./commands/review.js";
 import { CLI_KINDS, extractKindFlag, isCliKind, resolveScope, type CliKind, type KindScope } from "./kinds.js";
 import { findProjectGuides } from "./commands/project-guides.js";
 import { readUseme } from "./useme.js";
@@ -44,6 +48,7 @@ import {
   shareSnap,
   unshareSnap,
   tagsSnap,
+  SNAP_CREATE_FLAGS,
 } from "./commands/snap.js";
 import { formatHelp, formatKindHelp, formatGroupHelp, formatSnapHelp, formatCommandHelp, findCommandHelp } from "./help.js";
 import { ApiError } from "./http.js";
@@ -125,6 +130,14 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   whoami,
   token,
   completion,
+  // ahood#979: the user-level install record (~/.ahood/installed.json) and
+  // the owner's evolution review queue. Top-level, not under a kind noun:
+  // they span every kind and every project at once.
+  status,
+  sync,
+  pin,
+  unpin,
+  review,
   mcp: dispatchMcp,
   skill: dispatchSkill,
   agent: dispatchAgent,
@@ -180,8 +193,9 @@ function closestCommand(input: string): string | undefined {
 // `ahood docs`, `ahood projects`, `ahood loops` dispatch exactly as the
 // singular kind would. A straight trailing-`s` strip-and-match
 // against the KINDS registry is enough -- every current and planned kind
-// pluralizes this way, and no COMMANDS key ends in "s" (checked below), so a
-// real top-level command can never be shadowed by this. Scoped to CLI_KINDS
+// pluralizes this way, and no COMMANDS key is a kind name plus "s" (checked in index.test.ts), so a
+// real top-level command can never be shadowed by this (`status` ends in "s"
+// but "statu" is no kind, and a real command is matched first anyway). Scoped to CLI_KINDS
 // only, not "group"/"snap" (those are separate entities, not kinds).
 function pluralKindAlias(word: string): CliKind | undefined {
   if (!word.endsWith("s")) return undefined;
@@ -365,6 +379,19 @@ async function dispatchSnap(args: string[]): Promise<void> {
     return;
   }
 
+  // `ahood snap --lesson "..." "note"` (ahood#979): a create flag in verb
+  // position is a create with the verb left out. Only create's own flags
+  // route here, so a typo'd verb still fails as an unknown command.
+  if (SNAP_CREATE_FLAGS.some((f) => sub === f || sub.startsWith(`${f}=`))) {
+    if (args.includes("--help") || args.includes("-h")) {
+      const entry = findCommandHelp("snap", "create");
+      console.log(entry ? formatCommandHelp(entry) : formatSnapHelp());
+      return;
+    }
+    await createSnap(args);
+    return;
+  }
+
   const handler = SNAP_VERBS[sub];
   if (!handler) {
     console.error(`Unknown snap command: ${sub}`);
@@ -477,7 +504,11 @@ async function main() {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);
-    if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+    if (error instanceof ApiError && error.status === 403 && /scopes do not include/.test(message)) {
+      // ahood#978: a narrowed personal token. Logging in again mints a
+      // full-scope CLI token; a CI token needs re-minting with that scope.
+      console.error("Your token is missing a scope this command needs -- run `ahood login` again, or create a token with that scope (ahood token create).");
+    } else if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
       console.error("Run `ahood login` first (or set AHOOD_TOKEN).");
     }
     process.exit(exitCodeFor(error));
