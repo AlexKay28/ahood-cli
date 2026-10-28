@@ -63,3 +63,15 @@ deleted automatically about 3 days after creation.
 Codex and opencode setup renders, by `npm run sync-plugin`; `tests/claude-plugin.test.ts` fails
 when they drift. Bump `version` in `.claude-plugin/plugin.json` and the marketplace entry together
 on every change: a set `version` keeps users on it until it changes.
+
+## Optional: snap prompt at the end of a task
+
+The plugin ships an **opt-in** Stop hook (`hooks/snap-prompt.mjs`). It is **off by default**. When you turn it on, at most once per session, after Claude finishes, it asks Claude to draft a private ahood snap of what the session learned and to **ask you before saving**. The hook itself never sends anything: it has no network access and never runs the `ahood` CLI. Saving is a separate step that you agree to.
+
+Turn it on by setting `AHOOD_SNAP_HOOK=1` in the environment Claude Code runs in, for example in your shell profile or in the `env` block of `~/.claude/settings.json`:
+
+```json
+{ "env": { "AHOOD_SNAP_HOOK": "1" } }
+```
+
+To turn it off, remove the variable or set it to anything other than `1`.
