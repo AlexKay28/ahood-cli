@@ -78,8 +78,10 @@ no CLI install required. Add the marketplace and install the plugin from inside 
 /plugin install ahood@ahood
 ```
 
-Then mint a personal access token at [ahood.dev/settings/tokens](https://www.ahood.dev/settings/tokens)
-and set it as `AHOOD_API_TOKEN` in your environment -- see
+A token is required for every tool this server exposes, including read-only ones -- there is
+no anonymous access to `https://www.ahood.dev/api/mcp`. Mint a personal access token at
+[ahood.dev/settings/tokens](https://www.ahood.dev/settings/tokens) and set it as
+`AHOOD_API_TOKEN` in your environment -- see
 [`plugins/ahood/README.md`](plugins/ahood/README.md) for the full setup. This is a separate,
 lighter-weight path from the CLI above: it gives an agent the same MCP tools
 (`search_skills`, `create_skill`, etc.) without installing `@ahood/cli` at all.

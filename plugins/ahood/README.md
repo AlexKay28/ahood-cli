@@ -20,6 +20,7 @@ marketplace. Install it with:
 3. Install this plugin. Claude Code will connect to `https://www.ahood.dev/api/mcp` using
    that token.
 
-No token is required to use the read-only tools (`search_skills`, `get_skill`, etc.) against
-public skills, but a missing or invalid token will reject the authoring tools
-(`create_skill`, `update_skill`, and friends), which require the `publish` scope.
+A token is required for every tool, including read-only ones (`search_skills`, `get_skill`,
+etc.) -- a request to `https://www.ahood.dev/api/mcp` with no token is rejected outright. A
+missing or invalid token will also reject the authoring tools (`create_skill`, `update_skill`,
+and friends), which additionally require the `publish` scope.
