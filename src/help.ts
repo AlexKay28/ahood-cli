@@ -113,6 +113,43 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     examples: ["ahood review", "ahood review --json", "ahood review approve <id>", "ahood review reject <id>"],
   },
   {
+    usage: "ahood setup [claude|codex|opencode] [--remove <harness>] [--yes] [--dry-run]",
+    summary: "Add ahood (MCP server and /ahood commands) to Claude Code, Codex or opencode, or remove it again.",
+    desc:
+      "With no harness, detects which of Claude Code, Codex and opencode are installed (CLI on PATH or config dir) " +
+      "and asks which to set up. Claude Code: installs the ahood plugin the native way -- `claude plugin marketplace " +
+      "add AlexKay28/ahood-cli` then `claude plugin install ahood@ahood` -- or, when the claude CLI has no `plugin` " +
+      "subcommands, prints the /plugin commands to type in a session. Codex: adds the ahood MCP server as a marked " +
+      "block in $CODEX_HOME/config.toml (default ~/.codex), the `ahood` skill in $CODEX_HOME/skills/ahood/, and an " +
+      "AGENTS.md snippet file; $CODEX_HOME/AGENTS.md itself is edited only with --yes. opencode: adds " +
+      "mcp.servers.ahood to the global opencode.json(c) and /ahood, /ahood-sync, /ahood-review, /ahood-snap command " +
+      "files. Every MCP entry reads its token from $AHOOD_API_TOKEN (the variable the Claude Code plugin uses " +
+      "too); no token is ever written to a file. Only ahood's own entries are ever added or changed; a file is backed up to " +
+      "<file>.ahood-backup-<timestamp> before it is edited, a re-run with nothing to change writes nothing, and a " +
+      "malformed config or a same-named entry of yours is refused untouched. --remove takes out only ahood's " +
+      "entries and keeps the backups.",
+    flags: [
+      "--remove <harness>  Remove ahood's entries from that harness instead.",
+      "--yes               Apply without asking (and, for Codex, also append the snippet to AGENTS.md).",
+      "--dry-run           Print what would change; write and run nothing.",
+    ],
+    examples: ["ahood setup", "ahood setup codex --dry-run", "ahood setup opencode --yes", "ahood setup --remove codex"],
+  },
+  {
+    usage: "ahood doctor [--offline] [--json]",
+    summary: "Check each harness's ahood setup, the MCP server, your login and the CLI version.",
+    desc:
+      "For Claude Code, Codex and opencode: whether it is installed, whether ahood's config is in place and " +
+      "current, and -- for each one set up -- whether the ahood MCP server answers. Also checks that you are logged " +
+      "in (`ahood whoami`) and whether a newer @ahood/cli is on npm. Exits 1 when a harness that is set up is " +
+      "broken (partial or unreadable config, or the MCP server unreachable); warnings exit 0.",
+    flags: [
+      "--offline  Skip every network check (MCP probe, token check, npm latest).",
+      "--json     Emit the report as JSON.",
+    ],
+    examples: ["ahood doctor", "ahood doctor --offline"],
+  },
+  {
     usage: "ahood completion <bash|zsh|fish>",
     summary: "Print a shell completion script for the command names.",
     desc: "Print a shell completion script for the command names.",

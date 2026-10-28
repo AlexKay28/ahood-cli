@@ -280,6 +280,8 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood pin <owner>/<slug>[@version] [--json]` | Hold an install at one version so `ahood sync` never moves it past that. |
 | `ahood unpin <owner>/<slug> [--json]` | Remove a pin so `ahood sync` offers the latest version again. |
 | `ahood review [approve <id> [--version <semver>] \| reject <id>] [--limit <n>] [--json]` | List the self-evolution proposals waiting for your review, and approve or reject them. |
+| `ahood setup [claude\|codex\|opencode] [--remove <harness>] [--yes] [--dry-run]` | Add ahood (MCP server and /ahood commands) to Claude Code, Codex or opencode, or remove it again. |
+| `ahood doctor [--offline] [--json]` | Check each harness's ahood setup, the MCP server, your login and the CLI version. |
 | `ahood completion <bash\|zsh\|fish>` | Print a shell completion script for the command names. |
 | `ahood help useme` | Print the bundled ahood SKILL.md for an AI agent -- raw, offline, no login needed. |
 
