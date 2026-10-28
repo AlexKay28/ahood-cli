@@ -1,0 +1,9 @@
+{
+  "ahood": {
+    "type": "http",
+    "url": "https://www.ahood.dev/api/mcp",
+    "headers": {
+      "Authorization": "Bearer ${AHOOD_API_TOKEN}"
+    }
+  }
+}

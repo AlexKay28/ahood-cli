@@ -25,6 +25,7 @@ Installed alice/pdf-tools@1.4.0 to .claude/skills/alice@pdf-tools
 
 - [Quick start](#quick-start)
 - [Install](#install)
+- [Use ahood in Claude Code](#use-ahood-in-claude-code)
 - [Why ahood](#why-ahood)
 - [Configuration](#configuration)
 - [Usage examples](#usage-examples)
@@ -65,6 +66,23 @@ ahood <command>
 **The `-g` flag matters.** `npm i @ahood/cli` (no `-g`) installs into the current directory's `node_modules/` instead, and `ahood` won't be on your `PATH` -- you'll get `ahood: command not found`. If that happens, either re-run with `-g`, or use `npx @ahood/cli@latest <command>` from that directory instead.
 
 Requires Node.js 18 or later.
+
+## Use ahood in Claude Code
+
+This repo also publishes a [Claude Code plugin](https://code.claude.com/docs/en/plugins) marketplace
+(`.claude-plugin/marketplace.json`, `plugins/ahood/`) that wires up ahood's hosted MCP server --
+no CLI install required. Add the marketplace and install the plugin from inside a Claude Code session:
+
+```
+/plugin marketplace add AlexKay28/ahood-cli
+/plugin install ahood@ahood
+```
+
+Then mint a personal access token at [ahood.dev/settings/tokens](https://www.ahood.dev/settings/tokens)
+and set it as `AHOOD_API_TOKEN` in your environment -- see
+[`plugins/ahood/README.md`](plugins/ahood/README.md) for the full setup. This is a separate,
+lighter-weight path from the CLI above: it gives an agent the same MCP tools
+(`search_skills`, `create_skill`, etc.) without installing `@ahood/cli` at all.
 
 ## Why ahood
 
