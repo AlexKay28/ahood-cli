@@ -24,6 +24,8 @@ import { status } from "./commands/status.js";
 import { sync } from "./commands/sync.js";
 import { pin, unpin } from "./commands/pin.js";
 import { review } from "./commands/review.js";
+import { setup } from "./setup/setup-command.js";
+import { doctor } from "./setup/doctor-command.js";
 import { CLI_KINDS, extractKindFlag, isCliKind, resolveScope, type CliKind, type KindScope } from "./kinds.js";
 import { findProjectGuides } from "./commands/project-guides.js";
 import { readUseme } from "./useme.js";
@@ -138,6 +140,9 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   pin,
   unpin,
   review,
+  // ahood#980: wire ahood into Claude Code / Codex / opencode, and check it.
+  setup,
+  doctor,
   mcp: dispatchMcp,
   skill: dispatchSkill,
   agent: dispatchAgent,
