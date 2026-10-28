@@ -7,7 +7,7 @@
 //     is edited or deleted -- unless it is byte-identical to what setup itself
 //     would write, i.e. regenerable;
 //   - --dry-run computes and prints the same plan and writes nothing.
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { constants as fsConstants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { SetupRefusedError } from "./errors.js";
 import { displayPath } from "./paths.js";
@@ -48,6 +48,25 @@ export function backupStamp(now: Date = new Date()): string {
   return now.toISOString().replace(/[:.]/g, "-");
 }
 
+/**
+ * The single backup writer for every harness: copies `path` to
+ * <path>.ahood-backup-<stamp>, or -<stamp>-1, -2, ... when that name is taken,
+ * so a backup is never overwritten -- an install and a remove within the same
+ * millisecond would otherwise replace the user's original with our own edit.
+ * COPYFILE_EXCL makes the "not taken" check and the copy one atomic step.
+ */
+export function writeBackup(path: string, stamp: string): string {
+  for (let n = 0; ; n++) {
+    const candidate = `${path}.ahood-backup-${stamp}${n === 0 ? "" : `-${n}`}`;
+    try {
+      copyFileSync(path, candidate, fsConstants.COPYFILE_EXCL);
+      return candidate;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+}
+
 function writeAtomic(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.ahood-tmp-${process.pid}`;
@@ -60,10 +79,11 @@ export function applyChanges(changes: FileChange[], opts: { dryRun: boolean; sta
   for (const change of changes) {
     const action = actionOf(change);
     const result: AppliedChange = { path: change.path, what: change.what, action };
-    if (action !== "unchanged" && needsBackup(change)) result.backup = `${change.path}.ahood-backup-${opts.stamp}`;
+    const backupWanted = action !== "unchanged" && needsBackup(change);
+    if (backupWanted) result.backup = `${change.path}.ahood-backup-${opts.stamp}`;
     results.push(result);
     if (opts.dryRun || action === "unchanged") continue;
-    if (result.backup) copyFileSync(change.path, result.backup);
+    if (backupWanted) result.backup = writeBackup(change.path, opts.stamp);
     if (change.after === null) {
       unlinkSync(change.path);
       removeEmptyDir(dirname(change.path));

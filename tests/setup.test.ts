@@ -14,6 +14,7 @@ vi.mock("../src/confirm.js", async (orig) => ({
 import { confirmYesNo, isInteractive } from "../src/confirm.js";
 import { setup } from "../src/setup/setup-command.js";
 import { UsageError } from "../src/usage-error.js";
+import { writeBackup } from "../src/setup/file-changes.js";
 import { codexMcpBlock, codexSkill } from "../src/setup/templates/codex.js";
 import { opencodeCommandFiles } from "../src/setup/templates/opencode.js";
 import { captureConsole } from "./helpers/me-env.js";
@@ -323,6 +324,37 @@ describe("ahood setup claude (ahood#980)", () => {
     await setup(["claude", "--yes"]);
     expect(process.exitCode).toBe(1);
     expect(io.stderr()).toMatch(/could not install the ahood plugin/);
+  });
+});
+
+describe("backups are never overwritten (ahood#980)", () => {
+  it("two backups in the same tick are two distinct files, the original preserved", () => {
+    const file = join(env.home, "config.toml");
+    writeFileSync(file, "original\n");
+    const first = writeBackup(file, "T");
+    writeFileSync(file, "edited by setup\n");
+    const second = writeBackup(file, "T");
+    expect(second).not.toBe(first);
+    expect(readFileSync(first, "utf-8")).toBe("original\n");
+    expect(readFileSync(second, "utf-8")).toBe("edited by setup\n");
+    expect(writeBackup(file, "T")).toBe(`${file}.ahood-backup-T-2`);
+  });
+
+  it("install then remove within one frozen timestamp keeps the user's original backup", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-28T12:00:00.000Z") });
+    try {
+      const codex = join(env.home, ".codex");
+      mkdirSync(codex, { recursive: true });
+      writeFileSync(join(codex, "config.toml"), 'model = "o3"\n');
+      await setup(["codex", "--yes"]);
+      await setup(["--remove", "codex", "--yes"]);
+      const configBackups = backups(listFiles(codex)).filter((f) => f.startsWith("config.toml."));
+      expect(configBackups).toHaveLength(2);
+      const contents = configBackups.map((f) => readFileSync(join(codex, f), "utf-8"));
+      expect(contents).toContain('model = "o3"\n');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
