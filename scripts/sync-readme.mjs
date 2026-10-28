@@ -67,7 +67,7 @@ function renderTable(entries) {
 // `ahood group <verb>`; snap-entity commands as `ahood snap <verb>`.
 function renderTables() {
   return [
-    "### Account",
+    "### Account and installs",
     "",
     renderTable(TOP_LEVEL_COMMANDS_HELP),
     "",

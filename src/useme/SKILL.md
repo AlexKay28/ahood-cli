@@ -103,6 +103,19 @@ With no target, `agent`/`mcp`/`doc`/`project`/`loop` `update` and `outdated` con
 kind; the legacy `skill update` covers every pin. Updates only affect the current project.
 An `.mcp.json` entry you edited by hand is refused rather than overwritten.
 
+Across every project on the machine (the user-level record `~/.ahood/installed.json`):
+
+```bash
+ahood status --json                    # installed vs latest, pins, evolution on your own artifacts
+ahood sync --dry-run                   # unified diff per artifact that is behind; changes nothing
+ahood sync --yes                       # apply them all; without --yes and a terminal it refuses (exit 2)
+ahood pin alice/pdf-tools@1.2.0        # sync never moves it past this; `ahood unpin` releases it
+ahood review --json                    # your pending self-evolution proposals
+ahood review approve <id>              # or `reject <id>`; needs the token's publish scope
+```
+
+Never pass `sync --yes` on the user's behalf without their go-ahead: show `--dry-run` first.
+
 ## Publish what you build
 
 Scaffold a valid starter, edit it, then publish an immutable semver version:
@@ -176,7 +189,9 @@ ahood skill publish alice/pdf-tools@1.1.0 --path pdf-tools --changelog "Adds spl
 
 `ahood snap create|list|search|show|tags|share|unshare|remove` keep private, freeform
 session notes. They are not registry artifacts: no versions, never in search. See
-`ahood snap --help`.
+`ahood snap --help`. `snap create` also takes a structured header the owner's self-evolution
+reads: `--failed`, `--worked`, `--fix`, `--lesson` (no names or private details) and
+`--artifact <owner/slug>`.
 
 ## This guide vs. the registry copy
 

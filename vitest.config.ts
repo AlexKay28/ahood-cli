@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    // ahood#979: keeps installs out of the real ~/.ahood (see the file).
+    setupFiles: ["tests/setup-installed-file.ts"],
     // ahood-cli#124: tests used to hand-roll these resets, inconsistently, so a
     // `.not.toHaveBeenCalled()` assertion could pass or fail depending on what ran
     // before it. Both flags stay, but they do DIFFERENT jobs -- don't drop one

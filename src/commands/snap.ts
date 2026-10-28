@@ -28,7 +28,25 @@ type SnapDetail = {
 };
 
 const CREATE_USAGE =
-  "Usage: ahood snap create <content> [--tags tag1,tag2] (or pipe content on stdin; put -- before content that starts with --)";
+  "Usage: ahood snap create <content> [--tags tag1,tag2] [--failed <text>] [--worked <text>] [--fix <text>] [--lesson <text>] [--artifact <owner/slug>] (or pipe content on stdin; put -- before content that starts with --)";
+
+// ahood#946/#979: the optional structured header POST /api/v1/snaps accepts
+// as `structured` (lib/snaps/validation.ts SNAP_STRUCTURED_FIELDS), one flag
+// per field. Sent only when at least one is given, so a freeform snap's
+// request body is byte-for-byte what it was before.
+export const SNAP_STRUCTURED_FLAGS = {
+  "--failed": "failed",
+  "--worked": "worked",
+  "--fix": "fix",
+  "--lesson": "lesson",
+  "--artifact": "artifact",
+} as const;
+const STRUCTURED_FLAG_NAMES = Object.keys(SNAP_STRUCTURED_FLAGS);
+const ARTIFACT_REF_RE = /^[a-z0-9]+(-[a-z0-9]+)*\/[a-z0-9]+(-[a-z0-9]+)*(@[0-9a-z][0-9a-z.+-]{0,63})?$/i;
+
+// Every flag `snap create` consumes -- exported so `ahood snap --lesson ...`
+// (no verb) can be routed to create by index.ts.
+export const SNAP_CREATE_FLAGS = ["--json", "--tags", ...STRUCTURED_FLAG_NAMES];
 const LIST_USAGE = "Usage: ahood snap list [--json] [--limit <n>] [--tags tag1,tag2]";
 const SEARCH_USAGE = "Usage: ahood snap search <query> [--json] [--limit <n>] [--tags tag1,tag2]";
 const SHOW_USAGE = "Usage: ahood snap show <id> [--json]";
@@ -113,7 +131,15 @@ export async function createSnap(args: string[]): Promise<void> {
   // Whatever this command doesn't consume. --tags and its value (both
   // "--tags x" and "--tags=x" forms) are stripped the same way --json is, so
   // they never leak into the joined content.
-  const leftover = unrecognizedIndices(flagArgs, ["--json"], ["--tags"]);
+  const leftover = unrecognizedIndices(flagArgs, ["--json"], ["--tags", ...STRUCTURED_FLAG_NAMES]);
+  const structured: Record<string, string> = {};
+  for (const [flag, field] of Object.entries(SNAP_STRUCTURED_FLAGS)) {
+    const value = flagValue(flagArgs, flag)?.trim();
+    if (value) structured[field] = value;
+  }
+  if (structured.artifact !== undefined && !ARTIFACT_REF_RE.test(structured.artifact)) {
+    throw new UsageError(`--artifact must be owner/slug, optionally @version (got "${structured.artifact}").\n${CREATE_USAGE}`);
+  }
 
   // Every leftover used to be kept and folded into the note body, because
   // content is freeform and a blanket "--" rejection would break a note that
@@ -175,7 +201,8 @@ export async function createSnap(args: string[]): Promise<void> {
   // --tags`. Omitted entirely when --tags wasn't passed at all, so the
   // request body matches the "omitting tags is equivalent to []" contract
   // exactly instead of always sending an (empty) tags array.
-  const body: { content: string; tags?: string[] } = { content };
+  const body: { content: string; tags?: string[]; structured?: Record<string, string> } = { content };
+  if (Object.keys(structured).length > 0) body.structured = structured;
   if (tagsArg !== undefined) {
     body.tags = tagsArg
       .split(",")
@@ -194,6 +221,8 @@ export async function createSnap(args: string[]): Promise<void> {
     return;
   }
   console.log(created.id);
+  // stderr, so `id=$(ahood snap create ...)` still captures just the id.
+  console.error(`Saved as a private snap -- only you can see it. Share it with \`ahood snap share ${created.id}\`.`);
 }
 
 export async function listSnaps(args: string[]): Promise<void> {

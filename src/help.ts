@@ -49,6 +49,70 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     examples: ["ahood token create ci-runner", "ahood token list --json", "ahood token revoke <id>", "ahood token revoke <id> --yes"],
   },
   {
+    usage: "ahood status [--json]",
+    summary: "Show every install on this machine against the registry: updates, pins, and evolution on your own artifacts.",
+    desc:
+      "Reads ~/.ahood/installed.json (every install `ahood <kind> add` has made on this machine, in any project; " +
+      "AHOOD_INSTALLED_FILE overrides the path) and asks the registry (POST /api/v1/me/status) for each " +
+      "artifact's latest version. Prints installed vs latest, whether an update is available, pins, and -- on " +
+      "artifacts you own -- whether self-evolution is on and how many proposals wait for your review. Installs " +
+      "recorded only in the current project's .claude/skills.lock.json (from before this file existed) are " +
+      "imported on first run. Needs a login (the token's 'read' scope).",
+    flags: ["--json    Emit {items, plan} instead of a table."],
+    examples: ["ahood status", "ahood status --json"],
+  },
+  {
+    usage: "ahood sync [<owner>/<slug> | <slug> ...] [--yes] [--dry-run] [--json]",
+    summary: "Update installs that are behind, showing each one's diff and asking y/N first.",
+    desc:
+      "For every install `ahood status` reports behind (and not pinned at its version), downloads the new " +
+      "version, shows a unified diff against the installed files, and asks y/N per artifact before writing it " +
+      "-- never without consent. A pinned install is moved only to its pinned version. The write is the " +
+      "ordinary atomic install (`ahood <kind> add`) run in that install's own project, so its project lockfile " +
+      "moves with it. With no terminal to ask on, it refuses unless --yes is given. MCP servers are skipped " +
+      "(they can prompt for secrets): update those with `ahood mcp update`.",
+    flags: [
+      "--yes, -y   Accept every update without asking.",
+      "--dry-run   Show the diffs, change nothing.",
+      "--json      Emit {results} (requires --yes or --dry-run: there is nobody to ask).",
+    ],
+    examples: ["ahood sync", "ahood sync alice/pdf-tools --dry-run", "ahood sync --yes --json"],
+  },
+  {
+    usage: "ahood pin <owner>/<slug>[@version] [--json]",
+    summary: "Hold an install at one version so `ahood sync` never moves it past that.",
+    desc:
+      "Pins every install of <owner>/<slug> on this machine at <version> (default: the version installed now), " +
+      "in ~/.ahood/installed.json. `ahood sync` skips a pinned install, or offers to move it to the pinned " +
+      "version if it is on another one.",
+    flags: ["--json    Emit {owner, slug, installs} instead of prose."],
+    examples: ["ahood pin alice/pdf-tools", "ahood pin alice/pdf-tools@1.2.0"],
+  },
+  {
+    usage: "ahood unpin <owner>/<slug> [--json]",
+    summary: "Remove a pin so `ahood sync` offers the latest version again.",
+    desc: "Removes the pin `ahood pin` set on every install of <owner>/<slug> on this machine.",
+    flags: ["--json    Emit {owner, slug, unpinned} instead of prose."],
+    examples: ["ahood unpin alice/pdf-tools"],
+  },
+  {
+    usage: "ahood review [approve <id> [--version <semver>] | reject <id>] [--limit <n>] [--json]",
+    summary: "List the self-evolution proposals waiting for your review, and approve or reject them.",
+    desc:
+      "Bare `ahood review` lists your pending enhancement proposals across all your artifacts (GET " +
+      "/api/v1/me/proposals) with their evidence: checks, sandbox and probe results, risk findings, the review " +
+      "window and why automatic mode held it. In a terminal it then asks approve/reject/skip/quit for each; " +
+      "piped, it only lists. `ahood review approve <id>` publishes the proposal as a new version (--version " +
+      "when it needs one chosen) and `ahood review reject <id>` discards it -- the same decision as the web " +
+      "owner panel. Listing needs the token's 'read' scope, deciding its 'publish' scope.",
+    flags: [
+      "--version <semver>  (approve) The version to publish; default is the suggested next patch.",
+      "--limit <n>         (list) One page of at most n (1-100) instead of the whole queue.",
+      "--json              Emit the raw API response.",
+    ],
+    examples: ["ahood review", "ahood review --json", "ahood review approve <id>", "ahood review reject <id>"],
+  },
+  {
     usage: "ahood completion <bash|zsh|fish>",
     summary: "Print a shell completion script for the command names.",
     desc: "Print a shell completion script for the command names.",
@@ -566,15 +630,25 @@ export const GROUP_COMMANDS_HELP: CommandHelp[] = [
 // never public otherwise.
 export const SNAP_COMMANDS_HELP: CommandHelp[] = [
   {
-    usage: "ahood snap create <content> [--tags tag1,tag2] [--json]",
+    usage:
+      "ahood snap create <content> [--tags tag1,tag2] [--failed <t>] [--worked <t>] [--fix <t>] [--lesson <t>] [--artifact <owner/slug>] [--json]",
     summary: "Capture a new private snap, from an argument or piped stdin.",
     desc:
       "Capture a new private snap. Pass the content as an argument, or omit it and pipe content on stdin " +
       "(e.g. `echo \"...\" | ahood snap create`, or a piped heredoc) -- useful for capturing a whole session's " +
       "worth of freeform text at once. Prints the new snap's id on success. An unrecognized flag is refused " +
-      "rather than folded into the note; pass content that itself starts with `--` after a bare `--`.",
+      "rather than folded into the note; pass content that itself starts with `--` after a bare `--`. " +
+      "The optional structured header (--failed, --worked, --fix, --lesson, --artifact) records what went wrong, " +
+      "what worked, the fix, the general lesson and which artifact it is about, so your artifacts' " +
+      "self-evolution can read them; `ahood snap --lesson ... <content>` (no verb) is the same command. " +
+      "A snap is private to you until you share it.",
     flags: [
       "--tags <comma,separated>   Attach tags to the new snap.",
+      "--failed <text>            What went wrong, or what the user corrected.",
+      "--worked <text>            What worked.",
+      "--fix <text>               The change made or needed.",
+      "--lesson <text>            The general takeaway (no names or private details).",
+      "--artifact <owner/slug>    The skill, agent or MCP server it is about (optionally @version).",
       "--json                     Emit {id, created_at} instead of just the bare id.",
       "--                         End of options: everything after it is content, verbatim.",
     ],
@@ -582,6 +656,7 @@ export const SNAP_COMMANDS_HELP: CommandHelp[] = [
       'ahood snap create "Debugged the flaky CI step, root cause was a race in the cache key." --tags deploy,bugfix',
       'echo "..." | ahood snap create',
       'ahood snap create -- "--json broke the parser"',
+      'ahood snap --artifact alice/pdf-tools --failed "split pages out of order" --lesson "sort by page index" "pdf split bug"',
     ],
   },
   {

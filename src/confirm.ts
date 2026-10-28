@@ -29,3 +29,37 @@ export function confirm(promptText: string): Promise<boolean> {
     });
   });
 }
+
+// One free-text answer, with the same closed-stdin guarantee as confirm()
+// above: a stdin that closes before answering rejects instead of hanging or
+// silently resolving. Used by the per-item prompts of `ahood sync` and
+// `ahood review` (ahood#979).
+export function askLine(promptText: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    rl.once("close", () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Prompt was not answered (stdin closed)."));
+    });
+    rl.question(promptText, (answer) => {
+      settled = true;
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+// A y/N question: only "y" or "yes" (any case) is consent; anything else,
+// including an empty answer, is no.
+export async function confirmYesNo(promptText: string): Promise<boolean> {
+  const answer = (await askLine(promptText)).toLowerCase();
+  return answer === "y" || answer === "yes";
+}
+
+// Whether a per-item prompt can be shown at all: stdin and stdout both a
+// terminal. Piped or redirected, there is nobody to answer.
+export function isInteractive(): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}

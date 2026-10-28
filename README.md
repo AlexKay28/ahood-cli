@@ -101,6 +101,7 @@ lighter-weight path from the CLI above: it gives an agent the same MCP tools
 | --- | --- |
 | `AHOOD_TOKEN` | A personal API token (create one with `ahood token create <name>` after logging in once). When set, every command uses it instead of the stored browser-login credentials — the standard way to authenticate in CI or any non-interactive environment. |
 | `AHOOD_API_URL` | Overrides the registry endpoint (default: `https://www.ahood.dev`). Must be `https://`, except for `localhost`/`127.0.0.1` or a `.test`/`.invalid`/`.example`/`.localhost` host, which may use plain `http://` for local development. |
+| `AHOOD_INSTALLED_FILE` | Overrides where the user-level install record lives (default: `~/.ahood/installed.json`). |
 | `XDG_CONFIG_HOME` | If set, browser-login credentials are stored under `$XDG_CONFIG_HOME/ahood/credentials.json` instead of the default `~/.config/ahood/credentials.json`. |
 
 Paths `ahood` reads and writes in your project. The lockfile is meant to be committed, same as `package-lock.json`:
@@ -110,6 +111,7 @@ Paths `ahood` reads and writes in your project. The lockfile is meant to be comm
 | `.claude/skills/<owner>@<skill>/` | Installed skill files. |
 | `.claude/agents/<owner>@<skill>.md` | An installed agent, as a single file (`@` owner/skill separator, since Claude Code's own subagent loader scans `.claude/agents/*.md` flat, non-recursively). |
 | `.claude/skills.lock.json` | Exact installed version + checksum per skill or agent, written by `add`/`update`, read by every install to verify integrity. |
+| `~/.ahood/installed.json` | Not in your project: one user-level record of every install on this machine (`{owner, slug, version, kind, installedPath, projectDir, installedAt}`, plus `pinned`), written by every `add`/`update`/`remove` and read by `ahood status`, `sync` and `pin`. The project lockfile stays the source of truth; this only indexes it. |
 | `.mcp.json` | MCP server entries, for `mcp`-kind artifacts only. Merged into rather than owned — other MCP clients share this file. **May contain secrets in plaintext**, since a server manifest can declare credentials that `add` prompts for; `add` warns when it writes one. |
 | `*.json.tmp-<pid>-<hrtime>` | Never, in normal operation. Writes to the two `.json` files above go through a temp file that is renamed into place, and only a hard kill (SIGKILL, OOM, power loss) mid-write can strand one. A stranded copy of `.mcp.json` carries the same plaintext secrets, so **gitignore this pattern**. The next successful write removes any left by a process that is no longer running. |
 
@@ -250,6 +252,14 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 
 **`ahood mcp` has two meanings.** With no arguments, or as `ahood mcp serve` (the preferred spelling), it starts this CLI's local, read-only MCP server over stdio -- unchanged, so existing MCP host configurations keep working with no edits. With a registry verb it manages MCP server manifests. Anything else (`ahood mcp srve`, `ahood mcp --flag`) fails with usage and a suggestion instead of starting a server. Neither is the hosted registry MCP endpoint at `https://www.ahood.dev/api/mcp`.
 
+## Keeping installs current: status, sync, pin, review
+
+- **`ahood status`** asks the registry about everything in `~/.ahood/installed.json` (every install on this machine, in any project) and prints installed vs latest, updates available, pins, and -- on artifacts you own -- whether self-evolution is on and how many proposals wait for you. Installs recorded only in a project's `.claude/skills.lock.json` (from CLI versions before this file existed) are imported the first time `status`, `sync` or `pin` runs inside that project.
+- **`ahood sync` never updates without consent.** For each install that is behind, it downloads the new version, shows a unified diff against the files on disk, and asks `y/N`. `--yes` accepts all, `--dry-run` only shows the diffs. With no terminal to ask on (piped, CI, an agent) and no `--yes`, it refuses -- exit `2` -- before downloading anything. Each accepted update is the ordinary atomic install run in that install's own project, so its project lockfile moves with it. MCP servers are listed but skipped (they can prompt for secrets); use `ahood mcp update`.
+- **`ahood pin <owner>/<slug>[@version]`** holds every install of it at one version (default: the one installed now); `sync` never moves it past that. `ahood unpin` releases it.
+- **`ahood review`** lists your pending self-evolution proposals with their evidence and, in a terminal, asks approve/reject/skip for each; `ahood review approve <id> [--version <v>]` and `ahood review reject <id>` decide one from a script. Listing needs the token's `read` scope and deciding its `publish` scope; a token without one gets exit `4` and a hint to `ahood login` again.
+- **`ahood snap create`** takes an optional structured header -- `--failed`, `--worked`, `--fix`, `--lesson`, `--artifact <owner/slug>` -- that your artifacts' self-evolution reads. A snap is private to you until you share it.
+
 ## Commands
 
 <!-- Generated from src/help.ts's COMMANDS_HELP by scripts/sync-readme.mjs --
@@ -257,7 +267,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
      changing COMMANDS_HELP to regenerate it. -->
 
 <!-- COMMANDS_TABLE_START -->
-### Account
+### Account and installs
 
 | Command | What it does |
 | --- | --- |
@@ -265,6 +275,11 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood logout` | Removes the stored token. |
 | `ahood whoami [--json]` | Reports whether your stored token still authenticates. |
 | `ahood token create <name>\|list [--json]\|revoke <id> [--yes]` | Manage personal API tokens. |
+| `ahood status [--json]` | Show every install on this machine against the registry: updates, pins, and evolution on your own artifacts. |
+| `ahood sync [<owner>/<slug> \| <slug> ...] [--yes] [--dry-run] [--json]` | Update installs that are behind, showing each one's diff and asking y/N first. |
+| `ahood pin <owner>/<slug>[@version] [--json]` | Hold an install at one version so `ahood sync` never moves it past that. |
+| `ahood unpin <owner>/<slug> [--json]` | Remove a pin so `ahood sync` offers the latest version again. |
+| `ahood review [approve <id> [--version <semver>] \| reject <id>] [--limit <n>] [--json]` | List the self-evolution proposals waiting for your review, and approve or reject them. |
 | `ahood completion <bash\|zsh\|fish>` | Print a shell completion script for the command names. |
 | `ahood help useme` | Print the bundled ahood SKILL.md for an AI agent -- raw, offline, no login needed. |
 
@@ -426,7 +441,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 
 | Command | What it does |
 | --- | --- |
-| `ahood snap create <content> [--tags tag1,tag2] [--json]` | Capture a new private snap, from an argument or piped stdin. |
+| `ahood snap create <content> [--tags tag1,tag2] [--failed <t>] [--worked <t>] [--fix <t>] [--lesson <t>] [--artifact <owner/slug>] [--json]` | Capture a new private snap, from an argument or piped stdin. |
 | `ahood snap list [--json] [--limit <n>] [--tags tag1,tag2]` | List your own snaps, most recent first. |
 | `ahood snap search <query> [--json] [--limit <n>] [--tags tag1,tag2]` | Search your own snaps by content. |
 | `ahood snap show <id> [--json]` | Print a single snap's full content. |
