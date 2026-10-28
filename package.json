@@ -30,7 +30,8 @@
     "prepublishOnly": "npm run build",
     "pretest": "npm run build",
     "test": "vitest run",
-    "sync-readme": "node scripts/sync-readme.mjs"
+    "sync-readme": "node scripts/sync-readme.mjs",
+    "sync-plugin": "node scripts/sync-plugin.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

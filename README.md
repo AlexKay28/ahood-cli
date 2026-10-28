@@ -70,21 +70,39 @@ Requires Node.js 18 or later.
 ## Use ahood in Claude Code
 
 This repo also publishes a [Claude Code plugin](https://code.claude.com/docs/en/plugins) marketplace
-(`.claude-plugin/marketplace.json`, `plugins/ahood/`) that wires up ahood's hosted MCP server --
-no CLI install required. Add the marketplace and install the plugin from inside a Claude Code session:
+(`.claude-plugin/marketplace.json`, `plugins/ahood/`). Add the marketplace and install the plugin
+from inside a Claude Code session (or run `ahood setup claude`, which does the same through the
+`claude plugin` CLI):
 
 ```
 /plugin marketplace add AlexKay28/ahood-cli
 /plugin install ahood@ahood
 ```
 
-A token is required for every tool this server exposes, including read-only ones -- there is
-no anonymous access to `https://www.ahood.dev/api/mcp`. Mint a personal access token at
-[ahood.dev/settings/tokens](https://www.ahood.dev/settings/tokens) and set it as
-`AHOOD_API_TOKEN` in your environment -- see
-[`plugins/ahood/README.md`](plugins/ahood/README.md) for the full setup. This is a separate,
-lighter-weight path from the CLI above: it gives an agent the same MCP tools
-(`search_skills`, `create_skill`, etc.) without installing `@ahood/cli` at all.
+The plugin brings two things:
+
+- **ahood's hosted MCP server** (`https://www.ahood.dev/api/mcp`): `search_skills`, `get_skill`,
+  `create_skill`, `create_snap` and the rest, mid-session. **A token is required** for every tool,
+  including read-only ones -- there is no anonymous access. Mint a personal access token at
+  [ahood.dev/settings/tokens](https://www.ahood.dev/settings/tokens) and export it as
+  `AHOOD_API_TOKEN` in the environment you start Claude Code from.
+- **`/ahood` commands**, which call this CLI (`npm i -g @ahood/cli`; they fall back to
+  `npx -y @ahood/cli`), so they also need `ahood login` (or `AHOOD_TOKEN`) once:
+
+| Type | Does |
+| --- | --- |
+| `/ahood` | Dashboard from `ahood status --json`: installed vs latest versions, pins, pending evolution proposals, evolution on/off |
+| `/ahood sync` or `/ahood-sync` | `ahood sync --dry-run`, a diff per update, then `ahood sync <owner>/<slug> --yes` only for the updates you approve in chat |
+| `/ahood review` or `/ahood-review` | `ahood review`, each proposal with its evidence, then `ahood review approve\|reject <id>` only on your decision |
+| `/ahood snap` or `/ahood-snap` | Drafts a structured, private snap of the session, shows it, and runs `ahood snap create ...` only if you say yes |
+
+Every command is namespaced too (`/ahood:ahood`, `/ahood:ahood-sync`, ...) for when another plugin
+takes the bare name. Each one pre-approves only its read-only calls (`ahood status --json`,
+`ahood sync --dry-run --json`, `ahood skill diff`, `ahood review --json`); anything that changes
+state still goes through Claude Code's permission prompt after you have agreed in chat. See
+[`plugins/ahood/README.md`](plugins/ahood/README.md) for the full setup. The command files are
+generated from `src/setup/templates/ahood-commands.ts` (shared with the Codex and opencode setup);
+regenerate them with `npm run sync-plugin`.
 
 ## Why ahood
 

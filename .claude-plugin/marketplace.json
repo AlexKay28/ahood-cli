@@ -9,7 +9,8 @@
   "plugins": [
     {
       "name": "ahood",
-      "description": "Connect Claude Code to the ahood registry's MCP server -- search, fetch, read, and publish skills, agents, MCP servers, and docs mid-session, without leaving the editor.",
+      "version": "2.0.0",
+      "description": "ahood in Claude Code: the registry's MCP tools plus /ahood commands -- dashboard, sync updates with consent, review evolution proposals, capture private snaps.",
       "author": {
         "name": "ahood",
         "url": "https://github.com/AlexKay28/ahood-cli"
