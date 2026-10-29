@@ -19,7 +19,7 @@ or run `ahood setup claude` in a terminal. Claude Code's own update flow
 
 ## Setup
 
-The easy way: run `npx @ahood/cli setup claude` in a terminal. It logs you in, installs this
+The easy way: run `npx @ahood/cli@latest setup claude` in a terminal. It logs you in, installs this
 plugin and, if you say yes, stores your token as `env.AHOOD_TOKEN` in `~/.claude/settings.json`.
 By hand:
 

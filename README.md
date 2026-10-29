@@ -44,7 +44,7 @@ Installed alice/pdf-tools@1.4.0 to .claude/skills/alice@pdf-tools
 One command, then one slash command:
 
 ```
-npx @ahood/cli setup
+npx @ahood/cli@latest setup
 ```
 
 then type `/ahood` in your agent. `setup` logs you in if you are not already (a device-code flow in your browser), detects Claude Code, Codex and opencode, and wires each one you pick: the plugin or MCP server, plus the `/ahood` commands. With your consent it also stores your ahood token in that harness's own config, so you need no environment variable at all (see [Token](#token)). Re-run it any time; `ahood doctor` checks the result.
