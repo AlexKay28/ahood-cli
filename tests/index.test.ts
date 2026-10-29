@@ -20,6 +20,14 @@ vi.mock("../src/commands/update.js", async (importOriginal) => {
   return { ...actual, update: vi.fn(async () => {}) };
 });
 
+// Mocked so the bare-`ahood mcp` deprecation test below can assert the
+// stderr note fires without actually starting the real stdio server (which
+// blocks on process.stdin for the life of the process -- see mcp.ts).
+vi.mock("../src/commands/mcp.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/commands/mcp.js")>();
+  return { ...actual, mcp: vi.fn(async () => {}) };
+});
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cliPath = path.join(here, "..", "dist", "index.js");
 
@@ -244,6 +252,66 @@ describe("dispatchSkill (in-process)", () => {
     await dispatchSkill(["outdated"]);
 
     expect(update).toHaveBeenCalledWith(["--dry-run"]);
+  });
+
+  // ahood#990: the legacy, cross-kind `ahood skill update`/`ahood skill
+  // outdated` print a one-line stderr deprecation note pointing at the
+  // top-level `ahood sync`/`ahood status`, which both still do exactly what
+  // they did before (update()/update(["--dry-run"]) above still get called).
+  it("`ahood skill update` prints a deprecation note pointing at `ahood sync`, to stderr only", async () => {
+    const { dispatchSkill } = await import("../src/index.js");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await dispatchSkill(["update"]);
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Deprecated.*ahood skill update.*ahood sync/));
+    errorSpy.mockRestore();
+  });
+
+  it("`ahood skill outdated` prints a deprecation note pointing at `ahood status`, to stderr only", async () => {
+    const { dispatchSkill } = await import("../src/index.js");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await dispatchSkill(["outdated"]);
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Deprecated.*ahood skill outdated.*ahood status/));
+    errorSpy.mockRestore();
+  });
+
+  it("`ahood agent update` (kind-scoped, not legacy) prints no deprecation note", async () => {
+    const { dispatchAgent } = await import("../src/index.js");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await dispatchAgent(["update"]);
+
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringMatching(/Deprecated/));
+    errorSpy.mockRestore();
+  });
+});
+
+describe("dispatchMcp (in-process)", () => {
+  it("bare `ahood mcp` (no args) prints a deprecation note to stderr pointing at `ahood mcp serve`, then still starts the server", async () => {
+    const { mcp } = await import("../src/commands/mcp.js");
+    const { dispatchMcp } = await import("../src/index.js");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await dispatchMcp([]);
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Deprecated.*ahood mcp.*ahood mcp serve/));
+    expect(mcp).toHaveBeenCalledWith([]);
+    errorSpy.mockRestore();
+  });
+
+  it("`ahood mcp serve` (explicit, preferred spelling) prints no deprecation note", async () => {
+    const { mcp } = await import("../src/commands/mcp.js");
+    const { dispatchMcp } = await import("../src/index.js");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await dispatchMcp(["serve"]);
+
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringMatching(/Deprecated/));
+    expect(mcp).toHaveBeenCalledWith([]);
+    errorSpy.mockRestore();
   });
 });
 

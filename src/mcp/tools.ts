@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { safeTool } from "./safe-tool.js";
 import { searchSkills } from "../commands/search.js";
 import { viewSkill } from "../commands/view.js";
@@ -24,87 +25,124 @@ function validateOwnerAndSkill(owner: string, skill: string): void {
   validateSegment(skill, "skill", spec);
 }
 
-// Registers every v1 MCP tool. Read-only by design (ahood-cli#83's spec) --
-// each tool wraps the same core function the equivalent `ahood skill <verb>
-// --json` CLI path already calls, so there is exactly one source of truth
-// for what each of these returns.
-export function registerTools(server: McpServer): void {
-  server.registerTool(
-    "skill_search",
-    {
-      description: "Search published skills in the ahood registry.",
-      inputSchema: { query: z.string().min(1), limit: z.number().int().positive().optional() },
-    },
-    safeTool(async ({ query, limit }: { query: string; limit?: number }) => searchSkills(query, limit)),
-  );
+// ahood#990 decision D: this local, stdio-only server predates the hosted
+// registry MCP endpoint (https://www.ahood.dev/api/mcp, app/api/mcp/route.ts
+// in the ahood repo) and named its tools before that one existed, so the two
+// disagreed on names for the same operation (e.g. local `skill_view` vs.
+// hosted `get_skill`). Every tool below is now registered under the hosted
+// name it corresponds to; the original v1 name stays registered too, as a
+// deprecated alias with the identical handler, so an existing host config
+// (`claude mcp add ahood -- ahood mcp serve`) keeps working byte-for-byte.
+// `skill_outdated` has no hosted twin with the same shape -- the hosted
+// `ahood_status` tool is the closest equivalent (compares installed
+// owner/skill/version pins against the registry), so that is the name it is
+// aliased under, even though the hosted tool also reports evolution state
+// this local one does not.
+type ToolDef = {
+  newName: string;
+  oldName: string;
+  description: string;
+  inputSchema: Record<string, z.ZodTypeAny>;
+  // `any` rather than a generic bound to inputSchema: registerTool's own
+  // overload already infers and checks the handler's parameter type from
+  // inputSchema at each call site below (every handler is built by
+  // safeTool() with its own concrete, schema-matching input type) -- this
+  // wrapper only needs to carry that already-checked function through to
+  // two registerTool calls (the new name and the deprecated old one)
+  // without TypeScript trying (and failing) to unify two unrelated input
+  // shapes behind one generic parameter.
+  handler: (input: any) => Promise<CallToolResult>;
+};
 
+function registerWithDeprecatedAlias(server: McpServer, def: ToolDef): void {
+  server.registerTool(def.newName, { description: def.description, inputSchema: def.inputSchema }, def.handler);
   server.registerTool(
-    "skill_view",
+    def.oldName,
     {
-      description: "Show a skill's details (tags, license, homepage, repository, dates, etc.) without installing it.",
-      inputSchema: { owner: z.string().min(1), skill: z.string().min(1) },
+      description: `Deprecated alias for \`${def.newName}\`; use that instead. ${def.description}`,
+      inputSchema: def.inputSchema,
     },
-    safeTool(async ({ owner, skill }: { owner: string; skill: string }) => {
+    def.handler,
+  );
+}
+
+// Registers every v1 MCP tool (plus its ahood-cli#172/ahood#990 renamed
+// twin). Read-only by design (ahood-cli#83's spec) -- each tool wraps the
+// same core function the equivalent `ahood skill <verb> --json` CLI path
+// already calls, so there is exactly one source of truth for what each of
+// these returns.
+export function registerTools(server: McpServer): void {
+  registerWithDeprecatedAlias(server, {
+    newName: "search_skills",
+    oldName: "skill_search",
+    description: "Search published skills in the ahood registry.",
+    inputSchema: { query: z.string().min(1), limit: z.number().int().positive().optional() },
+    handler: safeTool(async ({ query, limit }: { query: string; limit?: number }) => searchSkills(query, limit)),
+  });
+
+  registerWithDeprecatedAlias(server, {
+    newName: "get_skill",
+    oldName: "skill_view",
+    description: "Show a skill's details (tags, license, homepage, repository, dates, etc.) without installing it.",
+    inputSchema: { owner: z.string().min(1), skill: z.string().min(1) },
+    handler: safeTool(async ({ owner, skill }: { owner: string; skill: string }) => {
       validateOwnerAndSkill(owner, skill);
       return viewSkill(owner, skill);
     }),
-  );
+  });
 
-  server.registerTool(
-    "skill_read",
-    {
-      description: "Read a skill's full SKILL.md content without installing it.",
-      inputSchema: { owner: z.string().min(1), skill: z.string().min(1) },
-    },
-    safeTool(async ({ owner, skill }: { owner: string; skill: string }) => {
+  registerWithDeprecatedAlias(server, {
+    newName: "read_skill",
+    oldName: "skill_read",
+    description: "Read a skill's full SKILL.md content without installing it.",
+    inputSchema: { owner: z.string().min(1), skill: z.string().min(1) },
+    handler: safeTool(async ({ owner, skill }: { owner: string; skill: string }) => {
       validateOwnerAndSkill(owner, skill);
       return readSkillMd(owner, skill);
     }),
-  );
+  });
 
-  server.registerTool(
-    "skill_versions",
-    {
-      description: "List a skill's published-version history (version, changelog, size, publish date).",
-      inputSchema: { owner: z.string().min(1), skill: z.string().min(1) },
-    },
-    safeTool(async ({ owner, skill }: { owner: string; skill: string }) => {
+  registerWithDeprecatedAlias(server, {
+    newName: "list_skill_versions",
+    oldName: "skill_versions",
+    description: "List a skill's published-version history (version, changelog, size, publish date).",
+    inputSchema: { owner: z.string().min(1), skill: z.string().min(1) },
+    handler: safeTool(async ({ owner, skill }: { owner: string; skill: string }) => {
       validateOwnerAndSkill(owner, skill);
       return listSkillVersions(owner, skill);
     }),
-  );
+  });
 
-  server.registerTool(
-    "skill_list",
-    {
-      description: "List the authenticated caller's own skills, public and private.",
-      inputSchema: {},
-    },
-    safeTool(async () => listOwnSkills()),
-  );
+  registerWithDeprecatedAlias(server, {
+    newName: "list_my_skills",
+    oldName: "skill_list",
+    description: "List the authenticated caller's own skills, public and private.",
+    inputSchema: {},
+    handler: safeTool(async () => listOwnSkills()),
+  });
 
-  server.registerTool(
-    "skill_outdated",
-    {
-      description:
-        "Compare an explicit list of {owner, skill, version} pins (e.g. from an agent's own memory of what it " +
-        "installed via MCP calls) against the registry's latest published version for each, returning " +
-        "up-to-date status and changelog -- without reading or requiring any local lockfile. One entry " +
-        "failing to resolve (e.g. a 404 for an unpublished skill) doesn't fail the whole batch; that entry's " +
-        "result carries an `error` field instead.",
-      inputSchema: {
-        skills: z
-          .array(
-            z.object({
-              owner: z.string().min(1),
-              skill: z.string().min(1),
-              version: z.string().min(1),
-            }),
-          )
-          .min(1),
-      },
+  registerWithDeprecatedAlias(server, {
+    newName: "ahood_status",
+    oldName: "skill_outdated",
+    description:
+      "Compare an explicit list of {owner, skill, version} pins (e.g. from an agent's own memory of what it " +
+      "installed via MCP calls) against the registry's latest published version for each, returning " +
+      "up-to-date status and changelog -- without reading or requiring any local lockfile. One entry " +
+      "failing to resolve (e.g. a 404 for an unpublished skill) doesn't fail the whole batch; that entry's " +
+      "result carries an `error` field instead. Named to match the hosted registry MCP's `ahood_status` tool, " +
+      "though this local version only reports version staleness, not evolution state.",
+    inputSchema: {
+      skills: z
+        .array(
+          z.object({
+            owner: z.string().min(1),
+            skill: z.string().min(1),
+            version: z.string().min(1),
+          }),
+        )
+        .min(1),
     },
-    safeTool(async ({ skills }: { skills: Array<{ owner: string; skill: string; version: string }> }) => {
+    handler: safeTool(async ({ skills }: { skills: Array<{ owner: string; skill: string; version: string }> }) => {
       const results = [];
       for (const { owner, skill, version } of skills) {
         const label = `${owner}/${skill}`;
@@ -137,8 +175,10 @@ export function registerTools(server: McpServer): void {
       }
       return results;
     }),
-  );
+  });
 
+  // No hosted twin shares this exact shape, so there is nothing to rename
+  // or alias to -- registered once, under its original name.
   server.registerTool(
     "whoami",
     {

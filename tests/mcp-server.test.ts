@@ -78,14 +78,51 @@ describe("ahood mcp tools", () => {
     else process.env.AHOOD_TOKEN = originalToken;
   });
 
-  it("lists exactly the 7 v1 tools", async () => {
+  it("lists the hosted-aligned tool names plus their deprecated v1 aliases (ahood#990)", async () => {
     const client = await connectedClient();
 
     const { tools } = await client.listTools();
 
     expect(tools.map((t) => t.name).sort()).toEqual(
-      ["skill_list", "skill_outdated", "skill_read", "skill_search", "skill_versions", "skill_view", "whoami"].sort(),
+      [
+        // Hosted-aligned names (the primary, non-deprecated spelling).
+        "search_skills",
+        "get_skill",
+        "read_skill",
+        "list_skill_versions",
+        "list_my_skills",
+        "ahood_status",
+        // Deprecated v1 aliases, kept so an existing host config never breaks.
+        "skill_search",
+        "skill_view",
+        "skill_read",
+        "skill_versions",
+        "skill_list",
+        "skill_outdated",
+        // No hosted twin, so no rename/alias.
+        "whoami",
+      ].sort(),
     );
+  });
+
+  it("every deprecated v1 alias's description says so and names its replacement", async () => {
+    const client = await connectedClient();
+
+    const { tools } = await client.listTools();
+    const byName = new Map(tools.map((t) => [t.name, t]));
+    const aliasToReplacement: Record<string, string> = {
+      skill_search: "search_skills",
+      skill_view: "get_skill",
+      skill_read: "read_skill",
+      skill_versions: "list_skill_versions",
+      skill_list: "list_my_skills",
+      skill_outdated: "ahood_status",
+    };
+
+    for (const [oldName, newName] of Object.entries(aliasToReplacement)) {
+      expect(byName.get(oldName)?.description).toMatch(/Deprecated alias/);
+      expect(byName.get(oldName)?.description).toContain(newName);
+    }
   });
 
   it("skill_search returns the skills array as tool content", async () => {
@@ -406,5 +443,125 @@ describe("ahood mcp tools", () => {
 
     expect(result.isError).toBeFalsy();
     expect(firstTextBody(result.content)).toEqual({ authenticated: true, mode: "session", profileStatus: "not_found" });
+  });
+
+  // ahood#990: the hosted-aligned names are the primary spelling now; each
+  // one behaves identically to its deprecated v1 alias above (same handler),
+  // asserted here under the new name so both surfaces stay covered.
+  describe("hosted-aligned tool names", () => {
+    it("search_skills returns the skills array as tool content", async () => {
+      const skills = [{ slug: "demo", name: "Demo", tagline: null, downloads_count: 3, profiles: { username: "alice" } }];
+      stubApi(200, { skills });
+      const client = await connectedClient();
+
+      const result = await client.callTool({ name: "search_skills", arguments: { query: "demo" } });
+
+      expect(result.isError).toBeFalsy();
+      expect(firstTextBody(result.content)).toEqual(skills);
+    });
+
+    it("get_skill returns the skill detail object", async () => {
+      const detail = { slug: "demo", name: "Demo", owner: "alice", tags: [], downloads_count: 0, stars_count: 0, skill_versions: null };
+      stubApi(200, detail);
+      const client = await connectedClient();
+
+      const result = await client.callTool({ name: "get_skill", arguments: { owner: "alice", skill: "demo" } });
+
+      expect(result.isError).toBeFalsy();
+      expect(firstTextBody(result.content)).toEqual(detail);
+    });
+
+    it("get_skill rejects an invalid owner segment locally, before any network request", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const client = await connectedClient();
+
+      const result = await client.callTool({ name: "get_skill", arguments: { owner: "..", skill: "profile" } });
+
+      expect(result.isError).toBe(true);
+      expect((firstTextBody(result.content) as { error_code: string }).error_code).toBe("usage_error");
+      expect(fetchMock).toHaveBeenCalledTimes(0);
+    });
+
+    it("read_skill returns version and content", async () => {
+      stubApi(200, { owner: "alice", slug: "demo", skill_versions: { version: "1.0.0", skill_md_content: "# Demo" } });
+      const client = await connectedClient();
+
+      const result = await client.callTool({ name: "read_skill", arguments: { owner: "alice", skill: "demo" } });
+
+      expect(result.isError).toBeFalsy();
+      expect(firstTextBody(result.content)).toEqual({ version: "1.0.0", content: "# Demo", yanked_at: null, yanked_reason: null });
+    });
+
+    it("list_skill_versions returns the versions array", async () => {
+      const versions = [{ version: "1.0.0", changelog_md: null, package_size_bytes: 100, status: "published", created_at: "2026-01-01" }];
+      stubApi(200, { versions });
+      const client = await connectedClient();
+
+      const result = await client.callTool({ name: "list_skill_versions", arguments: { owner: "alice", skill: "demo" } });
+
+      expect(result.isError).toBeFalsy();
+      expect(firstTextBody(result.content)).toEqual(versions);
+    });
+
+    it("list_my_skills returns the caller's own skills", async () => {
+      const skills = [{ slug: "demo", name: "Demo", tagline: null, visibility: "public", downloads_count: 0, stars_count: 0, profiles: { username: "alice" } }];
+      stubApi(200, { skills });
+      const client = await connectedClient();
+
+      const result = await client.callTool({ name: "list_my_skills", arguments: {} });
+
+      expect(result.isError).toBeFalsy();
+      expect(firstTextBody(result.content)).toEqual(skills);
+    });
+
+    it("ahood_status reports up-to-date and outdated entries with changelog only for the outdated one", async () => {
+      stubApiRoutes({
+        "/api/v1/skills/alice/current": {
+          status: 200,
+          body: { skill_versions: { version: "1.0.0", manifest: [], checksum_sha256: "same" } },
+        },
+        "/api/v1/skills/alice/behind": {
+          status: 200,
+          body: {
+            skill_versions: {
+              version: "2.0.0",
+              manifest: [],
+              checksum_sha256: "new",
+              changelog_md: "## 2.0.0\n- Breaking change.",
+            },
+          },
+        },
+      });
+      const client = await connectedClient();
+
+      const result = await client.callTool({
+        name: "ahood_status",
+        arguments: {
+          skills: [
+            { owner: "alice", skill: "current", version: "1.0.0" },
+            { owner: "alice", skill: "behind", version: "1.0.0" },
+          ],
+        },
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(firstTextBody(result.content)).toEqual([
+        {
+          skill: "alice/current",
+          current_version: "1.0.0",
+          latest_version: "1.0.0",
+          up_to_date: true,
+          changelog_md: null,
+        },
+        {
+          skill: "alice/behind",
+          current_version: "1.0.0",
+          latest_version: "2.0.0",
+          up_to_date: false,
+          changelog_md: "## 2.0.0\n- Breaking change.",
+        },
+      ]);
+    });
   });
 });

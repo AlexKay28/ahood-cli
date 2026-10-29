@@ -1,16 +1,23 @@
 ---
 name: using-ahood
-description: Use ahood (ahood.dev), the registry of AI agent skills, agents, MCP servers and docs, from inside a session -- search and install artifacts through the ahood MCP tools, capture private snaps of what a session learned, and keep installed skills current. Use when the user mentions ahood, asks to find or install a skill, agent or MCP server, says "snap this" or "remember this lesson", after you hand over a deliverable, or right after the user corrects you.
+description: "Use ahood (ahood.dev), the registry of AI agent skills, agents, MCP servers and docs, from inside a session -- search and install artifacts through the ahood MCP tools, capture private snaps of what a session learned, and keep installed skills current. Use when the user mentions ahood, asks to find or install a skill, agent or MCP server, says \"snap this\" or \"remember this lesson\", after you hand over a deliverable, or right after the user corrects you."
 ---
 
 
+<!-- Generated from src/skill/using-ahood.md by `npm run sync-skill`; edit that file, not this one. -->
+
 # Using ahood
 
-ahood is a registry for agent artifacts (skills, agents, MCP servers, docs) with versioning,
-private session notes ("snaps") and owner-approved self-evolution. This plugin gives you two
-ways in: the **ahood MCP tools** (server `ahood`, needs `AHOOD_API_TOKEN` in the environment)
-and the **`ahood` CLI** (`npm i -g @ahood/cli`, or `npx -y @ahood/cli`), which the user's
-`/ahood` commands call.
+ahood (ahood.dev) is a registry for agent artifacts (skills, agents, MCP servers, docs)
+with versioning, private session notes ("snaps") and owner-approved self-evolution.
+
+**One front door.** `npx @ahood/cli setup` logs you in, detects the harness (Claude Code,
+Codex, opencode), and -- with your consent -- wires up the plugin or MCP server, this skill,
+and the token -- after that, the user just types `/ahood`. Everything below is also reachable
+directly: the **ahood MCP tools** (the hosted registry endpoint, needs `AHOOD_TOKEN` in the
+environment; `AHOOD_API_TOKEN` is a deprecated fallback for one release) and the **`ahood`
+CLI** (`npm i -g @ahood/cli`, or `npx -y @ahood/cli`), which `/ahood` and its sibling commands
+call.
 
 ## Find and install
 

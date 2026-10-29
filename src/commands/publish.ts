@@ -283,6 +283,16 @@ function parsePublishArgs(args: string[]): {
   const changelog = flagValue(args, "--changelog");
   let legacyPath: string | undefined;
 
+  // ahood#990: the `<path> --owner <owner> --slug <skill> --version <x.y.z>`
+  // form predates the primary `<owner>/<skill>@<version>` spec form and is
+  // deprecated in favor of it -- still works unchanged, one stderr note.
+  if (owner !== undefined || skill !== undefined) {
+    console.error(
+      "Deprecated: the `<path> --owner <owner> --slug <skill> --version <x.y.z>` publish form is deprecated; " +
+        "use `ahood skill publish <owner>/<skill>@<version> [--path <dir>]` instead. The legacy form still works.",
+    );
+  }
+
   const first = args[0];
   if (first && !first.startsWith("--")) {
     if (first.includes("/") && first.includes("@")) {

@@ -258,6 +258,19 @@ async function dispatchRegistry(noun: CliKind, args: string[]): Promise<void> {
     return;
   }
 
+  // ahood#990: nudge the legacy, cross-kind `ahood skill update`/`ahood skill
+  // outdated` toward the top-level `ahood sync`/`ahood status`, which cover
+  // every project on the machine instead of just this one's lockfile. Both
+  // commands still work unchanged -- stderr only, so --json/table stdout is
+  // untouched (kind-scoped `ahood agent update`/`ahood mcp outdated` etc.
+  // are not legacy and print nothing here).
+  if (noun === "skill" && (sub === "update" || sub === "outdated")) {
+    const replacement = sub === "update" ? "ahood sync" : "ahood status";
+    console.error(
+      `Deprecated: \`ahood skill ${sub}\` is being phased out in favor of \`${replacement}\` (ahood#990), which covers every project on this machine. \`ahood skill ${sub}\` still works for now.`,
+    );
+  }
+
   if (noun === "skill" && sub === "publish") {
     await handler(rest);
     return;
@@ -317,13 +330,19 @@ async function dispatchProject(args: string[]): Promise<void> {
 
 // `ahood mcp` keeps its original contract byte-for-byte: with NO arguments it
 // is the local stdio MCP server that existing host configs launch -- nothing
-// is printed and nothing else runs first. `ahood mcp serve` is the same
-// server under an explicit, documented name. Every other first word is a
-// registry verb for mcp-kind entries, help, or an error: an unrecognized one
-// fails with usage (dispatchRegistry) rather than silently starting a
-// long-lived server that a typo would otherwise leave hanging.
+// is printed to STDOUT and nothing else runs first (the stdio protocol owns
+// stdout for the life of the process). `ahood mcp serve` is the same server
+// under an explicit, documented name. Every other first word is a registry
+// verb for mcp-kind entries, help, or an error: an unrecognized one fails
+// with usage (dispatchRegistry) rather than silently starting a long-lived
+// server that a typo would otherwise leave hanging.
 async function dispatchMcp(args: string[]): Promise<void> {
   if (args.length === 0) {
+    // ahood#990: bare `ahood mcp` is ambiguous with `ahood mcp <verb>` (the
+    // mcp-kind registry commands below) -- deprecated in favor of the
+    // explicit `ahood mcp serve`, stderr only so the stdio protocol's stdout
+    // is untouched and an existing host config keeps working byte-for-byte.
+    console.error("Deprecated: bare `ahood mcp` is ambiguous; run `ahood mcp serve` for the local MCP server. Starting it anyway.");
     await mcp(args);
     return;
   }
