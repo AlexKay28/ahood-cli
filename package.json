@@ -32,7 +32,8 @@
     "test": "vitest run",
     "sync-readme": "node scripts/sync-readme.mjs",
     "sync-plugin": "node scripts/sync-plugin.mjs",
-    "sync-skill": "node scripts/sync-skill.mjs"
+    "sync-skill": "node scripts/sync-skill.mjs",
+    "version": "node scripts/sync-plugin.mjs && git add plugins/codex/.codex-plugin/plugin.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

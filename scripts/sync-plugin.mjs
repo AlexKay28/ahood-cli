@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Writes plugins/ahood/commands/*.md from src/setup/templates/claude-plugin.ts
-// (ahood#981), the same way sync-readme.mjs regenerates the README's command
+// (ahood#981), and the Codex plugin (plugins/codex/ plus
+// .agents/plugins/marketplace.json) from src/setup/templates/codex-plugin.ts
+// (ahood#1009), the same way sync-readme.mjs regenerates the README's command
 // table: build with tsc, then import the compiled module, so the files can
 // never drift from what the tests check.
 //
@@ -24,11 +26,18 @@ execFileSync(existsSync(tscBin) ? tscBin : "npx", existsSync(tscBin) ? ["-p", "t
 const { CLAUDE_PLUGIN_DIR, claudePluginCommandFiles } = await import(
   path.join(rootDir, "dist", "setup", "templates", "claude-plugin.js")
 );
+const { codexPluginFiles } = await import(path.join(rootDir, "dist", "setup", "templates", "codex-plugin.js"));
+
+// Both lists as paths relative to the repo root.
+const files = [
+  ...claudePluginCommandFiles().map(({ file, content }) => ({ file: path.join(CLAUDE_PLUGIN_DIR, file), content })),
+  ...codexPluginFiles(),
+];
 
 const checkMode = process.argv.includes("--check");
 const stale = [];
-for (const { file, content } of claudePluginCommandFiles()) {
-  const target = path.join(rootDir, CLAUDE_PLUGIN_DIR, file);
+for (const { file, content } of files) {
+  const target = path.join(rootDir, file);
   const current = existsSync(target) ? readFileSync(target, "utf8") : null;
   if (current === content) continue;
   stale.push(path.relative(rootDir, target));
@@ -39,7 +48,7 @@ for (const { file, content } of claudePluginCommandFiles()) {
 }
 
 if (checkMode && stale.length > 0) {
-  console.error(`Out of date with src/setup/templates/claude-plugin.ts: ${stale.join(", ")}\nRun \`npm run sync-plugin\`.`);
+  console.error(`Out of date with src/setup/templates/claude-plugin.ts / codex-plugin.ts: ${stale.join(", ")}\nRun \`npm run sync-plugin\`.`);
   process.exit(1);
 }
-console.log(stale.length === 0 ? "Plugin command files already up to date." : `Updated: ${stale.join(", ")}`);
+console.log(stale.length === 0 ? "Plugin files already up to date." : `Updated: ${stale.join(", ")}`);

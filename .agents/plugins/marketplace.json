@@ -1,0 +1,20 @@
+{
+  "name": "ahood",
+  "interface": {
+    "displayName": "ahood"
+  },
+  "plugins": [
+    {
+      "name": "ahood",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

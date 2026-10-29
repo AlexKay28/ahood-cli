@@ -8,6 +8,8 @@
 //   - plugins/ahood/skills/using-ahood/SKILL.md -- the skill `ahood setup`
 //     bundles with the Claude Code plugin (name: using-ahood; not a
 //     registry entry, ships straight from this git repo).
+//   - plugins/codex/skills/using-ahood/SKILL.md -- the same skill in the
+//     Codex plugin (ahood#1009), next to its `ahood` command skill.
 //   - .claude/skills/alexkay@ahood/SKILL.md -- this repo's own dev-installed
 //     copy of the registry-published "alexkay/ahood" skill (name: ahood).
 //     Publishing a new version from it is a separate, owner-run step (see
@@ -73,6 +75,7 @@ export function renderRegistrySkill() {
 export function targets() {
   const all = [
     { path: "plugins/ahood/skills/using-ahood/SKILL.md", render: renderPluginSkill },
+    { path: "plugins/codex/skills/using-ahood/SKILL.md", render: renderPluginSkill },
     { path: ".claude/skills/alexkay@ahood/SKILL.md", render: renderRegistrySkill },
   ];
   return all.filter((t) => existsSync(path.join(rootDir, path.dirname(t.path))));

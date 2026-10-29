@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ahood": {
+      "type": "http",
+      "url": "https://www.ahood.dev/api/mcp",
+      "bearer_token_env_var": "AHOOD_TOKEN"
+    }
+  }
+}

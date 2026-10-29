@@ -26,6 +26,10 @@ describe("the self-skill's generated files match scripts/sync-skill.mjs (run `np
   it("plugins/ahood/skills/using-ahood/SKILL.md is one of the generated targets", () => {
     expect(targets().map((t) => t.path)).toContain("plugins/ahood/skills/using-ahood/SKILL.md");
   });
+
+  it("so is the Codex plugin's copy, plugins/codex/skills/using-ahood/SKILL.md (ahood#1009)", () => {
+    expect(targets().map((t) => t.path)).toContain("plugins/codex/skills/using-ahood/SKILL.md");
+  });
 });
 
 describe("the canonical self-skill body (src/skill/using-ahood.md)", () => {
