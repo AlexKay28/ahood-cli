@@ -29,7 +29,9 @@ import { setup } from "../src/setup/setup-command.js";
 import { doctor } from "../src/setup/doctor-command.js";
 import { REDACTED_TOKEN } from "../src/setup/file-changes.js";
 import { captureConsole } from "./helpers/me-env.js";
-import { fakeClaude, fakeOpencode, fakeRunner, listFiles, setupHomeEnv } from "./helpers/harness-env.js";
+import { upsertBlock } from "../src/setup/marked-block.js";
+import { CODEX_TOML_MARKERS, codexMcpBlock, codexPluginBlock } from "../src/setup/templates/codex.js";
+import { fakeClaude, fakeCodex, fakeOpencode, fakeRunner, listFiles, setupHomeEnv } from "./helpers/harness-env.js";
 
 const TOKEN = "ahd_s3cr3t_TOKEN_990";
 const OTHER = "ahd_other_TOKEN_990";
@@ -42,7 +44,8 @@ const mode = (path: string) => statSync(path).mode & 0o777;
 const codexConfig = () => join(env.home, ".codex", "config.toml");
 const opencodeConfig = () => join(env.home, ".config", "opencode", "opencode.json");
 const claudeSettings = () => join(env.home, ".claude", "settings.json");
-const tomlEntry = () => (parseToml(readFileSync(codexConfig(), "utf-8")) as { mcp_servers: Record<string, Record<string, unknown>> }).mcp_servers.ahood;
+/** The `[mcp_servers.ahood]` entry in config.toml: since ahood#1009 there is one only to hold a stored token. */
+const tomlEntry = () => (parseToml(readFileSync(codexConfig(), "utf-8")) as { mcp_servers?: Record<string, Record<string, unknown>> }).mcp_servers?.ahood;
 /** Every file under `dir` whose bytes contain `needle`. */
 const filesHolding = (dir: string, needle: string) => listFiles(dir).filter((f) => readFileSync(join(dir, f), "utf-8").includes(needle));
 
@@ -140,17 +143,19 @@ describe("ahood setup offers login first", () => {
 describe("Codex: the token in config.toml (ahood#990, decision B)", () => {
   beforeEach(() => writeCredentials({ token: TOKEN }));
 
-  it("--yes alone never stores the token: the block names $AHOOD_TOKEN and the note says how", async () => {
+  it("--yes alone never stores the token: no MCP entry (the plugin's names $AHOOD_TOKEN) and the note says how", async () => {
     await setup(["codex", "--yes"]);
-    expect(tomlEntry()).toEqual({ url: "https://www.ahood.dev/api/mcp", bearer_token_env_var: "AHOOD_TOKEN" });
+    expect(tomlEntry()).toBeUndefined();
     expect(filesHolding(join(env.home, ".codex"), TOKEN)).toEqual([]);
     expect(io.stdout()).toContain("export AHOOD_TOKEN=<your token>");
     expect(io.stdout()).toContain("--store-token");
   });
 
-  it("--store-token: the token in the managed block, the file it creates is 0600", async () => {
+  it("--store-token: the token in a full [mcp_servers.ahood] in the managed block, beside the plugin; the file it creates is 0600", async () => {
     await setup(["codex", "--yes", "--store-token"]);
+    // A full entry (url included): it takes the place of the plugin's server, and a partial one would not load.
     expect(tomlEntry()).toEqual({ url: "https://www.ahood.dev/api/mcp", http_headers: { Authorization: `Bearer ${TOKEN}` } });
+    expect(readFileSync(codexConfig(), "utf-8")).toContain(codexPluginBlock(TOKEN));
     expect(mode(codexConfig())).toBe(0o600);
     expect(io.stdout()).toContain("with your ahood token");
   });
@@ -162,7 +167,7 @@ describe("Codex: the token in config.toml (ahood#990, decision B)", () => {
     vi.mocked(isInteractive).mockReturnValue(true);
     vi.mocked(askLine).mockResolvedValue("y");
     await setup(["codex"]);
-    expect(tomlEntry().http_headers).toEqual({ Authorization: `Bearer ${TOKEN}` });
+    expect(tomlEntry()?.http_headers).toEqual({ Authorization: `Bearer ${TOKEN}` });
     expect(mode(codexConfig())).toBe(0o600);
     expect(vi.mocked(askLine).mock.calls.some(([q]) => q.includes("store your ahood token in ~/.codex/config.toml"))).toBe(true);
   });
@@ -171,7 +176,7 @@ describe("Codex: the token in config.toml (ahood#990, decision B)", () => {
     vi.mocked(isInteractive).mockReturnValue(true);
     vi.mocked(askLine).mockResolvedValue("");
     await setup(["codex"]);
-    expect(tomlEntry().bearer_token_env_var).toBe("AHOOD_TOKEN");
+    expect(tomlEntry()).toBeUndefined();
     expect(filesHolding(join(env.home, ".codex"), TOKEN)).toEqual([]);
   });
 
@@ -199,7 +204,7 @@ describe("Codex: the token in config.toml (ahood#990, decision B)", () => {
     vi.mocked(confirmYesNo).mockResolvedValue(true); // chmod? yes; apply? yes
     await setup(["codex"]);
     expect(mode(codexConfig())).toBe(0o600);
-    expect(tomlEntry().http_headers).toEqual({ Authorization: `Bearer ${TOKEN}` });
+    expect(tomlEntry()?.http_headers).toEqual({ Authorization: `Bearer ${TOKEN}` });
   });
 
   it("an edit without a token keeps the file's own mode (the atomic rename used to reset it)", async () => {
@@ -214,10 +219,21 @@ describe("Codex: the token in config.toml (ahood#990, decision B)", () => {
     await setup(["codex", "--yes", "--store-token"]);
     writeCredentials({ token: OTHER });
     await setup(["codex", "--yes"]);
-    expect(tomlEntry().http_headers).toEqual({ Authorization: `Bearer ${OTHER}` });
+    expect(tomlEntry()?.http_headers).toEqual({ Authorization: `Bearer ${OTHER}` });
     await setup(["codex", "--yes", "--no-store-token"]);
-    expect(tomlEntry()).toEqual({ url: "https://www.ahood.dev/api/mcp", bearer_token_env_var: "AHOOD_TOKEN" });
+    expect(tomlEntry()).toBeUndefined();
     expect(filesHolding(join(env.home, ".codex"), OTHER)).toEqual([]); // the backup of the edit is redacted too
+  });
+
+  it("a stored token from the pre-plugin setup survives the migration (same consent), then --remove takes it out", async () => {
+    mkdirSync(join(env.home, ".codex"), { recursive: true });
+    writeFileSync(codexConfig(), upsertBlock('model = "o3"\n', codexMcpBlock(TOKEN), CODEX_TOML_MARKERS, codexConfig()), { mode: 0o600 });
+    await setup(["codex", "--yes"]);
+    expect(tomlEntry()?.http_headers).toEqual({ Authorization: `Bearer ${TOKEN}` });
+    expect(readFileSync(codexConfig(), "utf-8")).toContain(codexPluginBlock(TOKEN));
+    expect(filesHolding(join(env.home, ".codex"), TOKEN)).toEqual(["config.toml"]); // the backup is redacted
+    await setup(["--remove", "codex", "--yes"]);
+    expect(readFileSync(codexConfig(), "utf-8")).toBe('model = "o3"\n');
   });
 
   it("--remove deletes the stored token; the backup of the user's file has it redacted and is 0600", async () => {
@@ -236,6 +252,8 @@ describe("Codex: the token in config.toml (ahood#990, decision B)", () => {
 
   it("doctor: a stored token counts as the MCP token, and the config is ok (not stale)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+    runner.restore();
+    runner = fakeRunner({ opencode: fakeOpencode(), codex: fakeCodex().bin });
     await setup(["codex", "--yes", "--store-token"]);
     await doctor(["--offline", "--json"]);
     const report = JSON.parse(io.out[io.out.length - 1]);

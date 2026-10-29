@@ -118,7 +118,13 @@ regenerate them with `npm run sync-plugin`.
 The same repo is a Codex plugin marketplace too: `.agents/plugins/marketplace.json` lists
 `ahood@ahood` from [`plugins/codex/`](plugins/codex), which bundles the hosted MCP server (it
 reads `$AHOOD_TOKEN` through `bearer_token_env_var`) and two skills, `ahood:ahood` (the `/ahood`
-command set above) and `ahood:using-ahood`. By hand:
+command set above) and `ahood:using-ahood`. `ahood setup codex` installs it: it writes
+`[marketplaces.ahood]` and `[plugins."ahood@ahood"] enabled = true` in its marked block in
+`$CODEX_HOME/config.toml`, then runs `codex plugin marketplace upgrade ahood` and
+`codex plugin add ahood@ahood`. It also takes out what earlier versions of setup wrote: the
+`[mcp_servers.ahood]` block, `$CODEX_HOME/skills/ahood/SKILL.md` and the AGENTS.md snippet, with
+the usual backups. `ahood setup --remove codex` deletes the block and runs `codex plugin remove` /
+`codex plugin marketplace remove`. By hand:
 
 ```
 codex plugin marketplace add AlexKay28/ahood-cli
@@ -157,7 +163,7 @@ The agent harnesses read it through their MCP config, and `ahood setup` asks, pe
 | Harness | Where setup stores it (with your yes) | Otherwise the config reads |
 | --- | --- | --- |
 | Claude Code | `env.AHOOD_TOKEN` in `~/.claude/settings.json` (the plugin's `.mcp.json` can only name a variable) | `$AHOOD_TOKEN` |
-| Codex | `http_headers` in ahood's marked block in `$CODEX_HOME/config.toml` | `$AHOOD_TOKEN` (`bearer_token_env_var`) |
+| Codex | a full `[mcp_servers.ahood]` with `http_headers`, in ahood's marked block in `$CODEX_HOME/config.toml`; it takes the place of the plugin's own server | `$AHOOD_TOKEN` (the plugin's `bearer_token_env_var`) |
 | opencode | the `Authorization` header of `mcp.servers.ahood` in `opencode.json` | `{env:AHOOD_TOKEN}` |
 
 `--store-token` answers yes up front and `--no-store-token` no; `--yes` alone never stores a secret. A file setup creates for the token is mode 0600. An existing file other users can read is tightened to 0600 only on a separate yes; without it the token is not stored there. The token is never printed, backups setup makes have it redacted, and `ahood setup --remove <harness>` takes it out together with the rest of ahood's entries.

@@ -9,7 +9,7 @@ import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from 
 import { SetupRefusedError } from "../errors.js";
 import { readIfExists, type FileChange } from "../file-changes.js";
 import { claudeDir, displayPath } from "../paths.js";
-import { runner } from "../runner.js";
+import { helpLists, runner } from "../runner.js";
 import { AHOOD_SNAP_HOOK_ENV } from "../templates/ahood-commands.js";
 import {
   CLAUDE_IN_SESSION_INSTALL,
@@ -33,15 +33,11 @@ function detect(): Detection {
   return { binary, configDir, configDirExists, installed: binary !== null || configDirExists };
 }
 
-function lists(help: string, verb: string): boolean {
-  return new RegExp(`^\\s+${verb}(\\|\\S+)?\\s`, "m").test(help);
-}
-
 /** True when this claude CLI has `plugin install` and `plugin marketplace add` (claude-code 2.x does). */
 export function claudeSupportsPluginCli(binary: string): boolean {
   const plugin = runner().run(binary, ["plugin", "--help"]);
   const marketplace = runner().run(binary, ["plugin", "marketplace", "--help"]);
-  return plugin.status === 0 && marketplace.status === 0 && lists(plugin.stdout, "install") && lists(marketplace.stdout, "add");
+  return plugin.status === 0 && marketplace.status === 0 && helpLists(plugin.stdout, "install") && helpLists(marketplace.stdout, "add");
 }
 
 function runJson<T>(binary: string, args: string[]): T | null {

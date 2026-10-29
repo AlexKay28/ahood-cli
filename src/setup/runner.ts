@@ -39,6 +39,11 @@ const realRunner: Runner = {
   },
 };
 
+/** True when a CLI's `--help` text lists `verb` as a subcommand (`  verb ...` or `  verb|alias ...`). */
+export function helpLists(help: string, verb: string): boolean {
+  return new RegExp(`^\\s+${verb}(\\|\\S+)?\\s`, "m").test(help);
+}
+
 let current: Runner = realRunner;
 
 export function runner(): Runner {

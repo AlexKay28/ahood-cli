@@ -18,10 +18,19 @@ import { confirmYesNo, isInteractive } from "../src/confirm.js";
 import { setup } from "../src/setup/setup-command.js";
 import { UsageError } from "../src/usage-error.js";
 import { writeBackup } from "../src/setup/file-changes.js";
-import { codexMcpBlock, codexSkill } from "../src/setup/templates/codex.js";
+import { upsertBlock } from "../src/setup/marked-block.js";
+import {
+  agentsSnippetBody,
+  agentsSnippetFile,
+  CODEX_AGENTS_MARKERS,
+  CODEX_TOML_MARKERS,
+  codexMcpBlock,
+  codexPluginBlock,
+  codexSkill,
+} from "../src/setup/templates/codex.js";
 import { opencodeCommandFiles } from "../src/setup/templates/opencode.js";
 import { captureConsole } from "./helpers/me-env.js";
-import { fakeClaude, fakeOpencode, fakeRunner, listFiles, setupHomeEnv } from "./helpers/harness-env.js";
+import { fakeClaude, fakeCodex, fakeOpencode, fakeRunner, listFiles, setupHomeEnv } from "./helpers/harness-env.js";
 
 const MCP_URL = "https://www.ahood.dev/api/mcp";
 const backups = (files: string[]) => files.filter((f) => f.includes(".ahood-backup-"));
@@ -42,19 +51,33 @@ afterEach(() => {
   env.restore();
 });
 
-describe("ahood setup codex (ahood#980)", () => {
+describe("ahood setup codex (ahood#980, ahood#1009: the Codex plugin)", () => {
   const codex = () => join(env.home, ".codex");
   const config = () => join(codex(), "config.toml");
   const USER_TOML = 'model = "o3"\n\n[projects."/x"]\ntrust_level = "trusted"\n';
+  const PLUGIN_TOML = {
+    marketplaces: { ahood: { source_type: "git", source: "https://github.com/AlexKay28/ahood-cli.git" } },
+    plugins: { "ahood@ahood": { enabled: true } },
+  };
+  /** The codex commands setup ran, without its read-only probes. */
+  const codexRuns = () =>
+    runner.calls.filter((c) => c.bin === "codex" && !c.args.includes("--help") && !c.args.includes("--json")).map((c) => c.args.join(" "));
+  let cx: ReturnType<typeof fakeCodex>;
 
-  it("fresh install: MCP block, skill and snippet; --yes also appends the AGENTS.md snippet", async () => {
+  beforeEach(() => {
+    runner.restore();
+    cx = fakeCodex();
+    runner = fakeRunner({ codex: cx.bin });
+  });
+
+  it("fresh install: only the marketplace and the enabled plugin in config.toml, then Codex fetches and installs it", async () => {
     await setup(["codex", "--yes"]);
-    const toml = readFileSync(config(), "utf-8");
-    expect(parseToml(toml)).toEqual({ mcp_servers: { ahood: { url: MCP_URL, bearer_token_env_var: "AHOOD_TOKEN" } } });
-    expect(readFileSync(join(codex(), "skills", "ahood", "SKILL.md"), "utf-8")).toBe(codexSkill());
-    expect(readFileSync(join(codex(), "ahood-agents-snippet.md"), "utf-8")).toContain("## ahood");
-    expect(readFileSync(join(codex(), "AGENTS.md"), "utf-8")).toContain("## ahood");
-    expect(backups(listFiles(codex()))).toEqual([]); // nothing existed, so nothing to back up
+    expect(parseToml(readFileSync(config(), "utf-8"))).toEqual(PLUGIN_TOML);
+    expect(readFileSync(config(), "utf-8")).toContain(codexPluginBlock());
+    // No MCP entry, skill file or AGENTS.md snippet of setup's own any more: the plugin brings them.
+    expect(listFiles(codex())).toEqual(["config.toml"]);
+    expect(codexRuns()).toEqual(["plugin marketplace upgrade ahood", "plugin add ahood@ahood"]);
+    expect(cx.state.installed).toBe(true);
     expect(process.exitCode).toBe(0);
   });
 
@@ -64,57 +87,129 @@ describe("ahood setup codex (ahood#980)", () => {
     await setup(["codex", "--yes"]);
     const toml = readFileSync(config(), "utf-8");
     expect(toml.startsWith(USER_TOML)).toBe(true);
-    expect(toml).toContain(codexMcpBlock());
+    expect(toml).toContain(codexPluginBlock());
     const [backup] = backups(listFiles(codex()));
     expect(readFileSync(join(codex(), backup), "utf-8")).toBe(USER_TOML);
   });
 
-  it("re-run is idempotent: no duplicate block, no new backup, nothing rewritten", async () => {
+  it("re-run is idempotent: no duplicate block, no new backup, nothing rewritten, no codex command", async () => {
     mkdirSync(codex(), { recursive: true });
     writeFileSync(config(), USER_TOML);
     await setup(["codex", "--yes"]);
     const first = listFiles(codex());
     const content = readFileSync(config(), "utf-8");
+    runner.calls.length = 0;
     await setup(["codex", "--yes"]);
     expect(listFiles(codex())).toEqual(first);
     expect(readFileSync(config(), "utf-8")).toBe(content);
-    expect(content.match(/\[mcp_servers\.ahood\]/g)).toHaveLength(1);
+    expect(content.match(/\[marketplaces\.ahood\]/g)).toHaveLength(1);
+    expect(codexRuns()).toEqual([]);
     expect(io.stdout()).toContain("Already set up; nothing to change.");
+    expect(io.stdout()).toContain("ahood@ahood is already installed");
   });
 
-  it("--remove takes out only ahood's entries and keeps the backups", async () => {
+  it("--remove leaves config.toml byte-identical to before setup, and uninstalls through codex", async () => {
     mkdirSync(codex(), { recursive: true });
     writeFileSync(config(), USER_TOML);
     writeFileSync(join(codex(), "AGENTS.md"), "# mine\n");
     await setup(["codex", "--yes"]);
+    runner.calls.length = 0;
     await setup(["--remove", "codex", "--yes"]);
     expect(readFileSync(config(), "utf-8")).toBe(USER_TOML);
     expect(readFileSync(join(codex(), "AGENTS.md"), "utf-8")).toBe("# mine\n");
-    expect(existsSync(join(codex(), "skills", "ahood"))).toBe(false);
-    expect(existsSync(join(codex(), "ahood-agents-snippet.md"))).toBe(false);
+    expect(codexRuns()).toEqual(["plugin remove ahood@ahood", "plugin marketplace remove ahood"]);
+    expect(cx.state).toMatchObject({ installed: false, cloned: false });
     expect(backups(listFiles(codex())).length).toBeGreaterThanOrEqual(2);
     // and a second remove has nothing left to do
     await setup(["--remove", "codex", "--yes"]);
     expect(io.stdout()).toContain("Nothing of ahood's to remove.");
   });
 
-  it("refuses a malformed config.toml without writing anything", async () => {
+  it("--remove of a marketplace Codex never cloned runs no codex command that would fail", async () => {
+    runner.restore();
+    runner = fakeRunner({ codex: fakeCodex().bin }); // upgrade never ran
+    mkdirSync(codex(), { recursive: true });
+    writeFileSync(config(), upsertBlock(USER_TOML, codexPluginBlock(), CODEX_TOML_MARKERS, config()));
+    await setup(["--remove", "codex", "--yes"]);
+    expect(readFileSync(config(), "utf-8")).toBe(USER_TOML);
+    expect(codexRuns()).toEqual([]);
+    expect(process.exitCode).toBe(0);
+  });
+
+  describe("migration from the pre-plugin setup (ahood#1009)", () => {
+    /** What `ahood setup codex --yes` left on disk before ahood#1009. */
+    function writeOldSetup() {
+      mkdirSync(join(codex(), "skills", "ahood"), { recursive: true });
+      writeFileSync(config(), upsertBlock(USER_TOML, codexMcpBlock(), CODEX_TOML_MARKERS, config()));
+      writeFileSync(join(codex(), "skills", "ahood", "SKILL.md"), codexSkill());
+      writeFileSync(join(codex(), "ahood-agents-snippet.md"), agentsSnippetFile());
+      writeFileSync(join(codex(), "AGENTS.md"), upsertBlock("# mine\n", agentsSnippetBody(), CODEX_AGENTS_MARKERS, "AGENTS.md"));
+    }
+
+    it("one run swaps the old MCP block for the plugin block and removes the skill, snippet file and AGENTS.md snippet", async () => {
+      writeOldSetup();
+      const oldConfig = readFileSync(config(), "utf-8");
+      await setup(["codex", "--yes"]);
+      expect(parseToml(readFileSync(config(), "utf-8"))).toEqual({ ...(parseToml(USER_TOML) as object), ...PLUGIN_TOML });
+      expect(readFileSync(config(), "utf-8")).not.toContain("[mcp_servers.ahood]");
+      expect(existsSync(join(codex(), "skills", "ahood"))).toBe(false);
+      expect(existsSync(join(codex(), "ahood-agents-snippet.md"))).toBe(false);
+      expect(readFileSync(join(codex(), "AGENTS.md"), "utf-8")).toBe("# mine\n");
+      // The usual backups: the edited config.toml and AGENTS.md (the skill and snippet are regenerable, so none).
+      const made = backups(listFiles(codex()));
+      expect(made.filter((f) => f.startsWith("config.toml.")).map((f) => readFileSync(join(codex(), f), "utf-8"))).toEqual([oldConfig]);
+      expect(made.some((f) => f.startsWith("AGENTS.md."))).toBe(true);
+      expect(io.stdout()).toContain("the old [mcp_servers.ahood] entry goes");
+      expect(codexRuns()).toEqual(["plugin marketplace upgrade ahood", "plugin add ahood@ahood"]);
+    });
+
+    it("then --remove leaves config.toml as it was before ahood was ever set up", async () => {
+      writeOldSetup();
+      await setup(["codex", "--yes"]);
+      await setup(["--remove", "codex", "--yes"]);
+      expect(readFileSync(config(), "utf-8")).toBe(USER_TOML);
+    });
+
+    it("--remove straight from the old setup takes everything out too", async () => {
+      writeOldSetup();
+      await setup(["--remove", "codex", "--yes"]);
+      expect(readFileSync(config(), "utf-8")).toBe(USER_TOML);
+      expect(listFiles(codex()).filter((f) => !f.includes(".ahood-backup-"))).toEqual(["AGENTS.md", "config.toml"]);
+    });
+
+    it("a SKILL.md of the user's own at the old path is left alone, and no longer blocks setup", async () => {
+      mkdirSync(join(codex(), "skills", "ahood"), { recursive: true });
+      writeFileSync(join(codex(), "skills", "ahood", "SKILL.md"), "my own skill\n");
+      await setup(["codex", "--yes"]);
+      expect(readFileSync(join(codex(), "skills", "ahood", "SKILL.md"), "utf-8")).toBe("my own skill\n");
+      expect(parseToml(readFileSync(config(), "utf-8"))).toEqual(PLUGIN_TOML);
+    });
+  });
+
+  it("refuses a malformed config.toml without writing or running anything", async () => {
     mkdirSync(codex(), { recursive: true });
     writeFileSync(config(), "model = \n[[[broken");
     await setup(["codex", "--yes"]);
     expect(io.stderr()).toMatch(/config\.toml is not valid TOML .*nothing was changed/);
     expect(listFiles(codex())).toEqual(["config.toml"]);
+    expect(codexRuns()).toEqual([]);
     expect(process.exitCode).toBe(1);
   });
 
-  it("refuses when the user already has their own [mcp_servers.ahood]", async () => {
-    mkdirSync(codex(), { recursive: true });
-    writeFileSync(config(), '[mcp_servers.ahood]\nurl = "https://example.test/mcp"\n');
-    await setup(["codex", "--yes"]);
-    expect(io.stderr()).toMatch(/already defines \[mcp_servers\.ahood\] outside ahood's managed block/);
-    expect(readFileSync(config(), "utf-8")).toBe('[mcp_servers.ahood]\nurl = "https://example.test/mcp"\n');
-    expect(process.exitCode).toBe(1);
-  });
+  for (const [table, toml] of [
+    ["[mcp_servers.ahood]", '[mcp_servers.ahood]\nurl = "https://example.test/mcp"\n'],
+    ["[marketplaces.ahood]", '[marketplaces.ahood]\nsource_type = "git"\nsource = "https://github.com/AlexKay28/ahood-cli.git"\n'],
+    ['[plugins."ahood@ahood"]', '[plugins."ahood@ahood"]\nenabled = false\n'],
+  ]) {
+    it(`refuses when the user already has their own ${table}`, async () => {
+      mkdirSync(codex(), { recursive: true });
+      writeFileSync(config(), toml);
+      await setup(["codex", "--yes"]);
+      expect(io.stderr()).toContain(`already defines ${table} outside ahood's managed block`);
+      expect(readFileSync(config(), "utf-8")).toBe(toml);
+      expect(process.exitCode).toBe(1);
+    });
+  }
 
   it("refuses a damaged ahood block (begin marker without end)", async () => {
     mkdirSync(codex(), { recursive: true });
@@ -125,38 +220,51 @@ describe("ahood setup codex (ahood#980)", () => {
     expect(readFileSync(config(), "utf-8")).toBe(damaged);
   });
 
-  it("refuses to overwrite a SKILL.md that setup did not write", async () => {
-    mkdirSync(join(codex(), "skills", "ahood"), { recursive: true });
-    writeFileSync(join(codex(), "skills", "ahood", "SKILL.md"), "my own skill\n");
-    await setup(["codex", "--yes"]);
-    expect(io.stderr()).toMatch(/SKILL\.md already exists and was not written by `ahood setup`/);
-    expect(existsSync(config())).toBe(false); // the whole plan is refused, not half-applied
-  });
-
-  it("--dry-run prints the plan and writes nothing", async () => {
+  it("--dry-run prints the plan, including the codex commands, and writes or runs nothing", async () => {
     mkdirSync(codex(), { recursive: true });
     writeFileSync(config(), USER_TOML);
     await setup(["codex", "--yes", "--dry-run"]);
     expect(listFiles(codex())).toEqual(["config.toml"]);
     expect(readFileSync(config(), "utf-8")).toBe(USER_TOML);
+    expect(codexRuns()).toEqual([]);
     expect(io.stdout()).toContain("would update");
+    expect(io.stdout()).toContain("would run    codex plugin add ahood@ahood -- install the ahood plugin");
     expect(io.stdout()).toContain("Nothing was changed (--dry-run).");
   });
 
-  it("with interactive consent but no --yes, does not touch AGENTS.md", async () => {
-    vi.mocked(isInteractive).mockReturnValue(true);
-    await setup(["codex"]);
-    expect(confirmYesNo).toHaveBeenCalledOnce();
-    expect(existsSync(config())).toBe(true);
-    expect(existsSync(join(codex(), "AGENTS.md"))).toBe(false);
-    expect(io.stdout()).toMatch(/AGENTS\.md is not edited without --yes/);
+  it("no codex CLI on PATH: writes the block and says which two commands install the plugin", async () => {
+    runner.restore();
+    runner = fakeRunner({});
+    mkdirSync(codex(), { recursive: true });
+    await setup(["codex", "--yes"]);
+    expect(parseToml(readFileSync(config(), "utf-8"))).toEqual(PLUGIN_TOML);
+    expect(io.stdout()).toContain("the codex CLI is not on PATH");
+    expect(io.stdout()).toContain("`codex plugin marketplace upgrade ahood` and `codex plugin add ahood@ahood`");
   });
 
-  it("a declined prompt changes nothing", async () => {
+  it("a codex CLI without `plugin` subcommands: the same, and says to update Codex", async () => {
+    runner.restore();
+    runner = fakeRunner({ codex: fakeCodex({ supportsPlugins: false }).bin });
+    await setup(["codex", "--yes"]);
+    expect(existsSync(config())).toBe(true);
+    expect(codexRuns()).toEqual([]);
+    expect(io.stdout()).toContain("no `plugin` subcommands (update Codex)");
+  });
+
+  it("a failing `codex plugin add` fails the run (exit 1) after the block is written", async () => {
+    runner.restore();
+    runner = fakeRunner({ codex: fakeCodex({ failAdd: true }).bin });
+    await setup(["codex", "--yes"]);
+    expect(io.stderr()).toContain("could not install the ahood plugin");
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("a declined prompt changes nothing and runs nothing", async () => {
     vi.mocked(isInteractive).mockReturnValue(true);
     vi.mocked(confirmYesNo).mockResolvedValue(false);
     await setup(["codex"]);
     expect(listFiles(env.home)).toEqual([]);
+    expect(codexRuns()).toEqual([]);
   });
 
   it("without a terminal or --yes, refuses (exit 2) and writes nothing", async () => {

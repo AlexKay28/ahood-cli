@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { doctor, NPM_LATEST_URL } from "../src/setup/doctor-command.js";
 import { setup } from "../src/setup/setup-command.js";
 import { CLI_VERSION } from "../src/version.js";
 import { captureConsole } from "./helpers/me-env.js";
-import { fakeClaude, fakeOpencode, fakeRunner, setupHomeEnv } from "./helpers/harness-env.js";
+import { upsertBlock } from "../src/setup/marked-block.js";
+import { CODEX_TOML_MARKERS, codexMcpBlock, codexSkill } from "../src/setup/templates/codex.js";
+import { fakeClaude, fakeCodex, fakeOpencode, fakeRunner, setupHomeEnv } from "./helpers/harness-env.js";
 
 const MCP_URL = "https://www.ahood.dev/api/mcp";
 
@@ -42,6 +44,14 @@ afterEach(() => {
   env.restore();
 });
 
+/** Puts a fake codex CLI with `plugin` subcommands on PATH (beside opencode). */
+function useCodex() {
+  const cx = fakeCodex();
+  runner.restore();
+  runner = fakeRunner({ opencode: fakeOpencode(), codex: cx.bin });
+  return cx;
+}
+
 const report = () => JSON.parse(io.out[io.out.length - 1]);
 const harness = (id: string) => report().harnesses.find((h: { id: string }) => h.id === id);
 const check = (id: string, name: string) => harness(id).checks.find((c: { name: string }) => c.name === name);
@@ -55,25 +65,57 @@ describe("ahood doctor (ahood#980)", () => {
     expect(process.exitCode).toBe(0);
   });
 
-  it("reports a healthy Codex setup as ok", async () => {
+  it("reports a healthy Codex setup as ok, naming the installed plugin's version", async () => {
     stubNet();
+    useCodex();
     await setup(["codex", "--yes"]);
     process.env.AHOOD_TOKEN = "t";
     await doctor(["--json"]);
     expect(harness("codex").config.state).toBe("ok");
+    expect(check("codex", "plugin")).toMatchObject({ status: "ok", detail: "ahood@ahood 0.14.0 installed, enabled" });
     expect(check("codex", "MCP server reachable")).toMatchObject({ status: "ok" });
     expect(check("codex", "MCP token")).toMatchObject({ status: "ok" });
     expect(report().ok).toBe(true);
     expect(process.exitCode).toBe(0);
   });
 
-  it("a partial Codex setup (skill deleted) is broken: exit 1", async () => {
+  it("a partial Codex setup (block written, plugin never installed) is broken: exit 1", async () => {
     stubNet();
-    await setup(["codex", "--yes"]);
-    unlinkSync(join(env.home, ".codex", "skills", "ahood", "SKILL.md"));
+    await setup(["codex", "--yes"]); // no codex CLI on PATH, so nothing installed it
     await doctor(["--offline", "--json"]);
     expect(harness("codex").config.state).toBe("partial");
+    expect(check("codex", "plugin")).toMatchObject({ status: "fail", detail: expect.stringContaining("not installed") });
     expect(process.exitCode).toBe(1);
+  });
+
+  it("a Codex plugin the user disabled is a warning, not a failure", async () => {
+    stubNet();
+    const cx = useCodex();
+    await setup(["codex", "--yes"]);
+    cx.state.enabled = false;
+    await doctor(["--offline", "--json"]);
+    expect(harness("codex").config.state).toBe("stale");
+    expect(check("codex", "plugin")).toMatchObject({ status: "warn", detail: expect.stringContaining("installed but disabled") });
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("without a codex CLI, reads the plugin cache and config.toml's enabled flag instead", async () => {
+    stubNet();
+    await setup(["codex", "--yes"]);
+    mkdirSync(join(env.home, ".codex", "plugins", "cache", "ahood", "ahood", "0.14.0"), { recursive: true });
+    await doctor(["--offline", "--json"]);
+    expect(harness("codex").config.state).toBe("ok");
+    expect(check("codex", "plugin")).toMatchObject({ status: "ok", detail: "ahood@ahood 0.14.0 installed, enabled" });
+  });
+
+  it("a pre-plugin Codex setup (ahood#1009) is flagged so a re-run migrates it", async () => {
+    mkdirSync(join(env.home, ".codex", "skills", "ahood"), { recursive: true });
+    writeFileSync(join(env.home, ".codex", "config.toml"), upsertBlock("", codexMcpBlock(), CODEX_TOML_MARKERS, "config.toml"));
+    writeFileSync(join(env.home, ".codex", "skills", "ahood", "SKILL.md"), codexSkill());
+    await doctor(["--offline", "--json"]);
+    expect(check("codex", "plugin config")).toMatchObject({ status: "warn" });
+    expect(check("codex", "old setup files")).toMatchObject({ status: "warn", detail: expect.stringContaining("re-run `ahood setup codex`") });
+    expect(process.exitCode).toBe(1); // the plugin itself is not installed yet
   });
 
   it("an unreadable config.toml is broken", async () => {
@@ -147,21 +189,23 @@ describe("ahood doctor (ahood#980)", () => {
   });
 
   describe("per-harness feature breakdown (ahood#982)", () => {
-    it("codex: separate MCP config and skill checks, both ok once set up", async () => {
+    it("codex: separate plugin config and plugin checks, both ok once set up", async () => {
       stubNet();
+      useCodex();
       await setup(["codex", "--yes"]);
       await doctor(["--offline", "--json"]);
-      expect(check("codex", "MCP config")).toMatchObject({ status: "ok" });
-      expect(check("codex", "skill")).toMatchObject({ status: "ok" });
+      expect(check("codex", "plugin config")).toMatchObject({ status: "ok" });
+      expect(check("codex", "plugin")).toMatchObject({ status: "ok" });
     });
 
-    it("codex: a deleted skill is its own failing check, not just the rolled-up config state", async () => {
+    it("codex: a plugin uninstalled behind setup's back is its own failing check", async () => {
       stubNet();
+      const cx = useCodex();
       await setup(["codex", "--yes"]);
-      unlinkSync(join(env.home, ".codex", "skills", "ahood", "SKILL.md"));
+      cx.state.installed = false;
       await doctor(["--offline", "--json"]);
-      expect(check("codex", "MCP config")).toMatchObject({ status: "ok" });
-      expect(check("codex", "skill")).toMatchObject({ status: "fail" });
+      expect(check("codex", "plugin config")).toMatchObject({ status: "ok" });
+      expect(check("codex", "plugin")).toMatchObject({ status: "fail" });
     });
 
     it("opencode: separate MCP config and commands checks, both ok once set up", async () => {
@@ -174,8 +218,8 @@ describe("ahood doctor (ahood#980)", () => {
 
     it("a harness that was never set up reports no per-feature checks (nothing to break down)", async () => {
       await doctor(["--offline", "--json"]);
-      expect(check("codex", "MCP config")).toBeUndefined();
-      expect(check("codex", "skill")).toBeUndefined();
+      expect(check("codex", "plugin config")).toBeUndefined();
+      expect(check("codex", "plugin")).toBeUndefined();
     });
 
     it("Claude Code: a `plugin` check plus a `snap hook` check that defaults to skipped, not failed", async () => {
