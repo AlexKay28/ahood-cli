@@ -4,26 +4,39 @@
 // shows the plan, asks, and applies it through ./file-changes.ts, which owns
 // the backup / idempotency / dry-run rules for every harness.
 import { askLine, confirmYesNo, isInteractive } from "../confirm.js";
+import { LEGACY_TOKEN_ENV, resolveToken, resolveTokenWithSource, TOKEN_ENV } from "../credentials.js";
+import { login } from "../commands/login.js";
 import { flagValue, unrecognizedArgs } from "../flags.js";
 import { UsageError } from "../usage-error.js";
 import { SetupRefusedError } from "./errors.js";
-import { actionOf, applyChanges, backupStamp, formatChanges } from "./file-changes.js";
+import { actionOf, applyChanges, backupStamp, fileMode, formatChanges } from "./file-changes.js";
 import { HARNESSES } from "./harnesses/index.js";
 import { HARNESS_IDS, isHarnessId, type Harness, type HarnessId, type SetupPlan } from "./harnesses/types.js";
 import { displayPath } from "./paths.js";
 import { runner } from "./runner.js";
 
 const USAGE =
-  "Usage: ahood setup [claude|codex|opencode] [--yes] [--dry-run]\n" +
+  "Usage: ahood setup [claude|codex|opencode] [--yes] [--dry-run] [--store-token|--no-store-token]\n" +
   "   or: ahood setup --remove <claude|codex|opencode> [--yes] [--dry-run]";
 
-type Parsed = { targets: HarnessId[] | null; remove: boolean; yes: boolean; dryRun: boolean };
+type Parsed = {
+  targets: HarnessId[] | null;
+  remove: boolean;
+  yes: boolean;
+  dryRun: boolean;
+  /** true = --store-token, false = --no-store-token, null = ask (or keep what is there). */
+  storeToken: boolean | null;
+};
 
 function parseArgs(args: string[]): Parsed {
   const yes = args.includes("--yes") || args.includes("-y");
   const dryRun = args.includes("--dry-run");
+  const store = args.includes("--store-token");
+  const noStore = args.includes("--no-store-token");
+  if (store && noStore) throw new UsageError(`--store-token and --no-store-token contradict each other.\n${USAGE}`);
   const removeValue = flagValue(args, "--remove");
-  const positionals = unrecognizedArgs(args, ["--yes", "-y", "--dry-run"], ["--remove"]);
+  if (removeValue !== undefined && (store || noStore)) throw new UsageError(`--remove always takes out a token setup stored.\n${USAGE}`);
+  const positionals = unrecognizedArgs(args, ["--yes", "-y", "--dry-run", "--store-token", "--no-store-token"], ["--remove"]);
   const unknownFlag = positionals.find((a) => a.startsWith("-"));
   if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${USAGE}`);
   if (positionals.length > 1) throw new UsageError(`One harness at a time (got: ${positionals.join(" ")}).\n${USAGE}`);
@@ -34,7 +47,94 @@ function parseArgs(args: string[]): Parsed {
   if (named !== undefined && !isHarnessId(named)) {
     throw new UsageError(`Unknown harness "${named}" -- expected one of: ${HARNESS_IDS.join(", ")}.\n${USAGE}`);
   }
-  return { targets: named === undefined ? null : [named as HarnessId], remove: removeValue !== undefined, yes, dryRun };
+  const storeToken = store ? true : noStore ? false : null;
+  return { targets: named === undefined ? null : [named as HarnessId], remove: removeValue !== undefined, yes, dryRun, storeToken };
+}
+
+// ---- login and the token (ahood#990, decision B) ---------------------------
+// The token is never printed or logged here: only file paths, env var names
+// and modes are. tests/setup-token.test.ts asserts no output ever holds it.
+
+/** No token anywhere: offer the normal `ahood login` device flow first. */
+async function ensureLoggedIn(parsed: Parsed): Promise<void> {
+  if (parsed.remove || parsed.dryRun || resolveTokenWithSource()) return;
+  if (!isInteractive()) {
+    console.log(
+      `Not logged in to ahood. The ahood MCP server needs a token: run \`ahood login\` (or set ${TOKEN_ENV}), then re-run \`ahood setup\`.`,
+    );
+    return;
+  }
+  const answer = parsed.yes ? "y" : (await askLine("You are not logged in to ahood. Log in now (approve in your browser)? [Y/n] ")).toLowerCase();
+  if (answer !== "" && answer !== "y" && answer !== "yes") {
+    console.log(`Continuing without a token; run \`ahood login\` later, then \`ahood setup\` again.`);
+    return;
+  }
+  try {
+    await login();
+  } catch (error) {
+    console.error(`Login did not finish (${error instanceof Error ? error.message : String(error)}); continuing without a token.`);
+  }
+}
+
+const loose = (mode: number) => (mode & 0o077) !== 0;
+const octal = (mode: number) => `0${mode.toString(8)}`;
+
+type TokenDecision = { token: string | null; mode?: number };
+
+/**
+ * Whether to store the token in this harness's config, and with what file
+ * mode. Consent is explicit: --store-token, or a yes to the question; --yes
+ * alone does not store a secret. With neither, a token setup stored earlier
+ * is kept (refreshed to the current one) rather than silently taken out.
+ * A file we create is 0600; an existing file readable by others is tightened
+ * only on a separate yes, and the token is not stored in it otherwise.
+ */
+async function decideToken(harness: Harness, parsed: Parsed): Promise<TokenDecision> {
+  const store = harness.tokenStore;
+  if (!store) return { token: null };
+  const file = store.file();
+  if (store.userSet()) {
+    console.log(`${harness.label}: ${displayPath(file)} already sets ${TOKEN_ENV} (not by ahood setup); leaving it as it is.`);
+    return { token: null };
+  }
+  const already = store.stored();
+  const token = resolveToken() ?? already;
+  if (token === null) return { token: null };
+  const canAsk = isInteractive() && !parsed.yes && !parsed.dryRun;
+  let consent: boolean;
+  if (parsed.storeToken !== null) consent = parsed.storeToken;
+  else if (!canAsk) consent = already !== null;
+  else {
+    const answer = (
+      await askLine(
+        `\n${harness.label}: store your ahood token in ${displayPath(file)} (${store.what}) so ${harness.label} can reach the ahood MCP server ` +
+          `without ${TOKEN_ENV} in its environment? ${already ? "[Y/n]" : "[y/N]"} `,
+      )
+    ).toLowerCase();
+    consent = answer === "y" || answer === "yes" || (answer === "" && already !== null);
+  }
+  if (!consent) return { token: null };
+  const mode = fileMode(file);
+  if (mode === null) return { token, mode: 0o600 };
+  if (!loose(mode)) return { token };
+  const why = `${displayPath(file)} is readable by other users (mode ${octal(mode)})`;
+  if (canAsk && (await confirmYesNo(`${why}. Make it user-only (chmod 600) so the token stays private? [y/N] `))) {
+    return { token, mode: 0o600 };
+  }
+  console.error(`${harness.label}: warning: ${why}; not storing the token there. Run \`chmod 600 ${displayPath(file)}\`, then re-run with --store-token.`);
+  return { token: null };
+}
+
+/** Where the harness will look for the token once this run is done, when that is the user's job. */
+function tokenNotes(harness: Harness, decision: TokenDecision, plan: SetupPlan): void {
+  if (!harness.tokenStore || decision.token !== null || harness.tokenStore.userSet()) return;
+  if (!process.env[TOKEN_ENV] && process.env[LEGACY_TOKEN_ENV]) {
+    plan.notes.push(`${harness.label}'s ahood config now reads ${TOKEN_ENV}, not ${LEGACY_TOKEN_ENV}: rename it where you export it.`);
+  }
+  plan.notes.push(
+    `${harness.label} reads the token from ${TOKEN_ENV} in the environment it starts in: add \`export ${TOKEN_ENV}=<your token>\` ` +
+      `to your shell profile, or re-run \`ahood setup ${harness.id} --store-token\` to keep it in ${displayPath(harness.tokenStore.file())}.`,
+  );
 }
 
 async function chooseTargets(yes: boolean): Promise<HarnessId[]> {
@@ -90,7 +190,16 @@ type Outcome = "done" | "nothing" | "dry-run" | "declined" | "needs-consent" | "
 async function runOne(harness: Harness, parsed: Parsed, stamp: string): Promise<Outcome> {
   let plan: SetupPlan;
   try {
-    plan = parsed.remove ? harness.planRemove() : harness.planSetup({ yes: parsed.yes });
+    if (parsed.remove) {
+      plan = harness.planRemove();
+    } else {
+      const decision = await decideToken(harness, parsed);
+      plan = harness.planSetup({ yes: parsed.yes, token: decision.token });
+      if (decision.mode !== undefined) {
+        for (const change of plan.files) if (change.path === harness.tokenStore?.file() && change.after !== null) change.mode = decision.mode;
+      }
+      tokenNotes(harness, decision, plan);
+    }
   } catch (error) {
     if (!(error instanceof SetupRefusedError)) throw error;
     console.error(`\n${harness.label}: refused -- ${error.message}`);
@@ -125,6 +234,7 @@ async function runOne(harness: Harness, parsed: Parsed, stamp: string): Promise<
 
 export async function setup(args: string[]): Promise<void> {
   const parsed = parseArgs(args);
+  await ensureLoggedIn(parsed);
   const targets = parsed.targets ?? (await chooseTargets(parsed.yes));
   const stamp = backupStamp();
   const outcomes: Outcome[] = [];

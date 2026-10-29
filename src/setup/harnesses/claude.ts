@@ -1,10 +1,14 @@
 // Claude Code (ahood#980): the ahood plugin, installed and removed through
 // the claude CLI's own `plugin` subcommands when it has them (detected from
 // `claude plugin --help`, never assumed), otherwise as /plugin commands for
-// the user to type in a session. Writes no files.
+// the user to type in a session. The one file it may edit, only with the
+// user's consent, is ~/.claude/settings.json: `env.AHOOD_TOKEN` (ahood#990).
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { claudeDir } from "../paths.js";
+import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from "jsonc-parser";
+import { SetupRefusedError } from "../errors.js";
+import { readIfExists, type FileChange } from "../file-changes.js";
+import { claudeDir, displayPath } from "../paths.js";
 import { runner } from "../runner.js";
 import { AHOOD_SNAP_HOOK_ENV } from "../templates/ahood-commands.js";
 import {
@@ -14,8 +18,11 @@ import {
   CLAUDE_MARKETPLACE_NAME,
   CLAUDE_PLUGIN_ID,
   CLAUDE_REMOVE_ARGS,
+  CLAUDE_TOKEN_ENV_KEY,
+  CLAUDE_TOKEN_MARKER_KEY,
+  CLAUDE_TOKEN_MARKER_VALUE,
 } from "../templates/claude.js";
-import { emptyPlan, type ConfigState, type Detection, type Feature, type Harness, type SetupPlan } from "./types.js";
+import { emptyPlan, type ConfigState, type Detection, type Feature, type Harness, type SetupOptions, type SetupPlan, type TokenStore } from "./types.js";
 
 type PluginEntry = { id: string; enabled?: boolean };
 
@@ -72,8 +79,77 @@ function pluginInstalled(binary: string | null): boolean {
   return (installedPlugins(binary) ?? []).some((p) => p.id === CLAUDE_PLUGIN_ID);
 }
 
-function planSetup(): SetupPlan {
+// ---- the token in ~/.claude/settings.json (ahood#990) ----------------------
+
+const settingsPath = () => join(claudeDir(), "settings.json");
+type SettingsEnv = Record<string, unknown>;
+
+function readSettings(): { text: string | null; env: SettingsEnv } {
+  const path = settingsPath();
+  const text = readIfExists(path);
+  if (text === null) return { text, env: {} };
+  const errors: ParseError[] = [];
+  const value: unknown = parse(text, errors, { allowTrailingComma: true, disallowComments: false });
+  if (errors.length > 0) {
+    throw new SetupRefusedError(
+      `${displayPath(path)} is not valid JSON (${printParseErrorCode(errors[0].error)} at offset ${errors[0].offset}). Fix it first; nothing was changed.`,
+    );
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new SetupRefusedError(`${displayPath(path)} is not a JSON object. Fix it first; nothing was changed.`);
+  }
+  const env = (value as { env?: unknown }).env;
+  return { text, env: env !== null && typeof env === "object" && !Array.isArray(env) ? (env as SettingsEnv) : {} };
+}
+
+export function settingsTokenState(): { stored: string | null; userSet: boolean } {
+  try {
+    const { env } = readSettings();
+    const token = typeof env[CLAUDE_TOKEN_ENV_KEY] === "string" ? (env[CLAUDE_TOKEN_ENV_KEY] as string) : null;
+    const ours = env[CLAUDE_TOKEN_MARKER_KEY] === CLAUDE_TOKEN_MARKER_VALUE;
+    return { stored: ours ? token : null, userSet: !ours && token !== null };
+  } catch {
+    return { stored: null, userSet: false };
+  }
+}
+
+function editEnv(text: string, key: string, value: string | undefined): string {
+  return applyEdits(text, modify(text, ["env", key], value, { formattingOptions: { tabSize: 2, insertSpaces: true } }));
+}
+
+/** Store (token) or take out (null) setup's own env.AHOOD_TOKEN; a value the user set is never touched. */
+function planSettingsToken(token: string | null): FileChange | null {
+  const path = settingsPath();
+  let read: ReturnType<typeof readSettings>;
+  try {
+    read = readSettings();
+  } catch (error) {
+    // Not storing anything: a settings.json we cannot read holds no token of ours to take out.
+    if (token === null) return null;
+    throw error;
+  }
+  const { text, env } = read;
+  const ours = env[CLAUDE_TOKEN_MARKER_KEY] === CLAUDE_TOKEN_MARKER_VALUE;
+  const current = typeof env[CLAUDE_TOKEN_ENV_KEY] === "string" ? (env[CLAUDE_TOKEN_ENV_KEY] as string) : null;
+  if (!ours && current !== null) return null; // the user's own
+  const secrets = [ours ? current : null, token].filter((t): t is string => t !== null);
+  if (token === null) {
+    if (!ours || text === null) return null;
+    let after = editEnv(editEnv(text, CLAUDE_TOKEN_ENV_KEY, undefined), CLAUDE_TOKEN_MARKER_KEY, undefined);
+    const left = (parse(after) as { env?: object }).env;
+    if (left && Object.keys(left).length === 0) after = applyEdits(after, modify(after, ["env"], undefined, {}));
+    return { path, before: text, after, what: `env.${CLAUDE_TOKEN_ENV_KEY} (stored by ahood setup) removed`, secrets };
+  }
+  if (ours && current === token) return { path, before: text, after: text, what: `env.${CLAUDE_TOKEN_ENV_KEY}`, secrets };
+  let after = editEnv(editEnv(text ?? "{}\n", CLAUDE_TOKEN_ENV_KEY, token), CLAUDE_TOKEN_MARKER_KEY, CLAUDE_TOKEN_MARKER_VALUE);
+  if (!after.endsWith("\n")) after += "\n";
+  return { path, before: text, after, what: `env.${CLAUDE_TOKEN_ENV_KEY}: your ahood token, for the plugin's MCP server`, secrets };
+}
+
+function planSetup(opts: SetupOptions): SetupPlan {
   const plan = emptyPlan();
+  const tokenChange = planSettingsToken(opts.token);
+  if (tokenChange) plan.files.push(tokenChange);
   const { binary } = detect();
   if (!binary || !claudeSupportsPluginCli(binary)) {
     plan.notes.push(binary ? "this claude CLI has no `plugin` subcommands." : "the claude CLI is not on PATH.");
@@ -93,6 +169,8 @@ function planSetup(): SetupPlan {
 
 function planRemove(): SetupPlan {
   const plan = emptyPlan();
+  const tokenChange = planSettingsToken(null);
+  if (tokenChange) plan.files.push(tokenChange);
   const { binary } = detect();
   if (!binary || !claudeSupportsPluginCli(binary)) {
     plan.notes.push(binary ? "this claude CLI has no `plugin` subcommands." : "the claude CLI is not on PATH.");
@@ -105,7 +183,7 @@ function planRemove(): SetupPlan {
   if (marketplaceAdded(binary)) {
     plan.commands.push({ bin: binary, args: [...CLAUDE_REMOVE_ARGS.marketplaceRemove], what: "remove the ahood plugin marketplace" });
   }
-  if (plan.commands.length === 0) plan.notes.push("the ahood plugin is not installed; nothing to remove.");
+  if (plan.commands.length === 0 && plan.files.length === 0) plan.notes.push("the ahood plugin is not installed; nothing to remove.");
   return plan;
 }
 
@@ -122,6 +200,10 @@ function hookFeature(): Feature {
 }
 
 function inspect(): ConfigState {
+  return { ...inspectPlugin(), tokenStored: settingsTokenState().stored !== null };
+}
+
+function inspectPlugin(): ConfigState {
   const { binary } = detect();
   const plugins = installedPlugins(binary);
   const ours = (plugins ?? []).filter((p) => p.id === CLAUDE_PLUGIN_ID);
@@ -146,4 +228,11 @@ function inspect(): ConfigState {
   return { state: "ok", details: [`${CLAUDE_PLUGIN_ID} installed`], features: [{ name: "plugin", state: "ok", detail: `${CLAUDE_PLUGIN_ID} installed` }, hook] };
 }
 
-export const claudeHarness: Harness = { id: "claude", label: "Claude Code", detect, planSetup, planRemove, inspect };
+const tokenStore: TokenStore = {
+  file: settingsPath,
+  stored: () => settingsTokenState().stored,
+  userSet: () => settingsTokenState().userSet,
+  what: `env.${CLAUDE_TOKEN_ENV_KEY} in Claude Code's settings.json`,
+};
+
+export const claudeHarness: Harness = { id: "claude", label: "Claude Code", detect, planSetup, planRemove, inspect, tokenStore };

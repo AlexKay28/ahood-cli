@@ -11,6 +11,9 @@ vi.mock("../src/confirm.js", async (orig) => ({
   askLine: vi.fn(async () => ""),
 }));
 
+// `ahood setup` offers `ahood login` when no token is found (ahood#990); never run the real device flow here.
+vi.mock("../src/commands/login.js", () => ({ login: vi.fn(async () => {}) }));
+
 import { confirmYesNo, isInteractive } from "../src/confirm.js";
 import { setup } from "../src/setup/setup-command.js";
 import { UsageError } from "../src/usage-error.js";
@@ -47,7 +50,7 @@ describe("ahood setup codex (ahood#980)", () => {
   it("fresh install: MCP block, skill and snippet; --yes also appends the AGENTS.md snippet", async () => {
     await setup(["codex", "--yes"]);
     const toml = readFileSync(config(), "utf-8");
-    expect(parseToml(toml)).toEqual({ mcp_servers: { ahood: { url: MCP_URL, bearer_token_env_var: "AHOOD_API_TOKEN" } } });
+    expect(parseToml(toml)).toEqual({ mcp_servers: { ahood: { url: MCP_URL, bearer_token_env_var: "AHOOD_TOKEN" } } });
     expect(readFileSync(join(codex(), "skills", "ahood", "SKILL.md"), "utf-8")).toBe(codexSkill());
     expect(readFileSync(join(codex(), "ahood-agents-snippet.md"), "utf-8")).toContain("## ahood");
     expect(readFileSync(join(codex(), "AGENTS.md"), "utf-8")).toContain("## ahood");
@@ -184,7 +187,7 @@ describe("ahood setup opencode (ahood#980)", () => {
   it("fresh install: opencode.json with mcp.servers.ahood, and the four /ahood commands", async () => {
     await setup(["opencode", "--yes"]);
     const config = readFileSync(join(dir(), "opencode.json"), "utf-8");
-    expect(entryOf(config)).toEqual({ type: "remote", url: MCP_URL, headers: { Authorization: "Bearer {env:AHOOD_API_TOKEN}" } });
+    expect(entryOf(config)).toEqual({ type: "remote", url: MCP_URL, headers: { Authorization: "Bearer {env:AHOOD_TOKEN}" } });
     expect(listFiles(commandsDir())).toEqual(["ahood-review.md", "ahood-snap.md", "ahood-sync.md", "ahood.md"]);
     for (const { file, content } of opencodeCommandFiles()) expect(readFileSync(join(commandsDir(), file), "utf-8")).toBe(content);
   });

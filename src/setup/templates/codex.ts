@@ -20,12 +20,25 @@ export const CODEX_TOML_MARKERS: BlockMarkers = {
 export const CODEX_MCP_SERVER_NAME = "ahood";
 
 // `bearer_token_env_var` is what `codex mcp add --bearer-token-env-var` writes.
-export function codexMcpBlock(): string {
+// With the user's consent (ahood#990) the token is stored instead, as a static
+// `http_headers` entry -- verified against codex-cli 0.164.0: `codex mcp get`
+// shows it as `http_headers: Authorization=*****` and `codex mcp list` as
+// "Bearer token" auth. It lives inside the managed block, so
+// `ahood setup --remove codex` takes it out with the block.
+export function codexMcpBlock(token: string | null = null): string {
   return [
     `[mcp_servers.${CODEX_MCP_SERVER_NAME}]`,
     `url = ${JSON.stringify(AHOOD_MCP_URL)}`,
-    `bearer_token_env_var = ${JSON.stringify(AHOOD_MCP_TOKEN_ENV)}`,
+    token === null
+      ? `bearer_token_env_var = ${JSON.stringify(AHOOD_MCP_TOKEN_ENV)}`
+      : `http_headers = { Authorization = ${JSON.stringify(`Bearer ${token}`)} }`,
   ].join("\n");
+}
+
+/** The token a parsed `[mcp_servers.ahood]` entry holds in its static Authorization header, if any. */
+export function codexStoredToken(entry: { http_headers?: unknown } | undefined): string | null {
+  const auth = (entry?.http_headers as { Authorization?: unknown } | undefined)?.Authorization;
+  return typeof auth === "string" && auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : null;
 }
 
 export function codexSkill(): string {

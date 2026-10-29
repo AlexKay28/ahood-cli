@@ -46,9 +46,46 @@ export function clearCredentials(): void {
   if (existsSync(path)) unlinkSync(path);
 }
 
-// AHOOD_TOKEN always wins -- this is what lets CI use a token without
-// ever running the interactive device-code `login` flow.
+// The env var every ahood config and doc names (ahood#990, decision A).
+export const TOKEN_ENV = "AHOOD_TOKEN";
+// The plugin-era name. Still read, after TOKEN_ENV, for one release cycle.
+export const LEGACY_TOKEN_ENV = "AHOOD_API_TOKEN";
+
+/** Where the token in use came from -- a name only, never the value. */
+export type TokenSource = typeof TOKEN_ENV | typeof LEGACY_TOKEN_ENV | "credentials";
+
+/**
+ * The resolution order, in one place: $AHOOD_TOKEN, then the deprecated
+ * $AHOOD_API_TOKEN, then the stored `ahood login` credentials. AHOOD_TOKEN
+ * winning is what lets CI use a token without the interactive device-code
+ * `login` flow. Truthiness, so an empty variable falls through.
+ */
+export function resolveTokenWithSource(): { token: string; source: TokenSource } | null {
+  const fromEnv = process.env[TOKEN_ENV];
+  if (fromEnv) return { token: fromEnv, source: TOKEN_ENV };
+  const legacy = process.env[LEGACY_TOKEN_ENV];
+  if (legacy) return { token: legacy, source: LEGACY_TOKEN_ENV };
+  const stored = readCredentials()?.token;
+  return stored ? { token: stored, source: "credentials" } : null;
+}
+
+export const LEGACY_TOKEN_NOTE =
+  `note: ${LEGACY_TOKEN_ENV} is deprecated -- rename it to ${TOKEN_ENV}. ` +
+  `${LEGACY_TOKEN_ENV} still works for this release cycle only.`;
+
+let legacyNoted = false;
+
+/** Tests only: let the one-time deprecation note print again. */
+export function resetLegacyTokenNoteForTests(): void {
+  legacyNoted = false;
+}
+
+// stderr, once per process: stdout may be a protocol (`ahood mcp serve`) or JSON.
 export function resolveToken(): string | null {
-  if (process.env.AHOOD_TOKEN) return process.env.AHOOD_TOKEN;
-  return readCredentials()?.token ?? null;
+  const resolved = resolveTokenWithSource();
+  if (resolved?.source === LEGACY_TOKEN_ENV && !legacyNoted) {
+    legacyNoted = true;
+    console.error(LEGACY_TOKEN_NOTE);
+  }
+  return resolved?.token ?? null;
 }
