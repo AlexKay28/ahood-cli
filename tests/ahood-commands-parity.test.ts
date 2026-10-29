@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AHOOD_COMMANDS, AHOOD_SNAP_HOOK_ENV, type AhoodCommand } from "../src/setup/templates/ahood-commands.js";
-import { codexSkill } from "../src/setup/templates/codex.js";
+import { codexPluginSkill, codexSkill } from "../src/setup/templates/codex.js";
 import { opencodeCommandFiles } from "../src/setup/templates/opencode.js";
 import { claudePluginCommandFiles, CLAUDE_PLUGIN_DIR } from "../src/setup/templates/claude-plugin.js";
 
@@ -28,6 +28,7 @@ const CONSENT_PHRASES: Record<string, string[]> = {
 
 describe("AHOOD_COMMANDS is the single source for every harness's /ahood wording", () => {
   const codex = codexSkill();
+  const codexPlugin = codexPluginSkill();
   const opencodeFiles = new Map(opencodeCommandFiles().map((f) => [f.file, f.content]));
   const claudeFiles = new Map(claudePluginCommandFiles().map((f) => [f.file, f.content]));
 
@@ -38,8 +39,9 @@ describe("AHOOD_COMMANDS is the single source for every harness's /ahood wording
 
   for (const c of AHOOD_COMMANDS) {
     describe(c.name, () => {
-      it("the Codex skill contains this command's body verbatim", () => {
+      it("the Codex skill (setup's file and the plugin's) contains this command's body verbatim", () => {
         expect(codex).toContain(c.body);
+        expect(codexPlugin).toContain(c.body);
       });
 
       it("the opencode command file contains this command's body verbatim", () => {
@@ -54,6 +56,7 @@ describe("AHOOD_COMMANDS is the single source for every harness's /ahood wording
       for (const phrase of CONSENT_PHRASES[c.name] ?? []) {
         it(`every harness's rendering keeps the consent rule: ${JSON.stringify(phrase)}`, () => {
           expect(codex).toContain(phrase);
+          expect(codexPlugin).toContain(phrase);
           expect(opencodeFiles.get(`${c.name}.md`)).toContain(phrase);
           expect(claudeFiles.get(`commands/${c.name}.md`)).toContain(phrase);
         });

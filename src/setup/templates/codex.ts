@@ -19,6 +19,13 @@ export const CODEX_TOML_MARKERS: BlockMarkers = {
 
 export const CODEX_MCP_SERVER_NAME = "ahood";
 
+// The Codex plugin (ahood#1009; its files: templates/codex-plugin.ts).
+/** `name` in .agents/plugins/marketplace.json, and so the `[marketplaces.<name>]` key in config.toml. */
+export const CODEX_MARKETPLACE_NAME = "ahood";
+export const CODEX_PLUGIN_NAME = "ahood";
+/** The `[plugins."..."]` key in config.toml, and what `codex plugin add` takes. */
+export const CODEX_PLUGIN_ID = `${CODEX_PLUGIN_NAME}@${CODEX_MARKETPLACE_NAME}`;
+
 // `bearer_token_env_var` is what `codex mcp add --bearer-token-env-var` writes.
 // With the user's consent (ahood#990) the token is stored instead, as a static
 // `http_headers` entry -- verified against codex-cli 0.164.0: `codex mcp get`
@@ -41,7 +48,19 @@ export function codexStoredToken(entry: { http_headers?: unknown } | undefined):
   return typeof auth === "string" && auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : null;
 }
 
+/** The `ahood` skill as `ahood setup codex` writes it to $CODEX_HOME/skills/ahood/SKILL.md. */
 export function codexSkill(): string {
+  return renderCodexSkill(`<!-- ${OWNED_MARKER}; remove with \`ahood setup --remove codex\` -->`);
+}
+
+/** The same skill as the Codex plugin ships it (plugins/codex/skills/ahood/SKILL.md, ahood#1009). */
+export function codexPluginSkill(): string {
+  return renderCodexSkill(
+    "<!-- Generated from src/setup/templates/ahood-commands.ts by `npm run sync-plugin`; edit that file, not this one. -->",
+  );
+}
+
+function renderCodexSkill(note: string): string {
   const sections = AHOOD_COMMANDS.map((c) => {
     const heading = c.name === "ahood" ? "`ahood` (no argument): dashboard" : `\`${c.name.replace("ahood-", "ahood ")}\``;
     return `## ${heading}\n\n${c.body}`;
@@ -54,7 +73,7 @@ export function codexSkill(): string {
       'when the user says "ahood", "/ahood", "ahood status", "ahood sync", "ahood review" or "ahood snap".',
     "---",
     "",
-    `<!-- ${OWNED_MARKER}; remove with \`ahood setup --remove codex\` -->`,
+    note,
     "",
     "# ahood",
     "",

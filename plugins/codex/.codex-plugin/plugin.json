@@ -1,0 +1,36 @@
+{
+  "name": "ahood",
+  "version": "0.14.0",
+  "description": "ahood in Codex: the registry's MCP tools (search, fetch, publish skills, agents, MCP servers, docs), plus the ahood skill for your dashboard, syncing updates, reviewing evolution proposals and capturing private snaps.",
+  "author": {
+    "name": "ahood",
+    "url": "https://github.com/AlexKay28/ahood-cli"
+  },
+  "homepage": "https://www.ahood.dev/docs#mcp",
+  "repository": "https://github.com/AlexKay28/ahood-cli",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "registry",
+    "mcp",
+    "agents",
+    "ahood",
+    "snaps"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "ahood",
+    "shortDescription": "ahood's registry MCP tools, plus a skill for your dashboard, updates, reviews and snaps",
+    "longDescription": "ahood (ahood.dev) is a registry for AI agent skills, agents, MCP servers and docs, with versioning, private session notes (snaps) and owner-approved self-evolution. This plugin wires up ahood's hosted MCP server (it reads your token from $AHOOD_TOKEN) and bundles two skills: `ahood`, a dashboard of installed skills that syncs updates and reviews evolution proposals only with your consent, and `using-ahood`, how to search, install and snap from inside a session.",
+    "developerName": "ahood",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://www.ahood.dev",
+    "privacyPolicyURL": "https://www.ahood.dev/privacy",
+    "termsOfServiceURL": "https://www.ahood.dev/terms"
+  }
+}

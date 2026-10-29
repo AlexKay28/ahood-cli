@@ -113,6 +113,22 @@ state still goes through Claude Code's permission prompt after you have agreed i
 generated from `src/setup/templates/ahood-commands.ts` (shared with the Codex and opencode setup);
 regenerate them with `npm run sync-plugin`.
 
+### Codex plugin
+
+The same repo is a Codex plugin marketplace too: `.agents/plugins/marketplace.json` lists
+`ahood@ahood` from [`plugins/codex/`](plugins/codex), which bundles the hosted MCP server (it
+reads `$AHOOD_TOKEN` through `bearer_token_env_var`) and two skills, `ahood:ahood` (the `/ahood`
+command set above) and `ahood:using-ahood`. By hand:
+
+```
+codex plugin marketplace add AlexKay28/ahood-cli
+codex plugin add ahood@ahood
+```
+
+Its files are generated too (`npm run sync-plugin` for the manifest, `.mcp.json` and the `ahood`
+skill; `npm run sync-skill` for `using-ahood`), and the plugin's version is the CLI's: `npm version`
+regenerates `plugin.json` on a release bump.
+
 ## Why ahood
 
 - **One command to publish, one to install.** `ahood skill publish owner/skill@1.0.0 --path ./my-skill` uploads a folder containing a `SKILL.md`; `ahood skill add owner/skill` installs it into `.claude/skills/`. No registry account setup beyond `ahood login`.
