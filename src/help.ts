@@ -119,13 +119,14 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
       "With no harness, detects which of Claude Code, Codex and opencode are installed (CLI on PATH or config dir) " +
       "and asks which to set up. Claude Code: installs the ahood plugin the native way -- `claude plugin marketplace " +
       "add AlexKay28/ahood-cli` then `claude plugin install ahood@ahood` -- or, when the claude CLI has no `plugin` " +
-      "subcommands, prints the /plugin commands to type in a session. Codex: adds the ahood MCP server as a marked " +
-      "block in $CODEX_HOME/config.toml (default ~/.codex), the `ahood` skill in $CODEX_HOME/skills/ahood/, and an " +
-      "AGENTS.md snippet file; $CODEX_HOME/AGENTS.md itself is edited only with --yes. opencode: adds " +
+      "subcommands, prints the /plugin commands to type in a session. Codex: installs the ahood Codex plugin -- " +
+      "[marketplaces.ahood] and [plugins.\"ahood@ahood\"] as a marked block in $CODEX_HOME/config.toml (default " +
+      "~/.codex), then `codex plugin marketplace upgrade ahood` and `codex plugin add ahood@ahood` -- and takes out " +
+      "the MCP block, skill and AGENTS.md snippet earlier versions wrote. opencode: adds " +
       "mcp.servers.ahood to the global opencode.json(c) and /ahood, /ahood-sync, /ahood-review, /ahood-snap command " +
       "files. Not logged in? It offers `ahood login` first. Every MCP entry reads its token from $AHOOD_TOKEN " +
       "($AHOOD_API_TOKEN is the deprecated old name) unless you let setup store the token in that harness's own " +
-      "config -- the Codex MCP block, the opencode MCP entry, or env.AHOOD_TOKEN in ~/.claude/settings.json -- which " +
+      "config -- an [mcp_servers.ahood] in the Codex block that replaces the plugin's, the opencode MCP entry, or env.AHOOD_TOKEN in ~/.claude/settings.json -- which " +
       "it asks about per harness (--store-token says yes up front; --yes alone does not store it). A file setup " +
       "creates for the token is 0600; an existing one other users can read is tightened only on a separate yes. " +
       "The token is never printed, and backups have it redacted. Only ahood's own entries are ever added or changed; a file is backed up to " +
@@ -134,7 +135,7 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
       "entries and keeps the backups.",
     flags: [
       "--remove <harness>  Remove ahood's entries from that harness instead.",
-      "--yes               Apply without asking (and, for Codex, also append the snippet to AGENTS.md).",
+      "--yes               Apply without asking.",
       "--dry-run           Print what would change; write and run nothing.",
       "--store-token       Store the ahood token in each harness's config (no question asked).",
       "--no-store-token    Never store it; the configs name $AHOOD_TOKEN (a token setup stored is taken out).",

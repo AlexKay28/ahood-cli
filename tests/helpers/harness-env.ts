@@ -104,3 +104,61 @@ export function fakeClaude(state: { marketplace?: boolean; installed?: boolean; 
 
 /** opencode prints its version as `v2.1.2`. */
 export const fakeOpencode = (version = "v2.1.2"): FakeBin => (args) => (args[0] === "--version" ? `${version}\n` : { status: 1, stdout: "", stderr: "" });
+
+// Trimmed from codex-cli 0.165.0's own `--help` output.
+const CODEX_PLUGIN_HELP = `Manage Codex plugins
+
+Usage: codex plugin [OPTIONS] <COMMAND>
+
+Commands:
+  add          Install a plugin from a configured or remote marketplace
+  list         List plugins available from configured and remote marketplaces
+  marketplace  Add, list, upgrade, or remove configured plugin marketplaces
+  remove       Uninstall a plugin and remove its local cache
+`;
+const CODEX_MARKETPLACE_HELP = `Add, list, upgrade, or remove configured plugin marketplaces
+
+Usage: codex plugin marketplace [OPTIONS] <COMMAND>
+
+Commands:
+  add      Add a local or Git marketplace to the configured marketplace sources
+  list     List plugin marketplaces Codex is currently considering and their roots
+  upgrade  Refresh configured Git marketplace snapshots
+  remove   Remove a configured marketplace source by name
+`;
+
+/**
+ * A codex CLI with `plugin` subcommands (or without, `supportsPlugins:
+ * false`), holding its own state: `cloned` = the ahood marketplace was
+ * fetched, `installed` = ahood@ahood is in the plugin cache. Like the real
+ * one, both `list --json` calls fail while the marketplace is configured but
+ * never cloned, and `marketplace remove` fails on one that was never cloned.
+ */
+export function fakeCodex(state: { cloned?: boolean; installed?: boolean; enabled?: boolean; version?: string; supportsPlugins?: boolean; failAdd?: boolean } = {}) {
+  const s = { cloned: false, installed: false, enabled: true, version: "0.14.0", supportsPlugins: true, failAdd: false, ...state };
+  const unloaded = { status: 1, stdout: "", stderr: "Error: failed to load configured marketplace snapshot(s)" };
+  const bin: FakeBin = (args) => {
+    const cmd = args.join(" ");
+    if (!s.supportsPlugins) return { status: 2, stdout: "", stderr: "error: unrecognized subcommand 'plugin'" };
+    if (cmd === "plugin --help") return CODEX_PLUGIN_HELP;
+    if (cmd === "plugin marketplace --help") return CODEX_MARKETPLACE_HELP;
+    if (cmd === "plugin list --json") {
+      if (!s.cloned) return unloaded;
+      const ours = { pluginId: "ahood@ahood", name: "ahood", marketplaceName: "ahood", version: s.version, installed: true, enabled: s.enabled };
+      return JSON.stringify({ installed: s.installed ? [ours] : [], available: [] });
+    }
+    if (cmd === "plugin marketplace list --json") return s.cloned ? JSON.stringify({ marketplaces: [{ name: "ahood", root: "/x" }] }) : unloaded;
+    if (cmd === "plugin marketplace upgrade ahood") return void (s.cloned = true), "Upgraded 1 marketplace(s).";
+    if (cmd === "plugin add ahood@ahood") {
+      if (s.failAdd || !s.cloned) return { status: 1, stdout: "", stderr: "boom" };
+      return void (s.installed = true), "Added plugin `ahood` from marketplace `ahood`.";
+    }
+    if (cmd === "plugin remove ahood@ahood") return void (s.installed = false), "Removed plugin `ahood` from marketplace `ahood`.";
+    if (cmd === "plugin marketplace remove ahood") {
+      if (!s.cloned) return { status: 1, stdout: "", stderr: "Error: marketplace `ahood` is not configured or installed" };
+      return void (s.cloned = false), "Removed marketplace `ahood`.";
+    }
+    return { status: 2, stdout: "", stderr: `unexpected: ${cmd}` };
+  };
+  return { state: s, bin };
+}
