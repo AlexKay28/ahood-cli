@@ -11,6 +11,12 @@ export const AHOOD_MCP_URL = "https://www.ahood.dev/api/mcp";
 // uses, so one `export AHOOD_API_TOKEN=...` serves every harness.
 export const AHOOD_MCP_TOKEN_ENV = "AHOOD_API_TOKEN";
 
+// The opt-in Claude Code snap Stop hook's enable switch (plugins/ahood/hooks/snap-prompt.mjs,
+// `ENABLE_ENV`). That script must stay import-free (ahood#981: no network, no `node:child_process`,
+// so it is never bundled through this module -- it keeps its own copy of the literal, and
+// tests/ahood-commands-parity.test.ts asserts the two stay equal. `ahood doctor` imports this one.
+export const AHOOD_SNAP_HOOK_ENV = "AHOOD_SNAP_HOOK";
+
 const CLI_NOTE =
   "If `ahood` is not on PATH, use `npx -y @ahood/cli` in its place. If a command says you are not logged in, " +
   "tell the user to run `ahood login` in a terminal (it opens a browser) and stop.";

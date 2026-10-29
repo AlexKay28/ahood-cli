@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { setRunnerForTests, type RunResult } from "../../src/setup/runner.js";
 
-const ENV_KEYS = ["HOME", "CODEX_HOME", "XDG_CONFIG_HOME", "AHOOD_TOKEN", "AHOOD_API_TOKEN", "AHOOD_API_URL"] as const;
+const ENV_KEYS = ["HOME", "CODEX_HOME", "XDG_CONFIG_HOME", "AHOOD_TOKEN", "AHOOD_API_TOKEN", "AHOOD_API_URL", "AHOOD_SNAP_HOOK"] as const;
 
 export function setupHomeEnv() {
   const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));

@@ -145,4 +145,61 @@ describe("ahood doctor (ahood#980)", () => {
   it("rejects unknown arguments", async () => {
     await expect(doctor(["--fix"])).rejects.toThrow(/Unknown argument: --fix/);
   });
+
+  describe("per-harness feature breakdown (ahood#982)", () => {
+    it("codex: separate MCP config and skill checks, both ok once set up", async () => {
+      stubNet();
+      await setup(["codex", "--yes"]);
+      await doctor(["--offline", "--json"]);
+      expect(check("codex", "MCP config")).toMatchObject({ status: "ok" });
+      expect(check("codex", "skill")).toMatchObject({ status: "ok" });
+    });
+
+    it("codex: a deleted skill is its own failing check, not just the rolled-up config state", async () => {
+      stubNet();
+      await setup(["codex", "--yes"]);
+      unlinkSync(join(env.home, ".codex", "skills", "ahood", "SKILL.md"));
+      await doctor(["--offline", "--json"]);
+      expect(check("codex", "MCP config")).toMatchObject({ status: "ok" });
+      expect(check("codex", "skill")).toMatchObject({ status: "fail" });
+    });
+
+    it("opencode: separate MCP config and commands checks, both ok once set up", async () => {
+      stubNet();
+      await setup(["opencode", "--yes"]);
+      await doctor(["--offline", "--json"]);
+      expect(check("opencode", "MCP config")).toMatchObject({ status: "ok" });
+      expect(check("opencode", "commands")).toMatchObject({ status: "ok" });
+    });
+
+    it("a harness that was never set up reports no per-feature checks (nothing to break down)", async () => {
+      await doctor(["--offline", "--json"]);
+      expect(check("codex", "MCP config")).toBeUndefined();
+      expect(check("codex", "skill")).toBeUndefined();
+    });
+
+    it("Claude Code: a `plugin` check plus a `snap hook` check that defaults to skipped, not failed", async () => {
+      runner.restore();
+      runner = fakeRunner({ claude: fakeClaude({ marketplace: true, installed: true }).bin });
+      await doctor(["--offline", "--json"]);
+      expect(check("claude", "plugin")).toMatchObject({ status: "ok" });
+      expect(check("claude", "snap hook")).toMatchObject({ status: "skip" });
+      expect(process.exitCode).toBe(0);
+    });
+
+    it("Claude Code: AHOOD_SNAP_HOOK=1 reports the snap hook as enabled, never as a failure", async () => {
+      runner.restore();
+      runner = fakeRunner({ claude: fakeClaude({ marketplace: true, installed: true }).bin });
+      process.env.AHOOD_SNAP_HOOK = "1";
+      await doctor(["--offline", "--json"]);
+      expect(check("claude", "snap hook")).toMatchObject({ status: "ok", detail: expect.stringContaining("enabled") });
+      expect(process.exitCode).toBe(0);
+    });
+
+    it("Claude Code: the snap hook check never appears before the plugin itself is installed", async () => {
+      process.env.AHOOD_SNAP_HOOK = "1";
+      await doctor(["--offline", "--json"]);
+      expect(check("claude", "snap hook")).toBeUndefined();
+    });
+  });
 });
