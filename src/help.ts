@@ -244,10 +244,13 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage: "ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]",
-    summary: "Move the lockfile pin(s) forward to the latest version, for one skill or all installed skills at once.",
+    summary: "Deprecated; prefer `ahood sync`, which moves the same lockfile pin(s) forward across every project on this machine.",
     desc:
-      "Move the lockfile pin(s) forward to the latest version. With no argument, updates every installed skill; one failure doesn't stop the rest. " +
-      "An mcp-kind entry is updated in place (re-resolving any secret environment variables) as long as its .mcp.json entry still matches what " +
+      "Deprecated (ahood#990): prefer `ahood sync`, which does the same thing across every project on this " +
+      "machine, with a diff and your consent. This still works, with no behavior change -- a one-line deprecation " +
+      "note goes to stderr, nothing else changes. Move the lockfile pin(s) forward to the latest version. With no " +
+      "argument, updates every installed skill; one failure doesn't stop the rest. An mcp-kind entry is updated " +
+      "in place (re-resolving any secret environment variables) as long as its .mcp.json entry still matches what " +
       "ahood last installed there -- a hand-edited or unverifiable entry is refused rather than silently overwritten.",
     flags: [
       "--dry-run   Preview current vs. latest version (and the changelog for anything behind) without installing anything.",
@@ -257,11 +260,14 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage: "ahood skill outdated [<owner>/<skill> ...] [--json]",
-    summary: "Read-only staleness check comparing current and latest versions (with changelog) for installed skills.",
+    summary: "Deprecated; prefer `ahood status`, which does the same read-only staleness check across every project on this machine.",
     desc:
-      "Read-only staleness check across installed skills -- current vs. latest version, plus the changelog for " +
-      "anything behind. With no argument, checks every installed skill; with one or more given, checks just " +
-      "those. Never moves a lockfile pin or installs anything; equivalent to `ahood skill update --dry-run`.",
+      "Deprecated (ahood#990): prefer `ahood status`, which does the same read-only staleness check across every " +
+      "project on this machine (plus pins and evolution state on artifacts you own). This still works, with no " +
+      "behavior change -- a one-line deprecation note goes to stderr, nothing else changes. Read-only staleness " +
+      "check across installed skills -- current vs. latest version, plus the changelog for anything behind. With " +
+      "no argument, checks every installed skill; with one or more given, checks just those. Never moves a " +
+      "lockfile pin or installs anything; equivalent to `ahood skill update --dry-run`.",
     flags: ["--json    Emit structured preview objects instead of a formatted table."],
     examples: ["ahood skill outdated", "ahood skill outdated alice/pdf-tools --json"],
   },
@@ -573,21 +579,26 @@ export const MCP_SERVE_HELP: CommandHelp[] = [
     usage: "ahood mcp serve",
     summary: "Start the local, read-only ahood MCP server over stdio (preferred spelling).",
     desc:
-      "Start a Model Context Protocol server over stdio, exposing skill_search, skill_view, skill_read, " +
-      "skill_versions, skill_list, skill_outdated, and whoami as MCP tools -- the same data ahood's --json " +
-      "commands already return, reachable as typed tool calls instead of parsed CLI output. Meant to be " +
-      "launched by an MCP-aware agent host (e.g. Claude Code's MCP server configuration), not run interactively. " +
-      "Read-only by design. This is not the hosted registry MCP endpoint (https://www.ahood.dev/api/mcp), which " +
-      "is a separate server with write tools.",
+      "Start a Model Context Protocol server over stdio, exposing search_skills, get_skill, read_skill, " +
+      "list_skill_versions, list_my_skills, ahood_status, and whoami as MCP tools -- the same data ahood's " +
+      "--json commands already return, reachable as typed tool calls instead of parsed CLI output. Names match " +
+      "the hosted registry MCP endpoint's tools (ahood#990); the original v1 names (skill_search, skill_view, " +
+      "skill_read, skill_versions, skill_list, skill_outdated) still work as deprecated aliases, so an existing " +
+      "host config never breaks. Meant to be launched by an MCP-aware agent host (e.g. Claude Code's MCP server " +
+      "configuration), not run interactively. Read-only by design. This is not the hosted registry MCP endpoint " +
+      "(https://www.ahood.dev/api/mcp), which is a separate server with write tools.",
     examples: ['claude mcp add ahood -- ahood mcp serve', "npx @ahood/cli@latest mcp serve"],
   },
   {
     usage: "ahood mcp",
-    summary: "Same as `ahood mcp serve`, kept byte-for-byte so existing MCP host configs keep working.",
+    summary: "Ambiguous and deprecated (same as `ahood mcp serve`, kept working for existing MCP host configs).",
     desc:
       "With no arguments at all, `ahood mcp` starts the same stdio server as `ahood mcp serve` -- nothing is printed " +
-      "to stdout before the protocol starts, and no login or network is needed to start it. Any other first word must " +
-      "be `serve`, `--help`, or a registry verb below; anything unrecognized fails with usage instead of starting a server.",
+      "to stdout before the protocol starts (a deprecation note goes to stderr instead), and no login or network is " +
+      "needed to start it. Bare `ahood mcp` is ambiguous with the mcp-kind registry verbs below (`ahood mcp <verb>`), " +
+      "so it is deprecated in favor of the explicit `ahood mcp serve` -- it keeps working byte-for-byte, with no " +
+      "behavior change, for existing host configs. Any other first word must be `serve`, `--help`, or a registry " +
+      "verb below; anything unrecognized fails with usage instead of starting a server.",
   },
 ];
 

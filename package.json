@@ -31,7 +31,8 @@
     "pretest": "npm run build",
     "test": "vitest run",
     "sync-readme": "node scripts/sync-readme.mjs",
-    "sync-plugin": "node scripts/sync-plugin.mjs"
+    "sync-plugin": "node scripts/sync-plugin.mjs",
+    "sync-skill": "node scripts/sync-skill.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

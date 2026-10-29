@@ -294,7 +294,9 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 
 **Migration plan for a strict `ahood skill`.** A future major version will make `ahood skill <verb>` skills-only by default, matching `agent` and `mcp`. Until then: (1) this release adds the strict groups and `--kind`, and labels `ahood skill` as legacy in `--help`; (2) a following minor release prints a stderr deprecation note when an `ahood skill` command actually touches a non-skill entry (stdout and `--json` unchanged); (3) the major release flips the default, keeping `ahood skill <verb> --kind all` as the explicit cross-kind escape hatch. Scripts that want today's behavior forever can pass `--kind all` now.
 
-**`ahood mcp` has two meanings.** With no arguments, or as `ahood mcp serve` (the preferred spelling), it starts this CLI's local, read-only MCP server over stdio -- unchanged, so existing MCP host configurations keep working with no edits. With a registry verb it manages MCP server manifests. Anything else (`ahood mcp srve`, `ahood mcp --flag`) fails with usage and a suggestion instead of starting a server. Neither is the hosted registry MCP endpoint at `https://www.ahood.dev/api/mcp`.
+**`ahood skill update`/`ahood skill outdated` are deprecated (ahood#990)** in favor of the top-level `ahood sync`/`ahood status`, which cover every project on the machine instead of just the current one's lockfile -- both keep working exactly as before, with a one-line stderr note.
+
+**`ahood mcp` has two meanings.** With no arguments, or as `ahood mcp serve` (the preferred, explicit spelling), it starts this CLI's local, read-only MCP server over stdio. With a registry verb it manages MCP server manifests. Bare `ahood mcp` is ambiguous between the two and is deprecated in favor of `ahood mcp serve` -- a one-line note goes to stderr, then it starts the server exactly as before, so existing MCP host configurations keep working with no edits. Anything else (`ahood mcp srve`, `ahood mcp --flag`) fails with usage and a suggestion instead of starting a server. Neither is the hosted registry MCP endpoint at `https://www.ahood.dev/api/mcp`.
 
 ## Keeping installs current: status, sync, pin, review
 
@@ -340,8 +342,8 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood skill diff <owner>/<skill> <versionA> <versionB> [--json]` | Show what changed between two published versions -- a SKILL.md diff plus an added/removed/changed file summary. |
 | `ahood skill list [--json]` | List your own skills, public and private. |
 | `ahood skill add <owner>/<skill>[@version]` | Install a skill into .claude/skills/, pinned in the lockfile. |
-| `ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]` | Move the lockfile pin(s) forward to the latest version, for one skill or all installed skills at once. |
-| `ahood skill outdated [<owner>/<skill> ...] [--json]` | Read-only staleness check comparing current and latest versions (with changelog) for installed skills. |
+| `ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]` | Deprecated; prefer `ahood sync`, which moves the same lockfile pin(s) forward across every project on this machine. |
+| `ahood skill outdated [<owner>/<skill> ...] [--json]` | Deprecated; prefer `ahood status`, which does the same read-only staleness check across every project on this machine. |
 | `ahood skill remove <owner>/<skill> [--yes]` | Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed). |
 | `ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a skill you own, changing only the flags you pass. |
 | `ahood skill unpublish <owner>/<skill>[@version] [--yes]` | Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed). |
@@ -380,7 +382,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | Command | What it does |
 | --- | --- |
 | `ahood mcp serve` | Start the local, read-only ahood MCP server over stdio (preferred spelling). |
-| `ahood mcp` | Same as `ahood mcp serve`, kept byte-for-byte so existing MCP host configs keep working. |
+| `ahood mcp` | Ambiguous and deprecated (same as `ahood mcp serve`, kept working for existing MCP host configs). |
 | `ahood mcp search <query> [--json] [--limit <n>]` | Search published MCP server manifests. |
 | `ahood mcp view\|show <owner>/<server> [--json] [--web]` | Show a single MCP server manifest's details without installing it (alias: ahood mcp show). |
 | `ahood mcp read <owner>/<server> [--json]` | Print a published MCP server manifest's server.json, without installing it. |
@@ -540,7 +542,7 @@ ahood completion fish > ~/.config/fish/completions/ahood.fish
 - **Predictable failure.** A stable, documented [exit code](#exit-codes) per failure class, and error messages that never leak raw upstream infrastructure details — safe to surface directly to an agent's reasoning loop.
 - **A built-in guide for the agent itself.** `ahood help useme` prints a complete `SKILL.md` teaching an agent when and how to use ahood -- kinds, search -> read -> add -> update, publishing, `--json`, exit codes, `AHOOD_TOKEN`, the MCP options, and which commands are destructive. It is bundled with the installed CLI version, so it needs no login, no network, and writes nothing: stdout is the raw file and nothing else (diagnostics go to stderr), ready to paste into an agent's context or for an agent with a shell to read directly (`ahood help useme > ahood-SKILL.md` saves it). That is separate from `ahood skill add alexkay/ahood`, which optionally installs the registry-published ahood skill into a project as its own pinned skill.
 - **A real "start here."** `ahood skill init <name>`, `ahood agent init <name>`, and `ahood mcp init <name>` scaffold a `SKILL.md`, `AGENT.md`, or `server.json` that passes the registry's publish validation, rather than requiring an agent to know each format up front.
-- **A native MCP server, for agents that prefer tool calls to subprocess parsing.** `ahood mcp serve` (or bare `ahood mcp`, unchanged for existing configs) starts a Model Context Protocol server over stdio, exposing `skill_search`, `skill_view`, `skill_read`, `skill_versions`, `skill_list`, `skill_outdated`, and `whoami` as typed, read-only tools -- the same data the `--json` flags above already return, reachable as structured tool calls instead. Configure your MCP-aware agent host to run `ahood mcp serve` (or `npx @ahood/cli@latest mcp serve`) as a stdio server, e.g. `claude mcp add ahood -- ahood mcp serve`.
+- **A native MCP server, for agents that prefer tool calls to subprocess parsing.** `ahood mcp serve` (or bare `ahood mcp`, deprecated but unchanged for existing configs) starts a Model Context Protocol server over stdio, exposing `search_skills`, `get_skill`, `read_skill`, `list_skill_versions`, `list_my_skills`, `ahood_status`, and `whoami` as typed, read-only tools -- the same data the `--json` flags above already return, reachable as structured tool calls instead. These names match the hosted registry MCP endpoint's tools (ahood#990); the original v1 names (`skill_search`, `skill_view`, `skill_read`, `skill_versions`, `skill_list`, `skill_outdated`) still work as deprecated aliases. Configure your MCP-aware agent host to run `ahood mcp serve` (or `npx @ahood/cli@latest mcp serve`) as a stdio server, e.g. `claude mcp add ahood -- ahood mcp serve`.
 
 ## Development
 
