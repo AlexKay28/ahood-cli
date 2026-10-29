@@ -11,7 +11,7 @@ description: "How to use the ahood CLI (@ahood/cli) and MCP tools, the registry 
 ahood (ahood.dev) is a registry for agent artifacts (skills, agents, MCP servers, docs)
 with versioning, private session notes ("snaps") and owner-approved self-evolution.
 
-**One front door.** `npx @ahood/cli setup` logs you in, detects the harness (Claude Code,
+**One front door.** `npx @ahood/cli@latest setup` logs you in, detects the harness (Claude Code,
 Codex, opencode), and -- with your consent -- wires up the plugin or MCP server, this skill,
 and the token -- after that, the user just types `/ahood`. Everything below is also reachable
 directly: the **ahood MCP tools** (the hosted registry endpoint, needs `AHOOD_TOKEN` in the

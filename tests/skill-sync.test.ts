@@ -37,7 +37,7 @@ describe("the canonical self-skill body (src/skill/using-ahood.md)", () => {
   });
 
   it("carries the front-door message", () => {
-    expect(body).toContain("npx @ahood/cli setup");
+    expect(body).toContain("npx @ahood/cli@latest setup");
     expect(body).toMatch(/\/ahood/);
   });
 
