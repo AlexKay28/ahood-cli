@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { claudeDir } from "../paths.js";
 import { runner } from "../runner.js";
+import { AHOOD_SNAP_HOOK_ENV } from "../templates/ahood-commands.js";
 import {
   CLAUDE_IN_SESSION_INSTALL,
   CLAUDE_IN_SESSION_REMOVE,
@@ -14,7 +15,7 @@ import {
   CLAUDE_PLUGIN_ID,
   CLAUDE_REMOVE_ARGS,
 } from "../templates/claude.js";
-import { emptyPlan, type ConfigState, type Detection, type Harness, type SetupPlan } from "./types.js";
+import { emptyPlan, type ConfigState, type Detection, type Feature, type Harness, type SetupPlan } from "./types.js";
 
 type PluginEntry = { id: string; enabled?: boolean };
 
@@ -108,20 +109,41 @@ function planRemove(): SetupPlan {
   return plan;
 }
 
+/**
+ * The opt-in snap Stop hook ships inside the plugin bundle itself (there is
+ * nothing separate for setup to write), so its "feature" is just whether the
+ * user has turned it on in this environment -- `absent` (off, the default) is
+ * not a failure, same as an unset MCP token.
+ */
+function hookFeature(): Feature {
+  return process.env[AHOOD_SNAP_HOOK_ENV] === "1"
+    ? { name: "snap hook", state: "ok", detail: `${AHOOD_SNAP_HOOK_ENV}=1 -- snap prompt enabled` }
+    : { name: "snap hook", state: "absent", detail: `opt-in, off by default -- set ${AHOOD_SNAP_HOOK_ENV}=1 to enable`, optional: true };
+}
+
 function inspect(): ConfigState {
   const { binary } = detect();
   const plugins = installedPlugins(binary);
   const ours = (plugins ?? []).filter((p) => p.id === CLAUDE_PLUGIN_ID);
+  const hook = hookFeature();
   if (ours.length === 0) {
     const marketplace = binary !== null && marketplaceAdded(binary);
     return marketplace
-      ? { state: "partial", details: [`marketplace "${CLAUDE_MARKETPLACE_NAME}" is added but ${CLAUDE_PLUGIN_ID} is not installed`] }
-      : { state: "absent", details: [`${CLAUDE_PLUGIN_ID} not installed`] };
+      ? {
+          state: "partial",
+          details: [`marketplace "${CLAUDE_MARKETPLACE_NAME}" is added but ${CLAUDE_PLUGIN_ID} is not installed`],
+          features: [{ name: "plugin", state: "partial", detail: `marketplace added, ${CLAUDE_PLUGIN_ID} not installed` }, hook],
+        }
+      : { state: "absent", details: [`${CLAUDE_PLUGIN_ID} not installed`], features: [{ name: "plugin", state: "absent", detail: `${CLAUDE_PLUGIN_ID} not installed` }, hook] };
   }
   if (ours.every((p) => p.enabled === false)) {
-    return { state: "stale", details: [`${CLAUDE_PLUGIN_ID} is installed but disabled (claude plugin enable ${CLAUDE_PLUGIN_ID})`] };
+    return {
+      state: "stale",
+      details: [`${CLAUDE_PLUGIN_ID} is installed but disabled (claude plugin enable ${CLAUDE_PLUGIN_ID})`],
+      features: [{ name: "plugin", state: "stale", detail: `installed but disabled (claude plugin enable ${CLAUDE_PLUGIN_ID})` }, hook],
+    };
   }
-  return { state: "ok", details: [`${CLAUDE_PLUGIN_ID} installed`] };
+  return { state: "ok", details: [`${CLAUDE_PLUGIN_ID} installed`], features: [{ name: "plugin", state: "ok", detail: `${CLAUDE_PLUGIN_ID} installed` }, hook] };
 }
 
 export const claudeHarness: Harness = { id: "claude", label: "Claude Code", detect, planSetup, planRemove, inspect };

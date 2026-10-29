@@ -9,6 +9,18 @@
 //     its template, $ARGUMENTS the user's arguments, and the file's path
 //     (minus .md) its name -- so commands/ahood.md is `/ahood`.
 //   Earlier opencode (v1) used a different MCP layout; setup refuses there.
+//   - Opt-in snap hook (ahood#982, parity with the Claude Code plugin's Stop
+//     hook): NOT ADDED. Verified against opencode v2.1.2 (`opencode --help`,
+//     `opencode plugin --help`) and the plugin docs at opencode.ai/docs/plugins
+//     (2026-10-29): opencode plugins are npm modules installed with
+//     `opencode plugin <module> [-g]`, not files setup can drop into a config
+//     dir, and their session-lifecycle hooks (`session.idle`, `session.deleted`,
+//     ...) are reactive event listeners -- none of them can return a decision
+//     that blocks/continues the session the way Claude Code's Stop hook
+//     ({"decision":"block","reason":...}) does. Without that, a snap reminder
+//     here could only print a message after the session has already ended,
+//     which is not the same feature. Revisit if opencode adds a decision-
+//     gating session-end hook.
 import { OWNED_MARKER } from "../file-changes.js";
 import { AHOOD_COMMANDS, AHOOD_MCP_TOKEN_ENV, AHOOD_MCP_URL } from "./ahood-commands.js";
 

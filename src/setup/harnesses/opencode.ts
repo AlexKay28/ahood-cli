@@ -11,7 +11,7 @@ import { displayPath, opencodeConfigDir } from "../paths.js";
 import { runner } from "../runner.js";
 import { AHOOD_MCP_URL } from "../templates/ahood-commands.js";
 import { OPENCODE_CONFIG_FILES, OPENCODE_MCP_PATH, opencodeCommandFiles, opencodeMcpEntry } from "../templates/opencode.js";
-import { emptyPlan, type ConfigState, type Detection, type Harness, type SetupPlan } from "./types.js";
+import { emptyPlan, type ConfigState, type Detection, type Feature, type Harness, type SetupPlan } from "./types.js";
 
 const commandPath = (file: string) => join(opencodeConfigDir(), "commands", file);
 
@@ -135,7 +135,7 @@ function inspect(): ConfigState {
     try {
       entry = entryAt(parseOrRefuse(text, path));
     } catch (error) {
-      return { state: "broken", details: [error instanceof Error ? error.message : String(error)] };
+      return { state: "broken", details: [error instanceof Error ? error.message : String(error)], features: [] };
     }
     if (isOurs(entry)) mcp = sameEntry(entry) ? "ok" : "stale";
   }
@@ -143,11 +143,16 @@ function inspect(): ConfigState {
   const present = files.filter(({ file }) => readIfExists(commandPath(file)) !== null);
   const current = files.filter(({ file, content }) => readIfExists(commandPath(file)) === content);
   const commands = present.length === 0 ? "absent" : current.length === files.length ? "ok" : present.length === files.length ? "stale" : "partial";
-  const details = [`MCP entry in ${displayPath(path)}: ${mcp}`, `commands in ${displayPath(join(opencodeConfigDir(), "commands"))}: ${commands}`];
-  if (mcp === "absent" && commands === "absent") return { state: "absent", details };
-  if (mcp === "absent" || commands === "absent" || commands === "partial") return { state: "partial", details };
-  if (mcp === "stale" || commands === "stale") return { state: "stale", details };
-  return { state: "ok", details };
+  const commandsDir = join(opencodeConfigDir(), "commands");
+  const details = [`MCP entry in ${displayPath(path)}: ${mcp}`, `commands in ${displayPath(commandsDir)}: ${commands}`];
+  const features: Feature[] = [
+    { name: "MCP config", state: mcp, detail: displayPath(path) },
+    { name: "commands", state: commands, detail: displayPath(commandsDir) },
+  ];
+  if (mcp === "absent" && commands === "absent") return { state: "absent", details, features };
+  if (mcp === "absent" || commands === "absent" || commands === "partial") return { state: "partial", details, features };
+  if (mcp === "stale" || commands === "stale") return { state: "stale", details, features };
+  return { state: "ok", details, features };
 }
 
 export const opencodeHarness: Harness = { id: "opencode", label: "opencode", detect, planSetup, planRemove, inspect };

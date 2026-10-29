@@ -32,8 +32,17 @@ export type SetupPlan = {
   notes: string[];
 };
 
+/**
+ * One feature a harness's setup writes (an MCP entry, a skill, command
+ * files, ...), or an independent opt-in extra (the Claude Code snap hook).
+ * `optional: true` means `absent` is the expected default, not a gap --
+ * `ahood doctor` shows it as skipped rather than failed, even when the rest
+ * of this harness's setup is in place.
+ */
+export type Feature = { name: string; state: "absent" | "ok" | "stale" | "partial" | "broken"; detail: string; optional?: boolean };
+
 /** Whether OUR config is in place for doctor: `absent` = never set up (not a failure). */
-export type ConfigState = { state: "absent" | "ok" | "stale" | "partial" | "broken"; details: string[] };
+export type ConfigState = { state: "absent" | "ok" | "stale" | "partial" | "broken"; details: string[]; features: Feature[] };
 
 export type SetupOptions = { yes: boolean };
 

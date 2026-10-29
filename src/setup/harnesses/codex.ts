@@ -20,7 +20,7 @@ import {
   codexMcpBlock,
   codexSkill,
 } from "../templates/codex.js";
-import { emptyPlan, type ConfigState, type Detection, type Harness, type SetupOptions, type SetupPlan } from "./types.js";
+import { emptyPlan, type ConfigState, type Detection, type Feature, type Harness, type SetupOptions, type SetupPlan } from "./types.js";
 
 const configPath = () => join(codexHome(), "config.toml");
 const skillPath = () => join(codexHome(), "skills", "ahood", "SKILL.md");
@@ -119,17 +119,25 @@ function inspect(): ConfigState {
       parseToml(text);
       block = readBlock(text, CODEX_TOML_MARKERS, displayPath(path));
     } catch (error) {
-      return { state: "broken", details: [`${displayPath(path)}: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`] };
+      return {
+        state: "broken",
+        details: [`${displayPath(path)}: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`],
+        features: [],
+      };
     }
     if (block !== null) mcp = block === `${CODEX_TOML_MARKERS.begin}\n${codexMcpBlock()}\n${CODEX_TOML_MARKERS.end}` ? "ok" : "stale";
   }
   const skill = readIfExists(skillPath());
   const skillState = skill === null ? "absent" : skill === codexSkill() ? "ok" : "stale";
   const details = [`MCP entry in ${displayPath(path)}: ${mcp}`, `skill ${displayPath(skillPath())}: ${skillState}`];
-  if (mcp === "absent" && skillState === "absent") return { state: "absent", details };
-  if (mcp === "absent" || skillState === "absent") return { state: "partial", details };
-  if (mcp === "stale" || skillState === "stale") return { state: "stale", details };
-  return { state: "ok", details };
+  const features: Feature[] = [
+    { name: "MCP config", state: mcp, detail: displayPath(path) },
+    { name: "skill", state: skillState, detail: displayPath(skillPath()) },
+  ];
+  if (mcp === "absent" && skillState === "absent") return { state: "absent", details, features };
+  if (mcp === "absent" || skillState === "absent") return { state: "partial", details, features };
+  if (mcp === "stale" || skillState === "stale") return { state: "stale", details, features };
+  return { state: "ok", details, features };
 }
 
 export const codexHarness: Harness = { id: "codex", label: "Codex", detect, planSetup, planRemove, inspect };

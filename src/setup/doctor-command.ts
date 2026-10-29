@@ -9,7 +9,7 @@ import { UsageError } from "../usage-error.js";
 import { CLI_NAME, CLI_VERSION } from "../version.js";
 import { checkAuth } from "../commands/whoami.js";
 import { HARNESSES } from "./harnesses/index.js";
-import { HARNESS_IDS, type ConfigState, type HarnessId } from "./harnesses/types.js";
+import { HARNESS_IDS, type ConfigState, type Feature, type HarnessId } from "./harnesses/types.js";
 import { displayPath } from "./paths.js";
 import { AHOOD_MCP_TOKEN_ENV, AHOOD_MCP_URL } from "./templates/ahood-commands.js";
 
@@ -84,6 +84,17 @@ async function versionCheck(offline: boolean): Promise<Check> {
 }
 
 const CONFIG_STATUS: Record<ConfigState["state"], CheckStatus> = { ok: "ok", absent: "skip", stale: "warn", partial: "fail", broken: "fail" };
+
+/**
+ * A feature's own `absent` is only a skip (not a failure) when it is marked
+ * `optional` (the Claude Code snap hook: off by default). Any other feature
+ * shown here at all means the harness is set up at least partially, so a
+ * missing piece of it is a real gap, not nothing-to-report.
+ */
+function featureStatus(feature: Feature): CheckStatus {
+  if (feature.state === "absent") return feature.optional ? "skip" : "fail";
+  return CONFIG_STATUS[feature.state];
+}
 const CONFIG_HINT: Partial<Record<ConfigState["state"], string>> = {
   stale: "re-run `ahood setup <h>` to refresh",
   partial: "re-run `ahood setup <h>` to repair",
@@ -107,6 +118,11 @@ function harnessReport(id: HarnessId, mcp: Check): HarnessReport {
     { name: "ahood config", status: CONFIG_STATUS[config.state], detail: [config.state, ...config.details, hint].filter(Boolean).join("; ") },
   ];
   if (config.state !== "absent") {
+    // Per-feature breakdown (an MCP entry, a skill, command files, an opt-in
+    // hook, ...): what `ahood setup <id>` can write, one row per thing, so
+    // `doctor` says exactly which harness features are installed rather than
+    // just an overall state.
+    for (const feature of config.features) checks.push({ name: feature.name, status: featureStatus(feature), detail: feature.detail });
     checks.push(mcp);
     checks.push(
       process.env[AHOOD_MCP_TOKEN_ENV]
