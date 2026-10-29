@@ -3,7 +3,7 @@
 // server reachable, logged in, this CLI vs the latest on npm. Exits 1 when a
 // harness that IS set up is broken (partial or unreadable config, or the MCP
 // server it points at is unreachable); warnings alone exit 0.
-import { resolveToken } from "../credentials.js";
+import { LEGACY_TOKEN_ENV, resolveTokenWithSource, TOKEN_ENV, type TokenSource } from "../credentials.js";
 import { unrecognizedArgs } from "../flags.js";
 import { UsageError } from "../usage-error.js";
 import { CLI_NAME, CLI_VERSION } from "../version.js";
@@ -11,7 +11,7 @@ import { checkAuth } from "../commands/whoami.js";
 import { HARNESSES } from "./harnesses/index.js";
 import { HARNESS_IDS, type ConfigState, type Feature, type HarnessId } from "./harnesses/types.js";
 import { displayPath } from "./paths.js";
-import { AHOOD_MCP_TOKEN_ENV, AHOOD_MCP_URL } from "./templates/ahood-commands.js";
+import { AHOOD_MCP_URL } from "./templates/ahood-commands.js";
 
 const USAGE = "Usage: ahood doctor [--offline] [--json]";
 const PROBE_TIMEOUT_MS = 5_000;
@@ -48,9 +48,30 @@ async function mcpCheck(offline: boolean): Promise<Check> {
   return { name, status: "fail", detail: `${AHOOD_MCP_URL} ${status !== undefined ? `answered HTTP ${status}` : `unreachable (${error})`}` };
 }
 
+const SOURCE_LABEL: Record<TokenSource, string> = {
+  [TOKEN_ENV]: `$${TOKEN_ENV}`,
+  [LEGACY_TOKEN_ENV]: `$${LEGACY_TOKEN_ENV} (deprecated)`,
+  credentials: "stored login (`ahood login`)",
+};
+
+/** Which token the CLI uses -- by name only, never the value (ahood#990). */
+function tokenSourceCheck(): Check {
+  const name = "token source";
+  const resolved = resolveTokenWithSource();
+  if (!resolved) return { name, status: "warn", detail: `none -- run \`ahood login\` (or set ${TOKEN_ENV})` };
+  if (resolved.source === LEGACY_TOKEN_ENV) {
+    return {
+      name,
+      status: "warn",
+      detail: `only $${LEGACY_TOKEN_ENV} is set -- it is deprecated and works for this release cycle only; rename it to ${TOKEN_ENV}`,
+    };
+  }
+  return { name, status: "ok", detail: SOURCE_LABEL[resolved.source] };
+}
+
 async function loginCheck(offline: boolean): Promise<Check> {
   const name = "logged in";
-  if (!resolveToken()) return { name, status: "warn", detail: "no token -- run `ahood login` (or set AHOOD_TOKEN)" };
+  if (!resolveTokenWithSource()) return { name, status: "warn", detail: `no token -- run \`ahood login\` (or set ${TOKEN_ENV})` };
   if (offline) return { name, status: "ok", detail: "token present (not verified: --offline)" };
   const auth = await checkAuth();
   if (auth.authenticated === true) {
@@ -124,19 +145,32 @@ function harnessReport(id: HarnessId, mcp: Check): HarnessReport {
     // just an overall state.
     for (const feature of config.features) checks.push({ name: feature.name, status: featureStatus(feature), detail: feature.detail });
     checks.push(mcp);
-    checks.push(
-      process.env[AHOOD_MCP_TOKEN_ENV]
-        ? { name: "MCP token", status: "ok", detail: `${AHOOD_MCP_TOKEN_ENV} is set in this shell` }
-        : {
-            name: "MCP token",
-            status: "warn",
-            detail:
-              `${AHOOD_MCP_TOKEN_ENV} is not set in this shell; the MCP server refuses requests without it. ` +
-              "Mint one at https://www.ahood.dev/settings/tokens and export it where the harness runs",
-          },
-    );
+    checks.push(mcpTokenCheck(id, config));
   }
   return { id, label: harness.label, detected: detection.installed, binary: detection.binary, config, checks };
+}
+
+/** Where this harness's MCP entry gets its token: stored by setup, $AHOOD_TOKEN, or nowhere. */
+function mcpTokenCheck(id: HarnessId, config: ConfigState): Check {
+  const name = "MCP token";
+  const store = HARNESSES[id].tokenStore;
+  if (config.tokenStored && store) return { name, status: "ok", detail: `stored by ahood setup in ${displayPath(store.file())}` };
+  if (store?.userSet()) return { name, status: "ok", detail: `${TOKEN_ENV} set in ${displayPath(store.file())}` };
+  if (process.env[TOKEN_ENV]) return { name, status: "ok", detail: `${TOKEN_ENV} is set in this shell` };
+  if (process.env[LEGACY_TOKEN_ENV]) {
+    return {
+      name,
+      status: "warn",
+      detail: `only ${LEGACY_TOKEN_ENV} is set; this harness's ahood config reads ${TOKEN_ENV} -- rename it (or \`ahood setup ${id} --store-token\`)`,
+    };
+  }
+  return {
+    name,
+    status: "warn",
+    detail:
+      `${TOKEN_ENV} is not set in this shell and no token is stored; the MCP server refuses requests without one. ` +
+      `Run \`ahood setup ${id} --store-token\`, or export ${TOKEN_ENV} where the harness runs`,
+  };
 }
 
 const MARK: Record<CheckStatus, string> = { ok: "ok  ", warn: "warn", fail: "FAIL", skip: "--  " };
@@ -147,15 +181,16 @@ export async function doctor(args: string[]): Promise<void> {
   const offline = args.includes("--offline");
   const json = args.includes("--json");
 
+  const source = tokenSourceCheck();
   const [mcp, login, version] = await Promise.all([mcpCheck(offline), loginCheck(offline), versionCheck(offline)]);
   const harnesses = HARNESS_IDS.map((id) => harnessReport(id, mcp));
   const broken = harnesses.filter((h) => h.config.state !== "absent" && h.checks.some((c) => c.status === "fail"));
 
   if (json) {
-    console.log(JSON.stringify({ ok: broken.length === 0, cli: [login, version], harnesses }));
+    console.log(JSON.stringify({ ok: broken.length === 0, cli: [source, login, version], harnesses }));
   } else {
     console.log("ahood doctor");
-    for (const c of [version, login, mcp]) console.log(`  [${MARK[c.status]}] ${c.name}: ${c.detail}`);
+    for (const c of [version, source, login, mcp]) console.log(`  [${MARK[c.status]}] ${c.name}: ${c.detail}`);
     for (const h of harnesses) {
       console.log(`\n${h.label} (${h.id})`);
       for (const c of h.checks) console.log(`  [${MARK[c.status]}] ${c.name}: ${c.detail}`);

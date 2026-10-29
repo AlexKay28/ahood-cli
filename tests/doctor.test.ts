@@ -58,7 +58,7 @@ describe("ahood doctor (ahood#980)", () => {
   it("reports a healthy Codex setup as ok", async () => {
     stubNet();
     await setup(["codex", "--yes"]);
-    process.env.AHOOD_API_TOKEN = "t";
+    process.env.AHOOD_TOKEN = "t";
     await doctor(["--json"]);
     expect(harness("codex").config.state).toBe("ok");
     expect(check("codex", "MCP server reachable")).toMatchObject({ status: "ok" });
@@ -108,7 +108,7 @@ describe("ahood doctor (ahood#980)", () => {
     await doctor(["--json"]);
     expect(harness("opencode").config.state).toBe("stale");
     expect(check("opencode", "MCP token")).toMatchObject({ status: "warn" });
-    const [login, version] = report().cli;
+    const [, login, version] = report().cli;
     expect(login).toMatchObject({ name: "logged in", status: "warn" });
     expect(version).toMatchObject({ status: "warn" });
     expect(version.detail).toContain("999.0.0");
@@ -118,7 +118,7 @@ describe("ahood doctor (ahood#980)", () => {
   it("offline with a stored token: token present, not verified", async () => {
     process.env.AHOOD_TOKEN = "t";
     await doctor(["--offline", "--json"]);
-    expect(report().cli[0]).toMatchObject({ status: "ok", detail: expect.stringContaining("not verified") });
+    expect(report().cli.find((c: { name: string }) => c.name === "logged in")).toMatchObject({ status: "ok", detail: expect.stringContaining("not verified") });
   });
 
   it("Claude Code: installed plugin is ok; disabled is a warning", async () => {

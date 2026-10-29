@@ -28,6 +28,7 @@ Installed alice/pdf-tools@1.4.0 to .claude/skills/alice@pdf-tools
 - [Use ahood in Claude Code](#use-ahood-in-claude-code)
 - [Why ahood](#why-ahood)
 - [Configuration](#configuration)
+  - [Token](#token)
 - [Usage examples](#usage-examples)
 - [Kinds: skills, agents, and MCP servers](#kinds-skills-agents-and-mcp-servers)
 - [Commands](#commands)
@@ -40,13 +41,20 @@ Installed alice/pdf-tools@1.4.0 to .claude/skills/alice@pdf-tools
 
 ## Quick start
 
+One command, then one slash command:
+
 ```
-npx @ahood/cli@latest login
+npx @ahood/cli setup
+```
+
+then type `/ahood` in your agent. `setup` logs you in if you are not already (a device-code flow in your browser), detects Claude Code, Codex and opencode, and wires each one you pick: the plugin or MCP server, plus the `/ahood` commands. With your consent it also stores your ahood token in that harness's own config, so you need no environment variable at all (see [Token](#token)). Re-run it any time; `ahood doctor` checks the result.
+
+The CLI is also the engine underneath, for direct use:
+
+```
 npx @ahood/cli@latest skill search <something>
 npx @ahood/cli@latest skill add <owner>/<skill>
 ```
-
-That's it — `login` opens a device-code flow in your browser and stores a token locally; every command after that just works.
 
 ## Install
 
@@ -83,9 +91,10 @@ The plugin brings two things:
 
 - **ahood's hosted MCP server** (`https://www.ahood.dev/api/mcp`): `search_skills`, `get_skill`,
   `create_skill`, `create_snap` and the rest, mid-session. **A token is required** for every tool,
-  including read-only ones -- there is no anonymous access. Mint a personal access token at
-  [ahood.dev/settings/tokens](https://www.ahood.dev/settings/tokens) and export it as
-  `AHOOD_API_TOKEN` in the environment you start Claude Code from.
+  including read-only ones -- there is no anonymous access. `ahood setup claude` offers to store
+  it as `env.AHOOD_TOKEN` in `~/.claude/settings.json`; otherwise export `AHOOD_TOKEN` in the
+  environment you start Claude Code from. **Renamed:** the plugin used to read `AHOOD_API_TOKEN`;
+  from plugin 2.0.1 it reads only `AHOOD_TOKEN` (see [Token](#token)).
 - **`/ahood` commands**, which call this CLI (`npm i -g @ahood/cli`; they fall back to
   `npx -y @ahood/cli`), so they also need `ahood login` (or `AHOOD_TOKEN`) once:
 
@@ -117,10 +126,27 @@ regenerate them with `npm run sync-plugin`.
 
 | Variable | Purpose |
 | --- | --- |
-| `AHOOD_TOKEN` | A personal API token (create one with `ahood token create <name>` after logging in once). When set, every command uses it instead of the stored browser-login credentials — the standard way to authenticate in CI or any non-interactive environment. |
+| `AHOOD_TOKEN` | A personal API token (create one with `ahood token create <name>` after logging in once). When set, every command uses it instead of the stored browser-login credentials — the standard way to authenticate in CI or any non-interactive environment. The same name is what every harness's ahood MCP config reads. |
+| `AHOOD_API_TOKEN` | **Deprecated** old name of `AHOOD_TOKEN`. The CLI still reads it, after `AHOOD_TOKEN`, for one release cycle and prints a one-line note to stderr when it is the only one set. Harness configs no longer read it. |
 | `AHOOD_API_URL` | Overrides the registry endpoint (default: `https://www.ahood.dev`). Must be `https://`, except for `localhost`/`127.0.0.1` or a `.test`/`.invalid`/`.example`/`.localhost` host, which may use plain `http://` for local development. |
 | `AHOOD_INSTALLED_FILE` | Overrides where the user-level install record lives (default: `~/.ahood/installed.json`). |
 | `XDG_CONFIG_HOME` | If set, browser-login credentials are stored under `$XDG_CONFIG_HOME/ahood/credentials.json` instead of the default `~/.config/ahood/credentials.json`. |
+
+### Token
+
+The CLI looks for a token in this order: `$AHOOD_TOKEN`, then the deprecated `$AHOOD_API_TOKEN`, then the credentials `ahood login` stored (`~/.config/ahood/credentials.json`, mode 0600). `ahood doctor` says which one is in use, by name only.
+
+The agent harnesses read it through their MCP config, and `ahood setup` asks, per harness, whether to store the token there for you:
+
+| Harness | Where setup stores it (with your yes) | Otherwise the config reads |
+| --- | --- | --- |
+| Claude Code | `env.AHOOD_TOKEN` in `~/.claude/settings.json` (the plugin's `.mcp.json` can only name a variable) | `$AHOOD_TOKEN` |
+| Codex | `http_headers` in ahood's marked block in `$CODEX_HOME/config.toml` | `$AHOOD_TOKEN` (`bearer_token_env_var`) |
+| opencode | the `Authorization` header of `mcp.servers.ahood` in `opencode.json` | `{env:AHOOD_TOKEN}` |
+
+`--store-token` answers yes up front and `--no-store-token` no; `--yes` alone never stores a secret. A file setup creates for the token is mode 0600. An existing file other users can read is tightened to 0600 only on a separate yes; without it the token is not stored there. The token is never printed, backups setup makes have it redacted, and `ahood setup --remove <harness>` takes it out together with the rest of ahood's entries.
+
+**Migrating from `AHOOD_API_TOKEN`:** rename the variable to `AHOOD_TOKEN` where you export it, or run `ahood setup` and let it store the token. The Claude Code plugin cannot fall back between the two names: Claude Code's `${VAR:-default}` does not nest, so `${AHOOD_TOKEN:-${AHOOD_API_TOKEN}}` would send a broken header.
 
 Paths `ahood` reads and writes in your project. The lockfile is meant to be committed, same as `package-lock.json`:
 
@@ -298,7 +324,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood pin <owner>/<slug>[@version] [--json]` | Hold an install at one version so `ahood sync` never moves it past that. |
 | `ahood unpin <owner>/<slug> [--json]` | Remove a pin so `ahood sync` offers the latest version again. |
 | `ahood review [approve <id> [--version <semver>] \| reject <id>] [--limit <n>] [--json]` | List the self-evolution proposals waiting for your review, and approve or reject them. |
-| `ahood setup [claude\|codex\|opencode] [--remove <harness>] [--yes] [--dry-run]` | Add ahood (MCP server and /ahood commands) to Claude Code, Codex or opencode, or remove it again. |
+| `ahood setup [claude\|codex\|opencode] [--remove <harness>] [--yes] [--dry-run] [--store-token\|--no-store-token]` | Add ahood (MCP server and /ahood commands) to Claude Code, Codex or opencode, or remove it again. |
 | `ahood doctor [--offline] [--json]` | Check each harness's ahood setup, the MCP server, your login and the CLI version. |
 | `ahood completion <bash\|zsh\|fish>` | Print a shell completion script for the command names. |
 | `ahood help useme` | Print the bundled ahood SKILL.md for an AI agent -- raw, offline, no login needed. |

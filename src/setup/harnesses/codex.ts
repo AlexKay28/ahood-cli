@@ -19,8 +19,18 @@ import {
   CODEX_TOML_MARKERS,
   codexMcpBlock,
   codexSkill,
+  codexStoredToken,
 } from "../templates/codex.js";
-import { emptyPlan, type ConfigState, type Detection, type Feature, type Harness, type SetupOptions, type SetupPlan } from "./types.js";
+import {
+  emptyPlan,
+  type ConfigState,
+  type Detection,
+  type Feature,
+  type Harness,
+  type SetupOptions,
+  type SetupPlan,
+  type TokenStore,
+} from "./types.js";
 
 const configPath = () => join(codexHome(), "config.toml");
 const skillPath = () => join(codexHome(), "skills", "ahood", "SKILL.md");
@@ -34,7 +44,7 @@ function detect(): Detection {
   return { binary, configDir, configDirExists, installed: binary !== null || configDirExists };
 }
 
-type ParsedToml = { mcp_servers?: Record<string, { url?: unknown }> };
+type ParsedToml = { mcp_servers?: Record<string, { url?: unknown; http_headers?: unknown }> };
 
 function parseOrRefuse(text: string, path: string, when: string): ParsedToml {
   try {
@@ -46,16 +56,32 @@ function parseOrRefuse(text: string, path: string, when: string): ParsedToml {
   }
 }
 
-function planConfig(remove: boolean): FileChange | null {
+/** The token setup stored in our block, or null (no block, or the block names $AHOOD_TOKEN). */
+function storedToken(): string | null {
+  const path = configPath();
+  const text = readIfExists(path);
+  if (text === null) return null;
+  try {
+    if (!hasBlock(text, CODEX_TOML_MARKERS, displayPath(path))) return null;
+    return codexStoredToken((parseToml(text) as ParsedToml).mcp_servers?.[CODEX_MCP_SERVER_NAME]);
+  } catch {
+    return null;
+  }
+}
+
+function planConfig(remove: boolean, token: string | null = null): FileChange | null {
   const path = configPath();
   const before = readIfExists(path);
   const parsed = parseOrRefuse(before ?? "", path, "");
   const ours = before !== null && hasBlock(before, CODEX_TOML_MARKERS, displayPath(path));
+  const previous = ours ? codexStoredToken(parsed.mcp_servers?.[CODEX_MCP_SERVER_NAME]) : null;
+  const secrets = [previous, token].filter((t): t is string => t !== null);
   if (remove) {
     if (!ours) return null;
     const after = removeBlock(before!, CODEX_TOML_MARKERS, displayPath(path));
     parseOrRefuse(after, path, "without the ahood block");
-    return { path, before, after: after.trim() === "" ? null : after, what: "ahood MCP server entry removed" };
+    const what = previous ? "ahood MCP server entry and stored token removed" : "ahood MCP server entry removed";
+    return { path, before, after: after.trim() === "" ? null : after, what, secrets };
   }
   if (!ours && parsed.mcp_servers?.[CODEX_MCP_SERVER_NAME] !== undefined) {
     throw new SetupRefusedError(
@@ -63,12 +89,13 @@ function planConfig(remove: boolean): FileChange | null {
         "leaving your entry alone. Delete it and re-run to let setup manage it; nothing was changed.",
     );
   }
-  const after = upsertBlock(before ?? "", codexMcpBlock(), CODEX_TOML_MARKERS, displayPath(path));
+  const after = upsertBlock(before ?? "", codexMcpBlock(token), CODEX_TOML_MARKERS, displayPath(path));
   const check = parseOrRefuse(after, path, "with the ahood block added");
   if (check.mcp_servers?.[CODEX_MCP_SERVER_NAME]?.url !== AHOOD_MCP_URL) {
     throw new SetupRefusedError(`Adding the ahood block to ${displayPath(path)} would not yield a working entry; nothing was changed.`);
   }
-  return { path, before, after, what: `MCP server "${CODEX_MCP_SERVER_NAME}" (${AHOOD_MCP_URL})` };
+  const what = `MCP server "${CODEX_MCP_SERVER_NAME}" (${AHOOD_MCP_URL})${token ? ", with your ahood token" : ""}`;
+  return { path, before, after, what, secrets };
 }
 
 function planAgents(remove: boolean): FileChange | null {
@@ -85,7 +112,7 @@ function planAgents(remove: boolean): FileChange | null {
 
 function planSetup(opts: SetupOptions): SetupPlan {
   const plan = emptyPlan();
-  plan.files.push(planConfig(false)!);
+  plan.files.push(planConfig(false, opts.token)!);
   plan.files.push(planOwnedFile(skillPath(), codexSkill(), "`ahood` skill (call it as $ahood, or pick it from /skills)"));
   plan.files.push(planOwnedFile(snippetPath(), agentsSnippetFile(), "AGENTS.md snippet to paste where you want it"));
   if (opts.yes) {
@@ -125,7 +152,10 @@ function inspect(): ConfigState {
         features: [],
       };
     }
-    if (block !== null) mcp = block === `${CODEX_TOML_MARKERS.begin}\n${codexMcpBlock()}\n${CODEX_TOML_MARKERS.end}` ? "ok" : "stale";
+    if (block !== null) {
+      const token = storedToken();
+      mcp = block === `${CODEX_TOML_MARKERS.begin}\n${codexMcpBlock(token)}\n${CODEX_TOML_MARKERS.end}` ? "ok" : "stale";
+    }
   }
   const skill = readIfExists(skillPath());
   const skillState = skill === null ? "absent" : skill === codexSkill() ? "ok" : "stale";
@@ -134,10 +164,18 @@ function inspect(): ConfigState {
     { name: "MCP config", state: mcp, detail: displayPath(path) },
     { name: "skill", state: skillState, detail: displayPath(skillPath()) },
   ];
+  const tokenStored = storedToken() !== null;
   if (mcp === "absent" && skillState === "absent") return { state: "absent", details, features };
-  if (mcp === "absent" || skillState === "absent") return { state: "partial", details, features };
-  if (mcp === "stale" || skillState === "stale") return { state: "stale", details, features };
-  return { state: "ok", details, features };
+  if (mcp === "absent" || skillState === "absent") return { state: "partial", details, features, tokenStored };
+  if (mcp === "stale" || skillState === "stale") return { state: "stale", details, features, tokenStored };
+  return { state: "ok", details, features, tokenStored };
 }
 
-export const codexHarness: Harness = { id: "codex", label: "Codex", detect, planSetup, planRemove, inspect };
+const tokenStore: TokenStore = {
+  file: configPath,
+  stored: storedToken,
+  userSet: () => false, // a [mcp_servers.ahood] of the user's own is refused outright (planConfig)
+  what: "the ahood MCP entry in config.toml",
+};
+
+export const codexHarness: Harness = { id: "codex", label: "Codex", detect, planSetup, planRemove, inspect, tokenStore };

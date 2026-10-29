@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "ahood",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "description": "ahood in Claude Code: the registry's MCP tools plus /ahood commands -- dashboard, sync updates with consent, review evolution proposals, capture private snaps.",
       "author": {
         "name": "ahood",

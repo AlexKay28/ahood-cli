@@ -6,10 +6,10 @@
 export const AHOOD_MCP_URL = "https://www.ahood.dev/api/mcp";
 
 // The hosted MCP server answers 401 without a bearer token. Every harness
-// config names this env var instead of holding a token (config files never
-// contain secrets) -- the same variable the Claude Code plugin's .mcp.json
-// uses, so one `export AHOOD_API_TOKEN=...` serves every harness.
-export const AHOOD_MCP_TOKEN_ENV = "AHOOD_API_TOKEN";
+// config names this env var -- the same one the CLI and the Claude Code
+// plugin's .mcp.json read (ahood#990, decision A) -- unless the user lets
+// `ahood setup` store the token itself in that harness's config (decision B).
+export { TOKEN_ENV as AHOOD_MCP_TOKEN_ENV, LEGACY_TOKEN_ENV as AHOOD_MCP_LEGACY_TOKEN_ENV } from "../../credentials.js";
 
 // The opt-in Claude Code snap Stop hook's enable switch (plugins/ahood/hooks/snap-prompt.mjs,
 // `ENABLE_ENV`). That script must stay import-free (ahood#981: no network, no `node:child_process`,

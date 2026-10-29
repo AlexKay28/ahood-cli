@@ -10,8 +10,8 @@ import { planOwnedFile, planOwnedFileRemoval, readIfExists, type FileChange } fr
 import { displayPath, opencodeConfigDir } from "../paths.js";
 import { runner } from "../runner.js";
 import { AHOOD_MCP_URL } from "../templates/ahood-commands.js";
-import { OPENCODE_CONFIG_FILES, OPENCODE_MCP_PATH, opencodeCommandFiles, opencodeMcpEntry } from "../templates/opencode.js";
-import { emptyPlan, type ConfigState, type Detection, type Feature, type Harness, type SetupPlan } from "./types.js";
+import { OPENCODE_CONFIG_FILES, OPENCODE_MCP_PATH, opencodeCommandFiles, opencodeMcpEntry, opencodeStoredToken } from "../templates/opencode.js";
+import { emptyPlan, type ConfigState, type Detection, type Feature, type Harness, type SetupOptions, type SetupPlan, type TokenStore } from "./types.js";
 
 const commandPath = (file: string) => join(opencodeConfigDir(), "commands", file);
 
@@ -71,8 +71,21 @@ function isOurs(entry: unknown): boolean {
   return entry !== null && typeof entry === "object" && (entry as { url?: unknown }).url === AHOOD_MCP_URL;
 }
 
-function sameEntry(entry: unknown): boolean {
-  return JSON.stringify(entry) === JSON.stringify(opencodeMcpEntry());
+function sameEntry(entry: unknown, token: string | null): boolean {
+  return JSON.stringify(entry) === JSON.stringify(opencodeMcpEntry(token));
+}
+
+/** The token setup stored in our entry, or null. */
+function storedToken(): string | null {
+  const path = configPath();
+  const text = readIfExists(path);
+  if (text === null) return null;
+  try {
+    const entry = entryAt(parseOrRefuse(text, path));
+    return isOurs(entry) ? opencodeStoredToken(entry) : null;
+  } catch {
+    return null;
+  }
 }
 
 function edit(text: string, value: unknown): string {
@@ -80,14 +93,17 @@ function edit(text: string, value: unknown): string {
   return applyEdits(text, edits);
 }
 
-function planConfig(remove: boolean): FileChange | null {
+function planConfig(remove: boolean, token: string | null = null): FileChange | null {
   const path = configPath();
   const before = readIfExists(path);
   const entry = before === null ? undefined : entryAt(parseOrRefuse(before, path));
+  const previous = isOurs(entry) ? opencodeStoredToken(entry) : null;
+  const secrets = [previous, token].filter((t): t is string => t !== null);
   if (remove) {
     if (entry === undefined) return null;
     if (!isOurs(entry)) return null;
-    return { path, before, after: edit(before!, undefined), what: "ahood MCP server entry removed" };
+    const what = previous ? "ahood MCP server entry and stored token removed" : "ahood MCP server entry removed";
+    return { path, before, after: edit(before!, undefined), what, secrets };
   }
   if (entry !== undefined && !isOurs(entry)) {
     throw new SetupRefusedError(
@@ -95,20 +111,20 @@ function planConfig(remove: boolean): FileChange | null {
         "entry alone. Delete it and re-run to let setup manage it; nothing was changed.",
     );
   }
-  if (entry !== undefined && sameEntry(entry)) return { path, before, after: before, what: "MCP server \"ahood\"" };
+  if (entry !== undefined && sameEntry(entry, token)) return { path, before, after: before, what: "MCP server \"ahood\"", secrets };
   const base = before ?? "{}\n";
-  let after = edit(base, opencodeMcpEntry());
+  let after = edit(base, opencodeMcpEntry(token));
   if (!after.endsWith("\n")) after += "\n";
-  if (!sameEntry(entryAt(parseOrRefuse(after, path)))) {
+  if (!sameEntry(entryAt(parseOrRefuse(after, path)), token)) {
     throw new SetupRefusedError(`Adding the ahood entry to ${displayPath(path)} would not yield a working entry; nothing was changed.`);
   }
-  return { path, before, after, what: `MCP server "ahood" (${AHOOD_MCP_URL})` };
+  return { path, before, after, what: `MCP server "ahood" (${AHOOD_MCP_URL})${token ? ", with your ahood token" : ""}`, secrets };
 }
 
-function planSetup(): SetupPlan {
+function planSetup(opts: SetupOptions): SetupPlan {
   refuseOldOpencode();
   const plan = emptyPlan();
-  plan.files.push(planConfig(false)!);
+  plan.files.push(planConfig(false, opts.token)!);
   for (const { file, content } of opencodeCommandFiles()) {
     plan.files.push(planOwnedFile(commandPath(file), content, `/${file.replace(/\.md$/, "")} command`));
   }
@@ -137,7 +153,7 @@ function inspect(): ConfigState {
     } catch (error) {
       return { state: "broken", details: [error instanceof Error ? error.message : String(error)], features: [] };
     }
-    if (isOurs(entry)) mcp = sameEntry(entry) ? "ok" : "stale";
+    if (isOurs(entry)) mcp = sameEntry(entry, opencodeStoredToken(entry)) ? "ok" : "stale";
   }
   const files = opencodeCommandFiles();
   const present = files.filter(({ file }) => readIfExists(commandPath(file)) !== null);
@@ -149,10 +165,18 @@ function inspect(): ConfigState {
     { name: "MCP config", state: mcp, detail: displayPath(path) },
     { name: "commands", state: commands, detail: displayPath(commandsDir) },
   ];
+  const tokenStored = storedToken() !== null;
   if (mcp === "absent" && commands === "absent") return { state: "absent", details, features };
-  if (mcp === "absent" || commands === "absent" || commands === "partial") return { state: "partial", details, features };
-  if (mcp === "stale" || commands === "stale") return { state: "stale", details, features };
-  return { state: "ok", details, features };
+  if (mcp === "absent" || commands === "absent" || commands === "partial") return { state: "partial", details, features, tokenStored };
+  if (mcp === "stale" || commands === "stale") return { state: "stale", details, features, tokenStored };
+  return { state: "ok", details, features, tokenStored };
 }
 
-export const opencodeHarness: Harness = { id: "opencode", label: "opencode", detect, planSetup, planRemove, inspect };
+const tokenStore: TokenStore = {
+  file: configPath,
+  stored: storedToken,
+  userSet: () => false, // an mcp.servers.ahood of the user's own is refused outright (planConfig)
+  what: "the ahood MCP entry in opencode.json",
+};
+
+export const opencodeHarness: Harness = { id: "opencode", label: "opencode", detect, planSetup, planRemove, inspect, tokenStore };

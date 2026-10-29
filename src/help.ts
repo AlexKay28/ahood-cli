@@ -113,7 +113,7 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     examples: ["ahood review", "ahood review --json", "ahood review approve <id>", "ahood review reject <id>"],
   },
   {
-    usage: "ahood setup [claude|codex|opencode] [--remove <harness>] [--yes] [--dry-run]",
+    usage: "ahood setup [claude|codex|opencode] [--remove <harness>] [--yes] [--dry-run] [--store-token|--no-store-token]",
     summary: "Add ahood (MCP server and /ahood commands) to Claude Code, Codex or opencode, or remove it again.",
     desc:
       "With no harness, detects which of Claude Code, Codex and opencode are installed (CLI on PATH or config dir) " +
@@ -123,8 +123,12 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
       "block in $CODEX_HOME/config.toml (default ~/.codex), the `ahood` skill in $CODEX_HOME/skills/ahood/, and an " +
       "AGENTS.md snippet file; $CODEX_HOME/AGENTS.md itself is edited only with --yes. opencode: adds " +
       "mcp.servers.ahood to the global opencode.json(c) and /ahood, /ahood-sync, /ahood-review, /ahood-snap command " +
-      "files. Every MCP entry reads its token from $AHOOD_API_TOKEN (the variable the Claude Code plugin uses " +
-      "too); no token is ever written to a file. Only ahood's own entries are ever added or changed; a file is backed up to " +
+      "files. Not logged in? It offers `ahood login` first. Every MCP entry reads its token from $AHOOD_TOKEN " +
+      "($AHOOD_API_TOKEN is the deprecated old name) unless you let setup store the token in that harness's own " +
+      "config -- the Codex MCP block, the opencode MCP entry, or env.AHOOD_TOKEN in ~/.claude/settings.json -- which " +
+      "it asks about per harness (--store-token says yes up front; --yes alone does not store it). A file setup " +
+      "creates for the token is 0600; an existing one other users can read is tightened only on a separate yes. " +
+      "The token is never printed, and backups have it redacted. Only ahood's own entries are ever added or changed; a file is backed up to " +
       "<file>.ahood-backup-<timestamp> before it is edited, a re-run with nothing to change writes nothing, and a " +
       "malformed config or a same-named entry of yours is refused untouched. --remove takes out only ahood's " +
       "entries and keeps the backups.",
@@ -132,6 +136,8 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
       "--remove <harness>  Remove ahood's entries from that harness instead.",
       "--yes               Apply without asking (and, for Codex, also append the snippet to AGENTS.md).",
       "--dry-run           Print what would change; write and run nothing.",
+      "--store-token       Store the ahood token in each harness's config (no question asked).",
+      "--no-store-token    Never store it; the configs name $AHOOD_TOKEN (a token setup stored is taken out).",
     ],
     examples: ["ahood setup", "ahood setup codex --dry-run", "ahood setup opencode --yes", "ahood setup --remove codex"],
   },

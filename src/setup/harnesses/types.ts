@@ -42,9 +42,28 @@ export type SetupPlan = {
 export type Feature = { name: string; state: "absent" | "ok" | "stale" | "partial" | "broken"; detail: string; optional?: boolean };
 
 /** Whether OUR config is in place for doctor: `absent` = never set up (not a failure). */
-export type ConfigState = { state: "absent" | "ok" | "stale" | "partial" | "broken"; details: string[]; features: Feature[] };
+export type ConfigState = {
+  state: "absent" | "ok" | "stale" | "partial" | "broken";
+  details: string[];
+  features: Feature[];
+  /** True when `ahood setup` stored the ahood token in this harness's config (ahood#990). */
+  tokenStored?: boolean;
+};
 
-export type SetupOptions = { yes: boolean };
+/**
+ * `token`: the ahood token to store in the harness's own config -- set only
+ * after the user consented (ahood#990, decision B). null = the config names
+ * $AHOOD_TOKEN instead, and any token setup stored earlier is taken out.
+ */
+export type SetupOptions = { yes: boolean; token: string | null };
+
+/**
+ * A harness whose config can hold the token itself. `file` is the one file
+ * the token goes into (so setup can check its permissions first); `stored`
+ * is the token setup already put there, if any; `userSet` whether the user
+ * set one there themselves (then setup leaves it alone).
+ */
+export type TokenStore = { file(): string; stored(): string | null; userSet(): boolean; what: string };
 
 export interface Harness {
   id: HarnessId;
@@ -53,6 +72,7 @@ export interface Harness {
   planSetup(opts: SetupOptions): SetupPlan;
   planRemove(): SetupPlan;
   inspect(): ConfigState;
+  tokenStore?: TokenStore;
 }
 
 export function emptyPlan(): SetupPlan {

@@ -19,9 +19,14 @@ or run `ahood setup claude` in a terminal. Claude Code's own update flow
 
 ## Setup
 
+The easy way: run `npx @ahood/cli setup claude` in a terminal. It logs you in, installs this
+plugin and, if you say yes, stores your token as `env.AHOOD_TOKEN` in `~/.claude/settings.json`.
+By hand:
+
 1. Mint a personal access token at [ahood.dev/settings/tokens](https://www.ahood.dev/settings/tokens).
-2. Set it as `AHOOD_API_TOKEN` in your environment (e.g. in your shell profile, or wherever
-   you keep secrets for Claude Code).
+2. Set it as `AHOOD_TOKEN` in your environment (e.g. in your shell profile, or `env` in
+   `~/.claude/settings.json`). **Renamed in 2.0.1:** earlier versions read `AHOOD_API_TOKEN`;
+   rename it -- Claude Code has no fallback between two variable names.
 3. Install this plugin. Claude Code will connect to `https://www.ahood.dev/api/mcp` using
    that token.
 4. For the `/ahood` commands, install the CLI (`npm i -g @ahood/cli`) and run `ahood login`
@@ -32,7 +37,7 @@ A token is required for every tool, including read-only ones (`search_skills`, `
 etc.) -- a request to `https://www.ahood.dev/api/mcp` with no token is rejected outright. A
 missing or invalid token will also reject the authoring tools (`create_skill`, `update_skill`,
 and friends), which additionally require the `publish` scope. The plugin files hold no
-secrets: `.mcp.json` names the `AHOOD_API_TOKEN` variable, never a token.
+secrets: `.mcp.json` names the `AHOOD_TOKEN` variable, never a token.
 
 ## Commands
 

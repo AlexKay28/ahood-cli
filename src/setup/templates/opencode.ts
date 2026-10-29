@@ -28,9 +28,21 @@ export const OPENCODE_CONFIG_FILES = ["opencode.json", "opencode.jsonc"] as cons
 export const OPENCODE_MCP_PATH = ["mcp", "servers", "ahood"] as const;
 
 // `headers` is what `opencode mcp add --header` writes; `{env:NAME}` is
-// opencode's config substitution, so the file names the token, never holds it.
-export function opencodeMcpEntry(): { type: "remote"; url: string; headers: Record<string, string> } {
-  return { type: "remote", url: AHOOD_MCP_URL, headers: { Authorization: `Bearer {env:${AHOOD_MCP_TOKEN_ENV}}` } };
+// opencode's config substitution, so by default the file names the token. With
+// the user's consent (ahood#990) the header holds the token itself -- exactly
+// what `opencode mcp add ahood --url <u> --header "Authorization=Bearer <t>"
+// --global` writes (verified against opencode v2.1.2). The entry is ours by its
+// url, so `ahood setup --remove opencode` takes the token out with it.
+export function opencodeMcpEntry(token: string | null = null): { type: "remote"; url: string; headers: Record<string, string> } {
+  return { type: "remote", url: AHOOD_MCP_URL, headers: { Authorization: `Bearer ${token ?? `{env:${AHOOD_MCP_TOKEN_ENV}}`}` } };
+}
+
+/** The token an entry's Authorization header holds literally (not an `{env:...}` reference), if any. */
+export function opencodeStoredToken(entry: unknown): string | null {
+  const auth = (entry as { headers?: { Authorization?: unknown } } | null | undefined)?.headers?.Authorization;
+  if (typeof auth !== "string" || !auth.startsWith("Bearer ")) return null;
+  const value = auth.slice("Bearer ".length);
+  return value === "" || value.startsWith("{env:") ? null : value;
 }
 
 export function opencodeCommandFiles(): Array<{ file: string; content: string }> {

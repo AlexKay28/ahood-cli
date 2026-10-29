@@ -67,7 +67,7 @@ describe("plugin manifest and marketplace", () => {
     expect(mcp.ahood).toEqual({
       type: "http",
       url: "https://www.ahood.dev/api/mcp",
-      headers: { Authorization: "Bearer ${AHOOD_API_TOKEN}" },
+      headers: { Authorization: "Bearer ${AHOOD_TOKEN}" },
     });
   });
 
