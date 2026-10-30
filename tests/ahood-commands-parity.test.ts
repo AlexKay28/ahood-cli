@@ -7,10 +7,11 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AHOOD_COMMANDS, AHOOD_SNAP_HOOK_ENV, type AhoodCommand } from "../src/setup/templates/ahood-commands.js";
+import { AHOOD_COMMANDS, AHOOD_SNAP_HOOK_ENV, AHOOD_SNAP_PROMPT, type AhoodCommand } from "../src/setup/templates/ahood-commands.js";
 import { codexPluginSkill, codexSkill } from "../src/setup/templates/codex.js";
 import { opencodeCommandFiles } from "../src/setup/templates/opencode.js";
 import { claudePluginCommandFiles, CLAUDE_PLUGIN_DIR } from "../src/setup/templates/claude-plugin.js";
+import { COMMANDS as OPENCODE_PLUGIN_COMMANDS } from "../packages/opencode-plugin/src/generated.js";
 
 const ROOT = join(import.meta.dirname, "..");
 
@@ -31,6 +32,7 @@ describe("AHOOD_COMMANDS is the single source for every harness's /ahood wording
   const codexPlugin = codexPluginSkill();
   const opencodeFiles = new Map(opencodeCommandFiles().map((f) => [f.file, f.content]));
   const claudeFiles = new Map(claudePluginCommandFiles().map((f) => [f.file, f.content]));
+  const opencodePlugin = new Map(OPENCODE_PLUGIN_COMMANDS.map((c) => [c.name, c.template]));
 
   it("renders one opencode command file and one Claude plugin command file per shared command", () => {
     expect([...opencodeFiles.keys()].sort()).toEqual(AHOOD_COMMANDS.map((c) => `${c.name}.md`).sort());
@@ -48,6 +50,10 @@ describe("AHOOD_COMMANDS is the single source for every harness's /ahood wording
         expect(opencodeFiles.get(`${c.name}.md`)).toContain(c.body);
       });
 
+      it("the opencode plugin's command prompt contains this command's body verbatim", () => {
+        expect(opencodePlugin.get(c.name)).toContain(c.body);
+      });
+
       it("the Claude plugin command (and, for the verbs, the /ahood dashboard's section) contains it verbatim", () => {
         expect(claudeFiles.get(`commands/${c.name}.md`)).toContain(c.body);
         if (c.name !== "ahood") expect(claudeFiles.get("commands/ahood.md")).toContain(c.body);
@@ -58,6 +64,7 @@ describe("AHOOD_COMMANDS is the single source for every harness's /ahood wording
           expect(codex).toContain(phrase);
           expect(codexPlugin).toContain(phrase);
           expect(opencodeFiles.get(`${c.name}.md`)).toContain(phrase);
+          expect(opencodePlugin.get(c.name)).toContain(phrase);
           expect(claudeFiles.get(`commands/${c.name}.md`)).toContain(phrase);
         });
       }
@@ -81,7 +88,7 @@ describe("AHOOD_COMMANDS is the single source for every harness's /ahood wording
   });
 });
 
-describe("the opt-in Claude Code snap hook's enable switch has exactly one literal value", () => {
+describe("the opt-in snap hook's switch and prompt have exactly one literal value each", () => {
   // plugins/ahood/hooks/snap-prompt.mjs must stay import-free (no network, no
   // child_process -- see tests/claude-plugin-hook.test.ts), so it cannot
   // import AHOOD_SNAP_HOOK_ENV from this module and keeps its own copy of the
@@ -90,6 +97,11 @@ describe("the opt-in Claude Code snap hook's enable switch has exactly one liter
     const hookModule = (await import(join(ROOT, CLAUDE_PLUGIN_DIR, "hooks", "snap-prompt.mjs"))) as { ENABLE_ENV: string };
     expect(AHOOD_SNAP_HOOK_ENV).toBe(hookModule.ENABLE_ENV);
     expect(AHOOD_SNAP_HOOK_ENV).toBe("AHOOD_SNAP_HOOK");
+  });
+
+  it("AHOOD_SNAP_PROMPT matches the hook script's own SNAP_PROMPT (the opencode plugin renders AHOOD_SNAP_PROMPT)", async () => {
+    const hookModule = (await import(join(ROOT, CLAUDE_PLUGIN_DIR, "hooks", "snap-prompt.mjs"))) as { SNAP_PROMPT: string };
+    expect(hookModule.SNAP_PROMPT).toBe(AHOOD_SNAP_PROMPT);
   });
 });
 

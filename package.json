@@ -26,14 +26,15 @@
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/index.js && mkdir -p dist/useme && cp src/useme/SKILL.md dist/useme/SKILL.md",
+    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/index.js && mkdir -p dist/useme && cp src/useme/SKILL.md dist/useme/SKILL.md && npm run build:opencode-plugin",
+    "build:opencode-plugin": "rm -rf packages/opencode-plugin/dist && tsc -p packages/opencode-plugin/tsconfig.json",
     "prepublishOnly": "npm run build",
     "pretest": "npm run build",
     "test": "vitest run",
     "sync-readme": "node scripts/sync-readme.mjs",
     "sync-plugin": "node scripts/sync-plugin.mjs",
     "sync-skill": "node scripts/sync-skill.mjs",
-    "version": "node scripts/sync-plugin.mjs && git add plugins/codex/.codex-plugin/plugin.json"
+    "version": "node scripts/sync-plugin.mjs && git add plugins/codex/.codex-plugin/plugin.json packages/opencode-plugin/package.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
