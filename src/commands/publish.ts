@@ -7,6 +7,7 @@ import { flagValue } from "../flags.js";
 import { parseOwnerSkill, SEMVER_RE, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { assertKind, CLI_KINDS, isCliKind, KINDS, strictKind, type CliKind, type KindScope } from "../kinds.js";
+import { parsePromptDoc } from "../prompt-doc.js";
 
 // `ahood agent publish` / `ahood mcp publish` (ahood-cli#172): an existing
 // entry of another kind must be refused before anything is packed, created,
@@ -56,7 +57,7 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
 }
 
 const USAGE =
-  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]\n" +
+  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project|loop|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]\n" +
   "   or: ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
@@ -421,7 +422,8 @@ function orList(items: string[]): string {
 // rootDoc), so a new kind needs no branch here. An explicit kind must have
 // its root doc. With none, exactly one root doc must be present; SKILL.md
 // alone returns undefined, the pre-kind behaviour (the server defaults to
-// skill). Inference: agent/mcp (ahood-cli#172), doc (#182), project (#185).
+// skill). Inference: agent/mcp (ahood-cli#172), doc (#182), project (#185),
+// loop (ahood#858), prompt (#206).
 function resolvePublishKind(path: string, kind: CliKind | undefined, via: string): CliKind | undefined {
   if (kind !== undefined) {
     const rootDocPath = join(path, KINDS[kind].rootDoc);
@@ -441,6 +443,16 @@ function resolvePublishKind(path: string, kind: CliKind | undefined, via: string
     throw new Error(`No ${orList(rootDocs)} found at ${path} -- publish must point at a ${orList(CLI_KINDS)} folder's root.`);
   }
   return present[0] === "skill" ? undefined : present[0];
+}
+
+// A PROMPT.md that breaks the contract (src/prompt-doc.ts: required
+// name/intent, every {{key}} declared and every declared input used, the
+// 32 KB body cap) is refused here, before any request, with the server's own
+// wording -- which names the offending key -- instead of after a full upload
+// (ahood-cli#206). The server enforces the same rules again.
+function assertValidPromptMd(path: string): void {
+  const result = parsePromptDoc(readFileSync(join(path, KINDS.prompt.rootDoc), "utf8"));
+  if (!result.ok) throw new UsageError(`${result.reason}. Fix ${join(path, KINDS.prompt.rootDoc)} and publish again.`);
 }
 
 // --json mode (ahood-cli#57): a CI/script caller needs one machine-readable
@@ -475,6 +487,7 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
     if (resolvedKind === "skill" || (resolvedKind === undefined && hasSkillMd)) {
       warnAboutSkillDescription(skillMdPath);
     }
+    if (resolvedKind === "prompt") assertValidPromptMd(path);
 
     if (scopedKind !== undefined) await assertPublishTargetKind(scope!, owner, skill);
 

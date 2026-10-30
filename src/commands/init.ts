@@ -168,6 +168,25 @@ file to .claude/loops/<owner>@<loop>.md.
 `;
 }
 
+// PROMPT.md, for `ahood prompt init` (ahood-cli#206, ahood#1007). Valid
+// under src/prompt-doc.ts's contract -- the server's publish gate -- as
+// written: name and intent set, one declared input with no default (so it
+// is required), and a body that uses it. A prompt is never installed, so
+// the body says how it is consumed instead.
+function buildPromptMd(name: string): string {
+  return `---
+name: ${name}
+intent: TODO -- one line saying what this prompt makes an agent do
+inputs:
+  - key: topic
+    label: TODO -- what to fill in here
+---
+TODO -- the prompt text, pasted into an agent once. Use {{topic}} wherever the input goes;
+every placeholder must be declared under inputs above, and every declared input used here.
+\`ahood prompt get <owner>/${name} --topic "..."\` fills it in and prints it.
+`;
+}
+
 const TEMPLATES: Record<CliKind, (name: string, project?: string) => string> = {
   skill: buildSkillMd,
   agent: buildAgentMd,
@@ -175,6 +194,7 @@ const TEMPLATES: Record<CliKind, (name: string, project?: string) => string> = {
   doc: buildDocMd,
   project: buildProjectMd,
   loop: buildLoopMd,
+  prompt: buildPromptMd,
 };
 
 const NEXT_STEPS: Record<CliKind, string[]> = {
@@ -188,6 +208,7 @@ const NEXT_STEPS: Record<CliKind, string[]> = {
   doc: ["Fill in the description, then write the doc below the frontmatter."],
   project: ["Fill in the description, then write the guide below the frontmatter."],
   loop: ["Fill in the description, then write the loop's pseudocode and rules below the frontmatter."],
+  prompt: ["Fill in the intent and the input's label, then write the prompt text below the frontmatter, using {{topic}} (rename it, or add inputs, as you need)."],
 };
 
 // `project init`'s flags for the `project` field (ahood-cli#185), parsed and

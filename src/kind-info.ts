@@ -4,8 +4,9 @@
 //
 // Kind-aware registry commands (ahood-cli#172).
 //
-// The registry stores six artifact kinds (the backend's
-// lib/artifact-kinds.ts ALLOWED_KINDS: skill, agent, mcp, doc, project, loop), and a
+// The registry stores seven artifact kinds (the backend's
+// lib/artifact-kinds.ts ALLOWED_KINDS: skill, agent, mcp, doc, project, loop,
+// prompt), and a
 // kind is fixed when an entry is created -- PATCH's allow-list has no `kind`
 // -- so the kind an entry reports now is the kind it has always had. Each
 // kind has a noun group (`ahood skill|agent|mcp|doc <verb>`), all run by one
@@ -17,7 +18,11 @@
 // recurring kind of agentic session, installed many-per-project like `doc`
 // (.claude/loops/<owner>@<loop>.md), with DOC.md's exact frontmatter shape --
 // no extra field, unlike `project`'s optional `project` remote, since a loop
-// is explicitly not scoped to one repository.
+// is explicitly not scoped to one repository. `prompt` joined as the seventh
+// (ahood-cli#206, ahood#1007): a one-shot recipe -- an intent, declared
+// inputs, and a text with {{key}} placeholders (src/prompt-doc.ts) -- that is
+// filled in and pasted once, so it is never installed: its `installsTo` is
+// null, and `ahood prompt get` replaces add/update/outdated/remove.
 //
 // Per-kind facts live here, not in per-command branches: `placeholder` and
 // `example` feed help and init, `about` the legacy `skill add` refusal.
@@ -79,6 +84,16 @@ export const KINDS = {
     example: { slug: "alice/code-review-pass", name: "Code Review Pass" },
     about: "a reusable procedure for a recurring kind of agentic session, portable across repositories",
   },
+  prompt: {
+    label: "prompt",
+    article: "a",
+    plural: "prompts",
+    rootDoc: "PROMPT.md",
+    installsTo: null,
+    placeholder: "<prompt>",
+    example: { slug: "alice/brutalist-landing-page", name: "Brutalist Landing Page" },
+    about: "a one-shot prompt with declared inputs, filled in and pasted once",
+  },
 } as const satisfies Record<
   string,
   {
@@ -86,7 +101,8 @@ export const KINDS = {
     article: "a" | "an";
     plural: string;
     rootDoc: string;
-    installsTo: string;
+    // null: never installed (prompt) -- see INSTALL_VERBS below.
+    installsTo: string | null;
     placeholder: string;
     example: { slug: string; name: string };
     about?: string;
@@ -110,4 +126,14 @@ export type PinnedFileKind = (typeof PINNED_FILE_KINDS)[number];
 
 export function isPinnedFileKind(value: unknown): value is PinnedFileKind {
   return typeof value === "string" && (PINNED_FILE_KINDS as readonly string[]).includes(value);
+}
+
+// The verbs that install, pin or uninstall something in this project. A kind
+// whose `installsTo` is null (prompt, ahood-cli#206) refuses every one of
+// them in the dispatcher, before any request, with a pointer to the verb
+// that replaces them (`ahood prompt get`).
+export const INSTALL_VERBS = ["add", "update", "outdated", "remove"] as const;
+
+export function isInstalledKind(kind: CliKind): boolean {
+  return KINDS[kind].installsTo !== null;
 }
