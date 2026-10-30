@@ -119,15 +119,17 @@ The same repo is a Codex plugin marketplace too: `.agents/plugins/marketplace.js
 `ahood@ahood` from [`plugins/codex/`](plugins/codex), which bundles the hosted MCP server (it
 reads `$AHOOD_TOKEN` through `bearer_token_env_var`) and two skills, `ahood:ahood` (the `/ahood`
 command set above) and `ahood:using-ahood`. `ahood setup codex` installs it: it writes
-`[marketplaces.ahood]` and `[plugins."ahood@ahood"] enabled = true` in its marked block in
+`[marketplaces.ahood]` (pinned with `ref = "v<CLI version>"`, so Codex gets the plugin released
+with your CLI, not `main`) and `[plugins."ahood@ahood"] enabled = true` in its marked block in
 `$CODEX_HOME/config.toml`, then runs `codex plugin marketplace upgrade ahood` and
-`codex plugin add ahood@ahood`. It also takes out what earlier versions of setup wrote: the
+`codex plugin add ahood@ahood`. After a CLI update, re-running it moves the pin to the new tag
+(and `marketplace upgrade` refreshes the installed plugin); `ahood doctor` shows the ref. It also takes out what earlier versions of setup wrote: the
 `[mcp_servers.ahood]` block, `$CODEX_HOME/skills/ahood/SKILL.md` and the AGENTS.md snippet, with
 the usual backups. `ahood setup --remove codex` deletes the block and runs `codex plugin remove` /
 `codex plugin marketplace remove`. By hand:
 
 ```
-codex plugin marketplace add AlexKay28/ahood-cli
+codex plugin marketplace add AlexKay28/ahood-cli --ref v<CLI version>
 codex plugin add ahood@ahood
 ```
 

@@ -23,6 +23,7 @@
 // setup now removes both, and harnesses/codex.ts keeps their paths for that.
 import { OWNED_MARKER } from "../file-changes.js";
 import type { BlockMarkers } from "../marked-block.js";
+import { CLI_VERSION } from "../../version.js";
 import { AHOOD_COMMANDS, AHOOD_MCP_TOKEN_ENV, AHOOD_MCP_URL } from "./ahood-commands.js";
 
 export const CODEX_TOML_MARKERS: BlockMarkers = {
@@ -40,6 +41,17 @@ export const CODEX_PLUGIN_NAME = "ahood";
 export const CODEX_PLUGIN_ID = `${CODEX_PLUGIN_NAME}@${CODEX_MARKETPLACE_NAME}`;
 /** The git repo Codex clones the marketplace from: this one (what `codex plugin marketplace add AlexKay28/ahood-cli` writes). */
 export const CODEX_MARKETPLACE_SOURCE = "https://github.com/AlexKay28/ahood-cli.git";
+/**
+ * The git ref Codex checks the marketplace out at: this CLI's release tag, so
+ * a Codex user gets the plugin built with their CLI, not whatever `main` holds
+ * (ahood#1009). `ref = "<ref>"` under `[marketplaces.<name>]` is what
+ * `codex plugin marketplace add <source> --ref <ref>` writes (codex-cli
+ * 0.165.0), and `codex plugin marketplace upgrade` checks that ref out --
+ * refreshing an installed plugin too. A ref that does not exist on the remote
+ * makes the upgrade fail ("git ls-remote returned empty output"), so an
+ * unreleased CLI build pins a tag that is not there yet.
+ */
+export const CODEX_MARKETPLACE_REF = `v${CLI_VERSION}`;
 
 export const CODEX_INSTALL_ARGS = {
   marketplaceUpgrade: ["plugin", "marketplace", "upgrade", CODEX_MARKETPLACE_NAME],
@@ -69,14 +81,20 @@ export function codexMcpBlock(token: string | null = null): string {
 }
 
 /**
- * The managed block in config.toml: the marketplace and the enabled plugin.
+ * The managed block in config.toml: the marketplace (pinned to this CLI's
+ * release tag) and the enabled plugin.
  * With a stored token it also carries a full `[mcp_servers.ahood]` holding
  * it, which takes the place of the plugin's own entry (that one can only
  * name $AHOOD_TOKEN: the plugin is shared from a public repo).
  */
 export function codexPluginBlock(token: string | null = null): string {
   const tables = [
-    [`[marketplaces.${CODEX_MARKETPLACE_NAME}]`, `source_type = "git"`, `source = ${JSON.stringify(CODEX_MARKETPLACE_SOURCE)}`].join("\n"),
+    [
+      `[marketplaces.${CODEX_MARKETPLACE_NAME}]`,
+      `source_type = "git"`,
+      `source = ${JSON.stringify(CODEX_MARKETPLACE_SOURCE)}`,
+      `ref = ${JSON.stringify(CODEX_MARKETPLACE_REF)}`,
+    ].join("\n"),
     [`[plugins.${JSON.stringify(CODEX_PLUGIN_ID)}]`, "enabled = true"].join("\n"),
   ];
   if (token !== null) tables.push(codexMcpBlock(token));

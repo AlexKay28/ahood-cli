@@ -23,12 +23,14 @@ import {
   agentsSnippetBody,
   agentsSnippetFile,
   CODEX_AGENTS_MARKERS,
+  CODEX_MARKETPLACE_REF,
   CODEX_TOML_MARKERS,
   codexMcpBlock,
   codexPluginBlock,
   codexSkill,
 } from "../src/setup/templates/codex.js";
 import { opencodeCommandFiles } from "../src/setup/templates/opencode.js";
+import { CLI_VERSION } from "../src/version.js";
 import { captureConsole } from "./helpers/me-env.js";
 import { fakeClaude, fakeCodex, fakeOpencode, fakeRunner, listFiles, setupHomeEnv } from "./helpers/harness-env.js";
 
@@ -56,7 +58,7 @@ describe("ahood setup codex (ahood#980, ahood#1009: the Codex plugin)", () => {
   const config = () => join(codex(), "config.toml");
   const USER_TOML = 'model = "o3"\n\n[projects."/x"]\ntrust_level = "trusted"\n';
   const PLUGIN_TOML = {
-    marketplaces: { ahood: { source_type: "git", source: "https://github.com/AlexKay28/ahood-cli.git" } },
+    marketplaces: { ahood: { source_type: "git", source: "https://github.com/AlexKay28/ahood-cli.git", ref: `v${CLI_VERSION}` } },
     plugins: { "ahood@ahood": { enabled: true } },
   };
   /** The codex commands setup ran, without its read-only probes. */
@@ -134,6 +136,75 @@ describe("ahood setup codex (ahood#980, ahood#1009: the Codex plugin)", () => {
     expect(readFileSync(config(), "utf-8")).toBe(USER_TOML);
     expect(codexRuns()).toEqual([]);
     expect(process.exitCode).toBe(0);
+  });
+
+  describe("the marketplace is pinned to this CLI's release tag (ahood#1009)", () => {
+    const REF_LINE = `ref = "v${CLI_VERSION}"`;
+    /** The block an earlier setup wrote: unpinned (no `ref`), or pinned to another tag. */
+    const blockWithRef = (ref: string | null) =>
+      codexPluginBlock()
+        .split("\n")
+        .flatMap((line) => (line === REF_LINE ? (ref === null ? [] : [`ref = ${JSON.stringify(ref)}`]) : [line]))
+        .join("\n");
+    const writeEarlierBlock = (ref: string | null) => {
+      mkdirSync(codex(), { recursive: true });
+      writeFileSync(config(), upsertBlock(USER_TOML, blockWithRef(ref), CODEX_TOML_MARKERS, config()));
+    };
+
+    it('writes `ref = "v<CLI version>"` right after `source`, the way `codex plugin marketplace add --ref` does', async () => {
+      expect(CODEX_MARKETPLACE_REF).toBe(`v${CLI_VERSION}`);
+      await setup(["codex", "--yes"]);
+      expect(readFileSync(config(), "utf-8")).toContain(
+        `[marketplaces.ahood]\nsource_type = "git"\nsource = "https://github.com/AlexKay28/ahood-cli.git"\n${REF_LINE}\n`,
+      );
+      expect(io.stdout()).toContain(`(https://github.com/AlexKay28/ahood-cli.git at v${CLI_VERSION})`);
+    });
+
+    for (const [label, ref] of [
+      ["an unpinned block", null],
+      ["a block pinned to an older tag", "v0.0.1"],
+    ] as const) {
+      it(`migrates ${label}: rewrites it with the ref, backs it up, and re-checks the installed plugin out with \`marketplace upgrade\` only`, async () => {
+        writeEarlierBlock(ref);
+        const before = readFileSync(config(), "utf-8");
+        runner.restore();
+        cx = fakeCodex({ cloned: true, installed: true });
+        runner = fakeRunner({ codex: cx.bin });
+        await setup(["codex", "--yes"]);
+        expect(parseToml(readFileSync(config(), "utf-8"))).toEqual({ ...(parseToml(USER_TOML) as object), ...PLUGIN_TOML });
+        expect(readFileSync(config(), "utf-8").match(/^ref = /gm)).toHaveLength(1);
+        const [backup] = backups(listFiles(codex()));
+        expect(readFileSync(join(codex(), backup), "utf-8")).toBe(before);
+        expect(io.stdout()).toContain(`marketplace re-pinned from ${ref ?? "unpinned (the repo's default branch)"}`);
+        expect(codexRuns()).toEqual(["plugin marketplace upgrade ahood"]);
+        // and a re-run has nothing left to do
+        runner.calls.length = 0;
+        await setup(["codex", "--yes"]);
+        expect(codexRuns()).toEqual([]);
+        expect(io.stdout()).toContain(`ahood@ahood is already installed from v${CLI_VERSION}`);
+      });
+    }
+
+    it("an unpinned block with nothing installed yet gets the ref and the usual fetch + install", async () => {
+      writeEarlierBlock(null);
+      await setup(["codex", "--yes"]);
+      expect(readFileSync(config(), "utf-8")).toContain(REF_LINE);
+      expect(codexRuns()).toEqual(["plugin marketplace upgrade ahood", "plugin add ahood@ahood"]);
+    });
+
+    it("--remove after migrating an unpinned block leaves config.toml byte-identical to before ahood", async () => {
+      writeEarlierBlock(null);
+      await setup(["codex", "--yes"]);
+      expect(readFileSync(config(), "utf-8")).toContain(REF_LINE);
+      await setup(["--remove", "codex", "--yes"]);
+      expect(readFileSync(config(), "utf-8")).toBe(USER_TOML);
+    });
+
+    it("--remove straight from an unpinned block takes it out byte-identically too", async () => {
+      writeEarlierBlock(null);
+      await setup(["--remove", "codex", "--yes"]);
+      expect(readFileSync(config(), "utf-8")).toBe(USER_TOML);
+    });
   });
 
   describe("migration from the pre-plugin setup (ahood#1009)", () => {

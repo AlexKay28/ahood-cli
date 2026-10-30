@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { doctor, NPM_LATEST_URL } from "../src/setup/doctor-command.js";
 import { setup } from "../src/setup/setup-command.js";
@@ -73,6 +73,7 @@ describe("ahood doctor (ahood#980)", () => {
     await doctor(["--json"]);
     expect(harness("codex").config.state).toBe("ok");
     expect(check("codex", "plugin")).toMatchObject({ status: "ok", detail: "ahood@ahood 0.14.0 installed, enabled" });
+    expect(check("codex", "plugin config")).toMatchObject({ status: "ok", detail: expect.stringContaining(`(marketplace ref v${CLI_VERSION})`) });
     expect(check("codex", "MCP server reachable")).toMatchObject({ status: "ok" });
     expect(check("codex", "MCP token")).toMatchObject({ status: "ok" });
     expect(report().ok).toBe(true);
@@ -116,6 +117,26 @@ describe("ahood doctor (ahood#980)", () => {
     expect(check("codex", "plugin config")).toMatchObject({ status: "warn" });
     expect(check("codex", "old setup files")).toMatchObject({ status: "warn", detail: expect.stringContaining("re-run `ahood setup codex`") });
     expect(process.exitCode).toBe(1); // the plugin itself is not installed yet
+  });
+
+  it("a Codex block that does not pin this CLI's tag (ahood#1009) is stale and names both refs", async () => {
+    stubNet();
+    useCodex();
+    await setup(["codex", "--yes"]);
+    const path = join(env.home, ".codex", "config.toml");
+    const pinned = readFileSync(path, "utf-8");
+    for (const [ref, shown] of [
+      [null, "unpinned (the repo's default branch)"],
+      ["v0.0.1", "v0.0.1"],
+    ] as const) {
+      const line = `ref = "v${CLI_VERSION}"\n`;
+      writeFileSync(path, pinned.replace(line, ref === null ? "" : `ref = "${ref}"\n`));
+      await doctor(["--offline", "--json"]);
+      expect(check("codex", "plugin config")).toMatchObject({
+        status: "warn",
+        detail: expect.stringContaining(`(marketplace ref ${shown}; this CLI pins v${CLI_VERSION} -- re-run \`ahood setup codex\`)`),
+      });
+    }
   });
 
   it("an unreadable config.toml is broken", async () => {
