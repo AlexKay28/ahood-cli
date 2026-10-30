@@ -19,6 +19,7 @@ import {
   CODEX_AGENTS_MARKERS,
   CODEX_INSTALL_ARGS,
   CODEX_MARKETPLACE_NAME,
+  CODEX_MARKETPLACE_REF,
   CODEX_MARKETPLACE_SOURCE,
   CODEX_MCP_SERVER_NAME,
   CODEX_PLUGIN_ID,
@@ -57,7 +58,7 @@ function detect(): Detection {
 
 type ParsedToml = {
   mcp_servers?: Record<string, { url?: unknown; http_headers?: unknown }>;
-  marketplaces?: Record<string, { source?: unknown }>;
+  marketplaces?: Record<string, { source?: unknown; ref?: unknown }>;
   plugins?: Record<string, { enabled?: unknown }>;
 };
 
@@ -83,6 +84,25 @@ function storedToken(): string | null {
     return null;
   }
 }
+
+/**
+ * The ref our block pins the marketplace to: a string, null for a block that
+ * names the marketplace unpinned (setup before the ref, so Codex tracks the
+ * repo's default branch), undefined when there is no block with a marketplace.
+ */
+function blockRef(text: string | null, path: string): string | null | undefined {
+  if (text === null) return undefined;
+  try {
+    if (!hasBlock(text, CODEX_TOML_MARKERS, displayPath(path))) return undefined;
+    const marketplace = (parseToml(text) as ParsedToml).marketplaces?.[CODEX_MARKETPLACE_NAME];
+    if (marketplace === undefined) return undefined;
+    return typeof marketplace.ref === "string" ? marketplace.ref : null;
+  } catch {
+    return undefined;
+  }
+}
+
+const describeRef = (ref: string | null) => (ref === null ? "unpinned (the repo's default branch)" : ref);
 
 // ---- the codex CLI ----------------------------------------------------------
 
@@ -170,14 +190,17 @@ function planConfig(remove: boolean, token: string | null = null): FileChange | 
   const check = parseOrRefuse(after, path, "with the ahood block added");
   const works =
     check.marketplaces?.[CODEX_MARKETPLACE_NAME]?.source === CODEX_MARKETPLACE_SOURCE &&
+    check.marketplaces?.[CODEX_MARKETPLACE_NAME]?.ref === CODEX_MARKETPLACE_REF &&
     check.plugins?.[CODEX_PLUGIN_ID]?.enabled === true &&
     (token === null || check.mcp_servers?.[CODEX_MCP_SERVER_NAME]?.url === AHOOD_MCP_URL);
   if (!works) {
     throw new SetupRefusedError(`Adding the ahood block to ${displayPath(path)} would not yield a working entry; nothing was changed.`);
   }
   const legacy = block !== null && block.includes(`[mcp_servers.${CODEX_MCP_SERVER_NAME}]`) && token === null;
+  const previousRef = blockRef(before, path);
   const what =
-    `plugin ${CODEX_PLUGIN_ID} from the "${CODEX_MARKETPLACE_NAME}" marketplace (${CODEX_MARKETPLACE_SOURCE})` +
+    `plugin ${CODEX_PLUGIN_ID} from the "${CODEX_MARKETPLACE_NAME}" marketplace (${CODEX_MARKETPLACE_SOURCE} at ${CODEX_MARKETPLACE_REF})` +
+    (previousRef !== undefined && previousRef !== CODEX_MARKETPLACE_REF ? `; marketplace re-pinned from ${describeRef(previousRef)}` : "") +
     (token ? `, with your ahood token in an [mcp_servers.${CODEX_MCP_SERVER_NAME}] entry that replaces the plugin's` : "") +
     (legacy ? `; the old [mcp_servers.${CODEX_MCP_SERVER_NAME}] entry goes (the plugin brings the MCP server)` : "");
   return { path, before, after, what, secrets };
@@ -205,6 +228,7 @@ const commandLine = (args: readonly string[]) => `codex ${args.join(" ")}`;
 
 function planSetup(opts: SetupOptions): SetupPlan {
   const plan = emptyPlan();
+  const previousRef = blockRef(readIfExists(configPath()), configPath());
   plan.files.push(planConfig(false, opts.token)!);
   // A same-named skill or snippet of the user's own is simply not ours to remove; no note at setup time.
   plan.files.push(...legacyRemovals([]));
@@ -217,7 +241,20 @@ function planSetup(opts: SetupOptions): SetupPlan {
     return plan;
   }
   if (installedPlugin(binary)) {
-    plan.notes.push(`${CODEX_PLUGIN_ID} is already installed; \`${commandLine(CODEX_INSTALL_ARGS.marketplaceUpgrade)}\` fetches a newer one.`);
+    // Installed from a marketplace checked out elsewhere (unpinned, or an older
+    // CLI's tag): `marketplace upgrade` checks the new ref out and refreshes
+    // the installed plugin with it (codex-cli 0.165.0).
+    if (previousRef !== CODEX_MARKETPLACE_REF) {
+      plan.commands.push({
+        bin: binary,
+        args: [...CODEX_INSTALL_ARGS.marketplaceUpgrade],
+        what: `check the ahood plugin marketplace out at ${CODEX_MARKETPLACE_REF} (updates the installed plugin)`,
+      });
+      return plan;
+    }
+    plan.notes.push(
+      `${CODEX_PLUGIN_ID} is already installed from ${CODEX_MARKETPLACE_REF}; after updating the CLI, re-run \`ahood setup codex\` to move it to the new release.`,
+    );
     return plan;
   }
   plan.commands.push(
@@ -253,6 +290,7 @@ function inspect(): ConfigState {
   const path = configPath();
   const text = readIfExists(path);
   let config: Feature["state"] = "absent";
+  let configDetail = displayPath(path);
   if (text !== null) {
     let block: string | null;
     try {
@@ -268,6 +306,13 @@ function inspect(): ConfigState {
     if (block !== null) {
       // A pre-ahood#1009 block (just [mcp_servers.ahood]) is stale: re-running setup migrates it.
       config = block === `${CODEX_TOML_MARKERS.begin}\n${codexPluginBlock(storedToken())}\n${CODEX_TOML_MARKERS.end}` ? "ok" : "stale";
+      const ref = blockRef(text, path);
+      if (ref !== undefined) {
+        configDetail +=
+          ref === CODEX_MARKETPLACE_REF
+            ? ` (marketplace ref ${ref})`
+            : ` (marketplace ref ${describeRef(ref)}; this CLI pins ${CODEX_MARKETPLACE_REF} -- re-run \`ahood setup codex\`)`;
+      }
     }
   }
   const { binary } = detect();
@@ -281,14 +326,14 @@ function inspect(): ConfigState {
         ? `${CODEX_PLUGIN_ID}${version} installed, enabled`
         : `${CODEX_PLUGIN_ID}${version} installed but disabled (enable it in Codex's /plugins, or re-run \`ahood setup codex\`)`;
   const features: Feature[] = [
-    { name: "plugin config", state: config, detail: displayPath(path) },
+    { name: "plugin config", state: config, detail: configDetail },
     { name: "plugin", state: pluginState, detail: pluginDetail },
   ];
   const leftovers = [legacySkillPath(), legacySnippetPath()].filter((p) => (readIfExists(p) ?? "").includes(OWNED_MARKER));
   if (leftovers.length > 0) {
     features.push({ name: "old setup files", state: "stale", detail: `${leftovers.map(displayPath).join(", ")} -- re-run \`ahood setup codex\` to remove` });
   }
-  const details = [`plugin entries in ${displayPath(path)}: ${config}`, pluginDetail];
+  const details = [`plugin entries in ${configDetail}: ${config}`, pluginDetail];
   const tokenStored = storedToken() !== null;
   const states = features.map((f) => f.state);
   if (config === "absent" && pluginState === "absent" && leftovers.length === 0) return { state: "absent", details, features };
