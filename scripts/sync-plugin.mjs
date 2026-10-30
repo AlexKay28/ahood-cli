@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Writes plugins/ahood/commands/*.md from src/setup/templates/claude-plugin.ts
-// (ahood#981), and the Codex plugin (plugins/codex/ plus
+// (ahood#981), the Codex plugin (plugins/codex/ plus
 // .agents/plugins/marketplace.json) from src/setup/templates/codex-plugin.ts
+// and the opencode plugin's generated files (packages/opencode-plugin/
+// package.json and src/generated.ts) from src/setup/templates/opencode-plugin.ts
 // (ahood#1009), the same way sync-readme.mjs regenerates the README's command
 // table: build with tsc, then import the compiled module, so the files can
 // never drift from what the tests check.
@@ -27,11 +29,13 @@ const { CLAUDE_PLUGIN_DIR, claudePluginCommandFiles } = await import(
   path.join(rootDir, "dist", "setup", "templates", "claude-plugin.js")
 );
 const { codexPluginFiles } = await import(path.join(rootDir, "dist", "setup", "templates", "codex-plugin.js"));
+const { opencodePluginFiles } = await import(path.join(rootDir, "dist", "setup", "templates", "opencode-plugin.js"));
 
 // Both lists as paths relative to the repo root.
 const files = [
   ...claudePluginCommandFiles().map(({ file, content }) => ({ file: path.join(CLAUDE_PLUGIN_DIR, file), content })),
   ...codexPluginFiles(),
+  ...opencodePluginFiles(),
 ];
 
 const checkMode = process.argv.includes("--check");
@@ -48,7 +52,7 @@ for (const { file, content } of files) {
 }
 
 if (checkMode && stale.length > 0) {
-  console.error(`Out of date with src/setup/templates/claude-plugin.ts / codex-plugin.ts: ${stale.join(", ")}\nRun \`npm run sync-plugin\`.`);
+  console.error(`Out of date with src/setup/templates/claude-plugin.ts / codex-plugin.ts / opencode-plugin.ts: ${stale.join(", ")}\nRun \`npm run sync-plugin\`.`);
   process.exit(1);
 }
 console.log(stale.length === 0 ? "Plugin files already up to date." : `Updated: ${stale.join(", ")}`);

@@ -1,0 +1,33 @@
+{
+  "name": "@ahood/opencode-plugin",
+  "version": "0.14.0",
+  "description": "ahood in opencode: the registry's hosted MCP server, the /ahood dashboard, sync, review and snap commands, and an opt-in snap prompt.",
+  "license": "MIT",
+  "homepage": "https://www.ahood.dev/docs#mcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexKay28/ahood-cli.git",
+    "directory": "packages/opencode-plugin"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "ahood",
+    "mcp",
+    "skills",
+    "snaps"
+  ],
+  "type": "module",
+  "main": "./dist/server.js",
+  "exports": {
+    ".": "./dist/server.js",
+    "./server": "./dist/server.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  }
+}

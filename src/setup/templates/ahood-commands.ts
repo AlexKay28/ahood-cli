@@ -11,11 +11,26 @@ export const AHOOD_MCP_URL = "https://www.ahood.dev/api/mcp";
 // `ahood setup` store the token itself in that harness's config (decision B).
 export { TOKEN_ENV as AHOOD_MCP_TOKEN_ENV, LEGACY_TOKEN_ENV as AHOOD_MCP_LEGACY_TOKEN_ENV } from "../../credentials.js";
 
-// The opt-in Claude Code snap Stop hook's enable switch (plugins/ahood/hooks/snap-prompt.mjs,
-// `ENABLE_ENV`). That script must stay import-free (ahood#981: no network, no `node:child_process`,
-// so it is never bundled through this module -- it keeps its own copy of the literal, and
-// tests/ahood-commands-parity.test.ts asserts the two stay equal. `ahood doctor` imports this one.
+// The opt-in snap hook's enable switch: the Claude Code Stop hook (plugins/ahood/hooks/snap-prompt.mjs,
+// `ENABLE_ENV`) and the opencode plugin (packages/opencode-plugin) both read it. That script must stay
+// import-free (ahood#981: no network, no `node:child_process`), so it is never bundled through this
+// module -- it keeps its own copy of the literal, and tests/ahood-commands-parity.test.ts asserts the
+// two stay equal. `ahood doctor` imports this one.
 export const AHOOD_SNAP_HOOK_ENV = "AHOOD_SNAP_HOOK";
+
+// What the opt-in snap hook tells the agent once a session's first turn has ended: the Claude Code
+// Stop hook's `reason` (snap-prompt.mjs `SNAP_PROMPT`, a copy for the same import-free reason) and
+// the opencode plugin's synthetic message (rendered from this one into packages/opencode-plugin).
+// tests/ahood-commands-parity.test.ts asserts the hook's copy stays equal to this.
+export const AHOOD_SNAP_PROMPT = [
+  "ahood snap hook (opt-in): before ending, offer the user a private ahood snap of this session.",
+  "If nothing here is worth keeping (no deliverable handed over, no correction from the user), end your turn without asking.",
+  "Otherwise draft it: a one-line summary plus failed / worked / fix / lesson (no names or private details) /",
+  "artifact (owner/slug, if one ahood skill, agent or MCP server was involved). Leave out secrets.",
+  "Show the draft and ask whether to save it. Save only on the user's explicit yes, with",
+  '`ahood snap create "<summary>" --failed "..." --worked "..." --fix "..." --lesson "..." --artifact <owner/slug>`',
+  "or the ahood MCP tool create_snap. Do not save it in this turn: wait for the answer.",
+].join(" ");
 
 const CLI_NOTE =
   "If `ahood` is not on PATH, use `npx -y @ahood/cli` in its place. If a command says you are not logged in, " +
