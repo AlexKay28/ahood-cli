@@ -16,6 +16,8 @@ import { AHOOD_MCP_URL } from "./templates/ahood-commands.js";
 const USAGE = "Usage: ahood doctor [--offline] [--json]";
 const PROBE_TIMEOUT_MS = 5_000;
 export const NPM_LATEST_URL = "https://registry.npmjs.org/@ahood%2fcli/latest";
+/** The npm registry document for `pkg` at `version` (404 when that version was never published). */
+export const npmVersionUrl = (pkg: string, version: string) => `https://registry.npmjs.org/${pkg.replace("/", "%2f")}/${version}`;
 
 export type CheckStatus = "ok" | "warn" | "fail" | "skip";
 export type Check = { name: string; status: CheckStatus; detail: string };
@@ -104,6 +106,34 @@ async function versionCheck(offline: boolean): Promise<Check> {
   }
 }
 
+/**
+ * Whether npm has the package a harness installs by itself (Harness.npmPackage)
+ * at this CLI's version. opencode skips a plugin it cannot install without an
+ * error, so without this check a missing package would only show as missing
+ * /ahood commands.
+ */
+async function npmPackageCheck(pkg: string, offline: boolean): Promise<Check> {
+  const name = "plugin on npm";
+  const wanted = `${pkg}@${CLI_VERSION}`;
+  if (offline) return { name, status: "skip", detail: `${wanted} not checked (--offline)` };
+  try {
+    const response = await fetch(npmVersionUrl(pkg, CLI_VERSION), { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    if (response.ok) return { name, status: "ok", detail: `${wanted} is published` };
+    if (response.status === 404) {
+      return {
+        name,
+        status: "warn",
+        detail:
+          `${wanted} is NOT on npm (not published yet), so the harness cannot install it and skips it silently: ` +
+          "no /ahood commands or snap prompt there until it is published. The MCP entry setup wrote still works",
+      };
+    }
+    return { name, status: "warn", detail: `could not check ${wanted}: npm answered HTTP ${response.status}` };
+  } catch (error) {
+    return { name, status: "warn", detail: `could not check ${wanted}: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
 const CONFIG_STATUS: Record<ConfigState["state"], CheckStatus> = { ok: "ok", absent: "skip", stale: "warn", partial: "fail", broken: "fail" };
 
 /**
@@ -123,7 +153,7 @@ const CONFIG_HINT: Partial<Record<ConfigState["state"], string>> = {
   absent: "not set up -- `ahood setup <h>`",
 };
 
-function harnessReport(id: HarnessId, mcp: Check): HarnessReport {
+function harnessReport(id: HarnessId, mcp: Check, packageCheck: Check | undefined): HarnessReport {
   const harness = HARNESSES[id];
   const detection = harness.detect();
   const config = harness.inspect();
@@ -144,6 +174,7 @@ function harnessReport(id: HarnessId, mcp: Check): HarnessReport {
     // `doctor` says exactly which harness features are installed rather than
     // just an overall state.
     for (const feature of config.features) checks.push({ name: feature.name, status: featureStatus(feature), detail: feature.detail });
+    if (packageCheck) checks.push(packageCheck);
     checks.push(mcp);
     checks.push(mcpTokenCheck(id, config));
   }
@@ -183,7 +214,12 @@ export async function doctor(args: string[]): Promise<void> {
 
   const source = tokenSourceCheck();
   const [mcp, login, version] = await Promise.all([mcpCheck(offline), loginCheck(offline), versionCheck(offline)]);
-  const harnesses = HARNESS_IDS.map((id) => harnessReport(id, mcp));
+  const packageChecks = new Map(
+    await Promise.all(
+      HARNESS_IDS.filter((id) => HARNESSES[id].npmPackage).map(async (id) => [id, await npmPackageCheck(HARNESSES[id].npmPackage!, offline)] as const),
+    ),
+  );
+  const harnesses = HARNESS_IDS.map((id) => harnessReport(id, mcp, packageChecks.get(id)));
   const broken = harnesses.filter((h) => h.config.state !== "absent" && h.checks.some((c) => c.status === "fail"));
 
   if (json) {
