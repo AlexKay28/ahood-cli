@@ -340,19 +340,20 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage:
-      "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+      "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project|loop|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
     summary:
-      "Publish a new version of a skill, agent, mcp server manifest, doc, or project guide from a folder containing SKILL.md, AGENT.md, server.json, DOC.md, or PROJECT.md, creating the skill first if it doesn't already exist.",
+      "Publish a new version of a skill, agent, mcp server manifest, doc, project guide, loop, or prompt from a folder containing SKILL.md, AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md, creating the skill first if it doesn't already exist.",
     desc:
-      "Publish a new version of a skill, agent, mcp server manifest, doc, or project guide from a folder containing SKILL.md, AGENT.md, server.json, DOC.md, or PROJECT.md. If the artifact " +
-      "doesn't exist yet, this creates it first -- pass --name to set its display name, and --kind agent, --kind mcp, --kind doc, or --kind project if " +
-      "publishing an AGENT.md, server.json, DOC.md, or PROJECT.md (auto-detected from the folder contents when only one of SKILL.md/AGENT.md/server.json/DOC.md/PROJECT.md is present). " +
+      "Publish a new version of a skill, agent, mcp server manifest, doc, project guide, loop, or prompt from a folder containing SKILL.md, AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md. If the artifact " +
+      "doesn't exist yet, this creates it first -- pass --name to set its display name, and --kind agent, --kind mcp, --kind doc, --kind project, --kind loop, or --kind prompt if " +
+      "publishing an AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md (auto-detected from the folder contents when only one of SKILL.md/AGENT.md/server.json/DOC.md/PROJECT.md/LOOP.md/PROMPT.md is present). " +
+      "A PROMPT.md is checked locally before anything is uploaded: an undeclared {{key}}, or a declared input the body never uses, is refused with an error naming the key. " +
       "--name is required when creating; optionally also pass --tagline/--tags/--license/--homepage/--repository. " +
       "Processing happens server-side after upload; this command polls and reports the final published/failed status. " +
       "The legacy form `ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted. " +
       "Every flag also accepts the --flag=value form, needed when a value itself starts with --.",
     flags: [
-      "--kind <kind>                 skill, agent, mcp, doc, or project. Auto-detected from the folder's root doc when omitted.",
+      "--kind <kind>                 skill, agent, mcp, doc, project, loop, or prompt. Auto-detected from the folder's root doc when omitted.",
       "--name <text>                 Required only when creating the artifact on this publish.",
       "--tagline <text>              Short one-line description, used only when creating.",
       "--tags <comma,separated>      Initial tags, used only when creating.",
@@ -535,6 +536,67 @@ export const DOC_COMMANDS_HELP: CommandHelp[] = registryCommandsHelp("doc");
 // is portable across repositories (unlike `project`), so it needs none of
 // PROJECT_COMMANDS_HELP's bare-listing or `--project` flag additions below.
 export const LOOP_COMMANDS_HELP: CommandHelp[] = registryCommandsHelp("loop");
+
+// `ahood prompt` (ahood-cli#206, ahood#1007): a prompt is never installed,
+// so the shared verbs minus add/update/outdated/remove (kind-info.ts
+// INSTALL_VERBS, refused by the dispatcher), plus `get`, which fills one in.
+export const PROMPT_COMMANDS_HELP: CommandHelp[] = [
+  {
+    usage: "ahood prompt get <owner>/<prompt>[@version] [--<key> <value> ...] [--copy] [--json]",
+    summary: "Fill a prompt's inputs and print the text, ready to paste into an agent once.",
+    desc:
+      "Read a published prompt's PROMPT.md, fill each {{key}} placeholder, and print the filled text -- and nothing " +
+      "else -- to stdout, so `| pbcopy` and `> prompt.txt` both work. Set an input with --<key> <value> or " +
+      "--<key>=<value>; an empty or omitted one uses its default. A required input (one with no default) left " +
+      "unset, or a --<key> the prompt does not declare, is a usage error (exit 2) naming the key. Filling is one " +
+      "pass: a value that itself contains {{x}} is inserted verbatim. Refused, before anything else happens, when " +
+      "the target is not a prompt.",
+    flags: [
+      "--<key> <value>   Set the input <key> (or --<key>=<value>, needed when the value starts with --).",
+      "--copy            Copy the filled text to the clipboard (pbcopy, clip, wl-copy or xclip) instead of printing it;",
+      "                  fails, printing nothing, when no clipboard tool works.",
+      "--json            Emit {owner, slug, name, intent, version, inputs, works_with, text} -- the hosted get_prompt",
+      "                  MCP tool's payload -- instead of the text.",
+    ],
+    examples: [
+      'ahood prompt get alice/brutalist-landing-page --product "a CLI for agent skills"',
+      'ahood prompt get alice/brutalist-landing-page@1.0.0 --product "a CLI" --audience designers --copy',
+      'ahood prompt get alice/brutalist-landing-page --product "a CLI" > prompt.txt',
+    ],
+  },
+  ...registryCommandsHelp("prompt")
+    .filter((entry) => !/^ahood prompt (add|update|outdated|remove) /.test(entry.usage))
+    .map((entry) => {
+      if (entry.usage.startsWith("ahood prompt read ")) {
+        return {
+          ...entry,
+          desc:
+            "Print the PROMPT.md of a published prompt verbatim, unfilled -- its frontmatter declares the inputs " +
+            "`ahood prompt get` takes. Refused, before anything else happens, when the target is not a prompt.",
+        };
+      }
+      if (entry.usage.startsWith("ahood prompt init ")) {
+        return {
+          ...entry,
+          desc:
+            "Scaffold a minimal PROMPT.md that passes the registry's publish validation -- a name, an intent, one " +
+            "declared input, and a body that uses it: ./<name>/PROMPT.md with a name, or ./PROMPT.md without. " +
+            "Refuses to overwrite an existing PROMPT.md, or to add one to a folder that already holds another kind's " +
+            "root document. Names are slug-normalized and must stay inside the current directory.",
+        };
+      }
+      if (entry.usage.startsWith("ahood prompt publish ")) {
+        return {
+          ...entry,
+          desc:
+            entry.desc +
+            " PROMPT.md is checked locally first: an undeclared {{key}}, a declared input the body never uses, or a " +
+            "body over 32 KB is refused before anything is uploaded, with an error naming the key.",
+        };
+      }
+      return entry;
+    }),
+];
 
 // `ahood project` (ahood-cli#185): the shared verbs, with init's `project`
 // field flags, plus bare `ahood project` -- the guides for this repository.
@@ -810,6 +872,7 @@ const ENTITY_COMMANDS_HELP: Record<string, CommandHelp[]> = {
   doc: DOC_COMMANDS_HELP,
   project: PROJECT_COMMANDS_HELP,
   loop: LOOP_COMMANDS_HELP,
+  prompt: PROMPT_COMMANDS_HELP,
   group: GROUP_COMMANDS_HELP,
   snap: SNAP_COMMANDS_HELP,
 };
@@ -940,8 +1003,8 @@ export function formatSkillHelp(): string {
     "Legacy, cross-kind: in this release `ahood skill <verb>` still acts on any registry kind",
     "(skills, agents, MCP server manifests) -- `skill list`/`skill search` include every kind, and",
     "`skill add`/`skill update` install whatever kind they resolve. Scripts relying on that keep",
-    "working. For one kind only, use `ahood agent|mcp|doc|project <verb>`, or add",
-    "`--kind skill|agent|mcp|doc|project` to any verb below (`--kind all` spells out the legacy behavior).",
+    "working. For one kind only, use `ahood agent|mcp|doc|project|loop|prompt <verb>`, or add",
+    "`--kind skill|agent|mcp|doc|project|loop|prompt` to any verb below (`--kind all` spells out the legacy behavior).",
     "A future major version will make `ahood skill` skills-only.",
     "",
     "Commands:",
@@ -1039,6 +1102,21 @@ export function formatLoopHelp(): string {
   );
 }
 
+export function formatPromptHelp(): string {
+  return formatRegistryKindHelp(
+    "ahood prompt -- prompts (PROMPT.md) in the ahood registry",
+    [
+      "A prompt is a one-shot recipe: an intent, declared inputs, and a text with {{key}} placeholders",
+      "that you fill in and paste into an agent once. It is never installed -- there is no add, update,",
+      "outdated or remove; `ahood prompt get <owner>/<prompt> --<key> <value>` fills one in and prints it.",
+      "Every verb here acts on prompts only: a target of another kind is refused before anything is",
+      "downloaded, prompted for, written, or sent.",
+    ],
+    PROMPT_COMMANDS_HELP,
+    "prompt",
+  );
+}
+
 const KIND_HELP: Record<CliKind, () => string> = {
   skill: formatSkillHelp,
   agent: formatAgentHelp,
@@ -1046,6 +1124,7 @@ const KIND_HELP: Record<CliKind, () => string> = {
   doc: formatDocHelp,
   project: formatProjectHelp,
   loop: formatLoopHelp,
+  prompt: formatPromptHelp,
 };
 
 export function formatKindHelp(noun: CliKind): string {
@@ -1098,6 +1177,9 @@ export function formatHelp(): string {
     "The same verbs, for project guides (PROJECT.md) only; bare `ahood project` lists this repository's guides.";
   const loopGroupUsage = "ahood loop <command>";
   const loopGroupSummary = "The same verbs, for loops (LOOP.md) only -- run `ahood loop --help` for the full list.";
+  const promptGroupUsage = "ahood prompt <command>";
+  const promptGroupSummary =
+    "The same read and publish verbs, for prompts (PROMPT.md) only; `ahood prompt get` fills one in -- prompts are never installed.";
   const groupGroupUsage = "ahood group <command>";
   const groupGroupSummary =
     "Create private groups and share skills with them -- run `ahood group --help` for the full list.";
@@ -1112,6 +1194,7 @@ export function formatHelp(): string {
     { usage: docGroupUsage, summary: docGroupSummary },
     { usage: projectGroupUsage, summary: projectGroupSummary },
     { usage: loopGroupUsage, summary: loopGroupSummary },
+    { usage: promptGroupUsage, summary: promptGroupSummary },
     { usage: groupGroupUsage, summary: groupGroupSummary },
     { usage: snapGroupUsage, summary: snapGroupSummary },
   ]);
@@ -1133,7 +1216,7 @@ export function formatHelp(): string {
     "",
     "Run `ahood <command> --help` (or `ahood help <command>`) for a single command's flags and examples.",
     "Run `ahood skill --help` for the full list of skill commands.",
-    "Run `ahood agent|mcp|doc|project|loop --help` for the kind-scoped agent, MCP, doc, project guide and loop commands.",
+    "Run `ahood agent|mcp|doc|project|loop|prompt --help` for the kind-scoped agent, MCP, doc, project guide, loop and prompt commands.",
     "Run `ahood group --help` for the full list of group commands.",
     "Run `ahood snap --help` for the full list of snap commands.",
     "Run `ahood --version` to print the installed CLI version.",

@@ -1053,6 +1053,15 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
   // only through their own scope (`ahood doc add`, `ahood project add`),
   // which writes the one pinned file below. Refused before the download, the
   // lockfile and any write. Entries with NO kind keep the legacy behaviour.
+  // A prompt (ahood-cli#206) is never installed at all, by any noun -- the
+  // scoped `ahood prompt add` is refused in the dispatcher; this is the
+  // legacy cross-kind path, which would otherwise unpack it as a skill.
+  if (meta.kind === "prompt") {
+    throw new UsageError(
+      `${key} is ${describeKind("prompt")} (${KINDS.prompt.about}), not a skill, and is never installed. ` +
+        `Fill it in and print it with \`ahood prompt get ${key}\`.`,
+    );
+  }
   const pinnedKind = isPinnedFileKind(meta.kind) ? meta.kind : undefined;
   if (pinnedKind !== undefined && strictKind(scope) !== pinnedKind) {
     throw new UsageError(

@@ -321,6 +321,60 @@ describe("ahood loop command group (ahood-cli, ahood#858)", () => {
   });
 });
 
+describe("ahood prompt command group (ahood-cli#206)", () => {
+  it("`ahood --help` lists `ahood prompt <command>`; `ahood prompt`, `ahood prompts`, `--help` and `help prompt` print prompt help", () => {
+    expect(run(["--help"]).stdout.toString()).toContain("ahood prompt <command>");
+    for (const args of [["prompt"], ["prompts"], ["prompt", "--help"], ["prompts", "--help"], ["help", "prompt"]]) {
+      const { stdout, status } = run(args);
+      expect(status).toBe(0);
+      const text = stdout.toString();
+      expect(text).toContain("ahood prompt -- prompts (PROMPT.md) in the ahood registry");
+      expect(text).toContain("ahood prompt get <owner>/<prompt>[@version]");
+      expect(text).toContain("ahood prompt read <owner>/<prompt>");
+      expect(text).toContain("ahood prompt init [name]");
+      expect(text).not.toContain("ahood prompt add");
+      expect(text).not.toContain("ahood prompt remove");
+    }
+    expect(run(["prompt", "get", "--help"]).stdout.toString()).toMatch(/^ahood prompt get <owner>\/<prompt>/);
+    expect(run(["help", "prompt", "publish"]).stdout.toString()).toMatch(/^ahood prompt publish <owner>\/<prompt>@<version>/);
+  });
+
+  it("`ahood prompts add` is refused (exit 2) before any request, pointing at `ahood prompt get`", () => {
+    const home = mkdtempSync(path.join(tmpdir(), "ahood-prompt-home-"));
+    const cwd = mkdtempSync(path.join(tmpdir(), "ahood-prompt-cwd-"));
+    try {
+      // Exit 2, not 6: refused before any request to the unreachable registry.
+      const { status, stderr } = run(["prompts", "add", "alice/landing"], { cwd, env: offlineEnv(home) });
+      expect(status).toBe(2);
+      expect(stderr).toContain("Prompts are never installed, so there is nothing to add.");
+      expect(stderr).toContain("ahood prompt get");
+      expect(readdirSync(cwd)).toEqual([]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("an unknown prompt verb suggests `get`; completion offers prompt and its verbs, without the install verbs", () => {
+    const bad = run(["prompt", "gte", "x"]);
+    expect(bad.status).toBe(2);
+    expect(bad.stderr).toContain("Unknown prompt command: gte");
+    expect(bad.stderr).toContain("Did you mean 'get'?");
+    const bash = run(["completion", "bash"]).stdout.toString();
+    expect(bash).toMatch(/local top_words="[^"]*\bprompt\b/);
+    const promptWords = bash.match(/local prompt_words="([^"]*)"/)![1].split(" ");
+    expect(promptWords).toEqual(expect.arrayContaining(["get", "search", "list", "view", "show", "read", "init", "publish"]));
+    expect(promptWords).not.toContain("add");
+    expect(promptWords).not.toContain("remove");
+  });
+
+  it("the self-skill documents the prompt group", () => {
+    const content = readFileSync(skillSource, "utf8");
+    expect(content).toContain("| prompt | `PROMPT.md` | not installed; `ahood prompt get` | `ahood prompt <verb>` |");
+    expect(content).toContain("ahood prompt get");
+  });
+});
+
 describe("ahood help useme", () => {
   it("prints the bundled SKILL.md byte-for-byte, offline, unauthenticated, writing nothing", () => {
     const home = mkdtempSync(path.join(tmpdir(), "ahood-useme-home-"));

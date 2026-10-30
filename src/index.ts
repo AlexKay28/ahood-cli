@@ -27,6 +27,8 @@ import { review } from "./commands/review.js";
 import { setup } from "./setup/setup-command.js";
 import { doctor } from "./setup/doctor-command.js";
 import { CLI_KINDS, extractKindFlag, isCliKind, resolveScope, type CliKind, type KindScope } from "./kinds.js";
+import { INSTALL_VERBS, isInstalledKind, KINDS } from "./kind-info.js";
+import { promptGet } from "./commands/prompt-get.js";
 import { findProjectGuides } from "./commands/project-guides.js";
 import { readUseme } from "./useme.js";
 import { UsageError } from "./usage-error.js";
@@ -58,7 +60,7 @@ import { exitCodeFor } from "./exit-code.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
 
 // Every registry verb, reached as `ahood <noun> <verb>` for every registry
-// noun (skill, agent, mcp, doc, project, loop) -- one handler per verb shared by
+// noun (skill, agent, mcp, doc, project, loop, prompt) -- one handler per verb shared by
 // every noun
 // (see dispatchRegistry() below), never a copy per kind. "show" is an alias
 // for "view" (issue #30). A handler gets a second, KindScope argument only
@@ -91,6 +93,14 @@ const SKILL_COMMANDS: Record<string, RegistryHandler> = {
   unshare,
   init,
   publish,
+};
+
+// Verbs only one kind has, on top of SKILL_COMMANDS: `ahood prompt get`
+// (ahood-cli#206), which fills a prompt and prints it -- the verb that
+// replaces add/update/outdated/remove for a kind that is never installed.
+// Not reachable as `ahood skill get` or under any other noun.
+const KIND_VERBS: Partial<Record<CliKind, Record<string, RegistryHandler>>> = {
+  prompt: { get: promptGet },
 };
 
 // Every group-entity verb, reached only as `ahood group <verb>` -- see
@@ -149,6 +159,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   doc: dispatchDoc,
   project: dispatchProject,
   loop: dispatchLoop,
+  prompt: dispatchPrompt,
   group: dispatchGroup,
   snap: dispatchSnap,
 };
@@ -162,7 +173,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
 // sense "skill" already used before "group" (the entity) existed. "snap"
 // joins this set for the exact same reason (ahood-cli#107).
 // Every registry noun joins it (ahood-cli#172), taken from the kind table so
-// a new kind (doc #182, project #185, loop ahood#858) needs no edit here.
+// a new kind (doc #182, project #185, loop ahood#858, prompt #206) needs no edit here.
 const GROUP_COMMANDS = new Set<string>([...CLI_KINDS, "group", "snap"]);
 
 function levenshtein(a: string, b: string): number {
@@ -195,7 +206,7 @@ function closestCommand(input: string): string | undefined {
 }
 
 // Plural alias (ahood-cli#190): `ahood skills`, `ahood agents`, `ahood mcps`,
-// `ahood docs`, `ahood projects`, `ahood loops` dispatch exactly as the
+// `ahood docs`, `ahood projects`, `ahood loops`, `ahood prompts` dispatch exactly as the
 // singular kind would. A straight trailing-`s` strip-and-match
 // against the KINDS registry is enough -- every current and planned kind
 // pluralizes this way, and no COMMANDS key is a kind name plus "s" (checked in index.test.ts), so a
@@ -240,10 +251,12 @@ async function dispatchRegistry(noun: CliKind, args: string[]): Promise<void> {
     return;
   }
 
-  const handler = SKILL_COMMANDS[sub];
+  const kindVerbs = KIND_VERBS[noun] ?? {};
+  const handler = kindVerbs[sub] ?? SKILL_COMMANDS[sub];
   if (!handler) {
     console.error(`Unknown ${noun} command: ${sub}`);
-    const suggestion = closestOf(sub, noun === "mcp" ? ["serve", ...Object.keys(SKILL_COMMANDS)] : Object.keys(SKILL_COMMANDS));
+    const known = [...Object.keys(kindVerbs), ...Object.keys(SKILL_COMMANDS)];
+    const suggestion = closestOf(sub, noun === "mcp" ? ["serve", ...known] : known);
     if (suggestion) console.error(`Did you mean '${suggestion}'?`);
     console.error(`Run \`ahood ${noun} --help\` for a list of commands.`);
     if (noun === "mcp") {
@@ -276,8 +289,25 @@ async function dispatchRegistry(noun: CliKind, args: string[]): Promise<void> {
     return;
   }
 
+  // A kind-only verb takes its args untouched: `ahood prompt get`'s
+  // `--<key> value` inputs may include one named `kind`.
+  if (kindVerbs[sub]) {
+    await handler(rest, { noun, kind: noun });
+    return;
+  }
+
   const { kind, rest: handlerArgs } = extractKindFlag(rest);
   const scope = resolveScope(noun, kind);
+  // A kind that is never installed (prompt, ahood-cli#206) has nothing to
+  // add, pin, update or remove: refused before any request, whichever noun
+  // reached it (`ahood prompt add`, `ahood skill add --kind prompt`).
+  if (scope.kind !== "all" && !isInstalledKind(scope.kind) && (INSTALL_VERBS as readonly string[]).includes(sub)) {
+    const { label, placeholder } = KINDS[scope.kind];
+    throw new UsageError(
+      `${label[0].toUpperCase()}${label.slice(1)}s are never installed, so there is nothing to ${sub}. ` +
+        `Use \`ahood ${scope.kind} get <owner>/${placeholder} [--<key> <value> ...]\` to fill one in and print it.`,
+    );
+  }
   if (scope.kind === "all") {
     // Legacy: the exact pre-#172 call, minus an explicit `--kind all`.
     await handler(kind === undefined ? rest : handlerArgs);
@@ -313,6 +343,13 @@ async function dispatchDoc(args: string[]): Promise<void> {
 // same shape as dispatchDoc above.
 async function dispatchLoop(args: string[]): Promise<void> {
   await dispatchRegistry("loop", args);
+}
+
+// `ahood prompt` (ahood-cli#206, ahood#1007): the shared registry dispatch,
+// plus `get` (KIND_VERBS above); a prompt is never installed, so the install
+// verbs are refused there too.
+async function dispatchPrompt(args: string[]): Promise<void> {
+  await dispatchRegistry("prompt", args);
 }
 
 // `ahood project` (ahood-cli#185): with no verb -- nothing, or only its own
@@ -556,4 +593,4 @@ if (isEntrypoint) {
 }
 
 // Exported for tests only -- the CLI itself only ever calls main() above.
-export { main, dispatchSkill, dispatchAgent, dispatchDoc, dispatchProject, dispatchLoop, dispatchMcp, dispatchRegistry, dispatchGroup, dispatchSnap, COMMANDS, SKILL_COMMANDS, GROUP_VERBS, SNAP_VERBS };
+export { main, dispatchSkill, dispatchAgent, dispatchDoc, dispatchProject, dispatchLoop, dispatchPrompt, dispatchMcp, dispatchRegistry, dispatchGroup, dispatchSnap, COMMANDS, SKILL_COMMANDS, GROUP_VERBS, SNAP_VERBS };

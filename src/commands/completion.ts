@@ -6,6 +6,7 @@ import {
   DOC_COMMANDS_HELP,
   PROJECT_COMMANDS_HELP,
   LOOP_COMMANDS_HELP,
+  PROMPT_COMMANDS_HELP,
   GROUP_COMMANDS_HELP,
   SNAP_COMMANDS_HELP,
   COMMAND_ALIASES,
@@ -16,7 +17,7 @@ import { UsageError } from "../usage-error.js";
 const USAGE = "Usage: ahood completion <bash|zsh|fish>";
 
 // Every entity noun with its own verb list, in the order completion offers
-// them. Registry nouns (skill, agent, mcp -- ahood-cli#172; doc -- #182; project -- #185; loop -- ahood#858) come first; group
+// them. Registry nouns (skill, agent, mcp -- ahood-cli#172; doc -- #182; project -- #185; loop -- ahood#858; prompt -- #206) come first; group
 // and snap were already real nouns but had no completion at all before.
 const NOUNS: Array<[string, CommandHelp[]]> = [
   ["skill", SKILL_COMMANDS_HELP],
@@ -25,6 +26,7 @@ const NOUNS: Array<[string, CommandHelp[]]> = [
   ["doc", DOC_COMMANDS_HELP],
   ["project", PROJECT_COMMANDS_HELP],
   ["loop", LOOP_COMMANDS_HELP],
+  ["prompt", PROMPT_COMMANDS_HELP],
   ["group", GROUP_COMMANDS_HELP],
   ["snap", SNAP_COMMANDS_HELP],
 ];

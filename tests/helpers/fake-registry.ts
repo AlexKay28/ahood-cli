@@ -37,6 +37,7 @@ export const ROOT_DOCS: Record<string, string> = {
   doc: "DOC.md",
   project: "PROJECT.md",
   loop: "LOOP.md",
+  prompt: "PROMPT.md",
 };
 
 export async function entry(kind: string | undefined, version = "1.0.0", contentKind = kind ?? "skill"): Promise<Entry> {
