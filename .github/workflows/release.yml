@@ -30,6 +30,13 @@ jobs:
             exit 1
           fi
 
+      # One tag publishes @ahood/cli AND @ahood/opencode-plugin (ahood#1009),
+      # and `ahood setup opencode` / `ahood doctor` look for the plugin at the
+      # CLI's own version. `npm version` keeps the two in sync (the `version`
+      # hook); this catches a hand edit before anything is published.
+      - name: Verify @ahood/opencode-plugin version matches package.json
+        run: node scripts/check-plugin-version.mjs
+
       - uses: ./.github/actions/verify
         with:
           registry-url: "https://registry.npmjs.org"
@@ -60,5 +67,34 @@ jobs:
 
       - if: steps.registry.outputs.already-published != 'true'
         run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # The opencode plugin (ahood#1009), published after the CLI from the same
+      # tag at the same version, with the same idempotent check: a re-run after
+      # a partial release publishes whichever of the two is still missing.
+      # --access public because a scoped package's first publish defaults to
+      # restricted. NPM_TOKEN must be allowed to publish @ahood/opencode-plugin
+      # (a granular token limited to @ahood/cli gets a 403 here).
+      - name: Build @ahood/opencode-plugin
+        run: npm run build:opencode-plugin
+
+      - name: Check whether @ahood/opencode-plugin is already on the registry
+        id: plugin-registry
+        working-directory: packages/opencode-plugin
+        run: |
+          PKG_NAME="$(node -p "require('./package.json').name")"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if PUBLISHED="$(npm view "${PKG_NAME}@${PKG_VERSION}" version 2>/dev/null)" && [ -n "$PUBLISHED" ]; then
+            echo "${PKG_NAME}@${PKG_VERSION} is already published -- skipping publish."
+            echo "already-published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "${PKG_NAME}@${PKG_VERSION} is not on the registry -- publishing."
+            echo "already-published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.plugin-registry.outputs.already-published != 'true'
+        working-directory: packages/opencode-plugin
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
