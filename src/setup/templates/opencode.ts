@@ -4,20 +4,27 @@
 //     the first of opencode.json / opencode.jsonc that exists in the global
 //     config dir (opencode.json when neither does), editing it with
 //     jsonc-parser so comments survive. Setup does the same edit.
-//   - Commands: opencode loads `{command,commands}/**/*.md` from the config
-//     dir; front matter is the command's options (description, ...), the body
-//     its template, $ARGUMENTS the user's arguments, and the file's path
-//     (minus .md) its name -- so commands/ahood.md is `/ahood`.
+//   - Plugin (ahood#1009): setup lists @ahood/opencode-plugin in the config's
+//     `plugins` array (plural: @opencode/schema 2.1.2 config.d.ts), and opencode
+//     installs it from npm on its next start. The plugin brings the /ahood
+//     commands and the opt-in snap hook (templates/opencode-plugin.ts); setup
+//     keeps writing the MCP entry above, which the plugin defers to, so the
+//     token policy is unchanged. A listed package opencode cannot install is
+//     skipped silently (verified with v2.1.2: empty `plugin.list`, no error),
+//     which is why `ahood doctor` checks npm has it.
+//   - Commands: before ahood#1009 setup wrote one markdown file per command
+//     into `commands/` (opencode loads `{command,commands}/**/*.md`: front
+//     matter = options, body = template, path minus .md = name). Setup now only
+//     removes those; opencodeCommandFiles() is kept as what they looked like,
+//     so an unedited one is deleted without a backup.
 //   Earlier opencode (v1) used a different MCP layout; setup refuses there.
-//   - Opt-in snap hook (ahood#982): not written by setup. opencode v2 has no
-//     hook a config dir can carry; the ahood opencode plugin
-//     (packages/opencode-plugin, ahood#1009) brings it instead, verified
-//     against opencode v2.1.2's own plugin API (templates/opencode-plugin.ts).
 import { OWNED_MARKER } from "../file-changes.js";
 import { AHOOD_COMMANDS, AHOOD_MCP_TOKEN_ENV, AHOOD_MCP_URL, type AhoodCommand } from "./ahood-commands.js";
 
 export const OPENCODE_CONFIG_FILES = ["opencode.json", "opencode.jsonc"] as const;
 export const OPENCODE_MCP_PATH = ["mcp", "servers", "ahood"] as const;
+/** The config key opencode v2 lists plugins under. */
+export const OPENCODE_PLUGINS_KEY = "plugins";
 
 // `headers` is what `opencode mcp add --header` writes; `{env:NAME}` is
 // opencode's config substitution, so by default the file names the token. With

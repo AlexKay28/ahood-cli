@@ -149,6 +149,13 @@ your config, such as the one `--store-token` writes, stays in charge) and the op
 harnesses, its version is the CLI's, and `npm run build` builds it. See
 [`packages/opencode-plugin/README.md`](packages/opencode-plugin/README.md).
 
+`ahood setup opencode` lists it in `plugins` and still writes `mcp.servers.ahood` (the token policy
+in [Token](#token) is unchanged; the plugin defers to that entry). It also takes out the four
+`commands/ahood*.md` files earlier versions of setup wrote, backing up any you edited.
+`ahood setup --remove opencode` takes both entries out again. opencode installs the package from
+npm on its next start and skips it without an error when npm does not have it, so `ahood doctor`
+checks `@ahood/opencode-plugin@<CLI version>` is published and warns if it is not.
+
 ## Why ahood
 
 - **One command to publish, one to install.** `ahood skill publish owner/skill@1.0.0 --path ./my-skill` uploads a folder containing a `SKILL.md`; `ahood skill add owner/skill` installs it into `.claude/skills/`. No registry account setup beyond `ahood login`.

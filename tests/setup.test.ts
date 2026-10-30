@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { parse as parseJsonc } from "jsonc-parser";
@@ -352,10 +352,18 @@ describe("ahood setup codex (ahood#980, ahood#1009: the Codex plugin)", () => {
   });
 });
 
-describe("ahood setup opencode (ahood#980)", () => {
+describe("ahood setup opencode (ahood#980, ahood#1009: the opencode plugin)", () => {
   const dir = () => join(env.home, ".config", "opencode");
   const commandsDir = () => join(dir(), "commands");
   const entryOf = (text: string) => (parseJsonc(text) as { mcp?: { servers?: Record<string, unknown> } }).mcp?.servers?.ahood;
+  const pluginsOf = (text: string) => (parseJsonc(text) as { plugins?: unknown[] }).plugins;
+  const PLUGIN = "@ahood/opencode-plugin";
+  /** What setup wrote before ahood#1009: the MCP entry plus one command file per /ahood command. */
+  const writeLegacySetup = (configText: string) => {
+    mkdirSync(commandsDir(), { recursive: true });
+    writeFileSync(join(dir(), "opencode.json"), configText);
+    for (const { file, content } of opencodeCommandFiles()) writeFileSync(join(commandsDir(), file), content);
+  };
   const JSONC = '{\n  // my comment\n  "$schema": "https://opencode.ai/config.json",\n  "theme": "dark",\n}\n';
 
   beforeEach(() => {
@@ -363,12 +371,74 @@ describe("ahood setup opencode (ahood#980)", () => {
     runner = fakeRunner({ opencode: fakeOpencode() });
   });
 
-  it("fresh install: opencode.json with mcp.servers.ahood, and the four /ahood commands", async () => {
+  it("fresh install: opencode.json with mcp.servers.ahood and the plugin in `plugins`; no command files", async () => {
     await setup(["opencode", "--yes"]);
     const config = readFileSync(join(dir(), "opencode.json"), "utf-8");
     expect(entryOf(config)).toEqual({ type: "remote", url: MCP_URL, headers: { Authorization: "Bearer {env:AHOOD_TOKEN}" } });
-    expect(listFiles(commandsDir())).toEqual(["ahood-review.md", "ahood-snap.md", "ahood-sync.md", "ahood.md"]);
-    for (const { file, content } of opencodeCommandFiles()) expect(readFileSync(join(commandsDir(), file), "utf-8")).toBe(content);
+    expect(pluginsOf(config)).toEqual([PLUGIN]);
+    expect(listFiles(dir())).toEqual(["opencode.json"]);
+    expect(io.stdout()).toMatch(/opencode installs @ahood\/opencode-plugin from npm/);
+  });
+
+  it("appends to the user's own plugins and keeps them; an existing entry for ours (bare or { package }) is not duplicated", async () => {
+    mkdirSync(dir(), { recursive: true });
+    writeFileSync(join(dir(), "opencode.json"), '{\n  "plugins": ["their-plugin"]\n}\n');
+    await setup(["opencode", "--yes"]);
+    expect(pluginsOf(readFileSync(join(dir(), "opencode.json"), "utf-8"))).toEqual(["their-plugin", PLUGIN]);
+    writeFileSync(join(dir(), "opencode.json"), JSON.stringify({ plugins: [{ package: PLUGIN, options: {} }] }));
+    await setup(["opencode", "--yes"]);
+    expect(pluginsOf(readFileSync(join(dir(), "opencode.json"), "utf-8"))).toEqual([{ package: PLUGIN, options: {} }]);
+  });
+
+  it("refuses a `plugins` that is not a list", async () => {
+    mkdirSync(dir(), { recursive: true });
+    const mine = '{"plugins":"x"}';
+    writeFileSync(join(dir(), "opencode.json"), mine);
+    await setup(["opencode", "--yes"]);
+    expect(io.stderr()).toMatch(/`plugins` that is not a list/);
+    expect(readFileSync(join(dir(), "opencode.json"), "utf-8")).toBe(mine);
+  });
+
+  it("migrates a setup from before ahood#1009: adds the plugin, deletes the unedited command files without backups", async () => {
+    writeLegacySetup(JSON.stringify({ mcp: { servers: { ahood: { type: "remote", url: MCP_URL, headers: { Authorization: "Bearer {env:AHOOD_TOKEN}" } } } } }));
+    await setup(["opencode", "--yes"]);
+    expect(pluginsOf(readFileSync(join(dir(), "opencode.json"), "utf-8"))).toEqual([PLUGIN]);
+    expect(existsSync(commandsDir())).toBe(false);
+    expect(listFiles(dir()).filter((f) => f.startsWith("commands"))).toEqual([]);
+  });
+
+  it("migration: an edited command file is backed up before it goes; a user's own same-named file is left with a note", async () => {
+    writeLegacySetup("{}\n");
+    const [first, second] = opencodeCommandFiles();
+    writeFileSync(join(commandsDir(), first.file), first.content + "my edit\n");
+    writeFileSync(join(commandsDir(), second.file), "---\ndescription: mine\n---\nmine\n");
+    await setup(["opencode", "--yes"]);
+    const left = listFiles(commandsDir());
+    expect(left).toContain(second.file);
+    const [backup] = backups(left);
+    expect(backup.startsWith(`${first.file}.ahood-backup-`)).toBe(true);
+    expect(readFileSync(join(commandsDir(), backup), "utf-8")).toBe(first.content + "my edit\n");
+    expect(left.sort()).toEqual([backup, second.file].sort());
+    expect(io.stdout()).toMatch(/not written by `ahood setup`/);
+  });
+
+  it("--remove leaves opencode.jsonc byte-identical to before setup", async () => {
+    mkdirSync(dir(), { recursive: true });
+    writeFileSync(join(dir(), "opencode.jsonc"), JSONC);
+    await setup(["opencode", "--yes"]);
+    await setup(["--remove", "opencode", "--yes"]);
+    expect(readFileSync(join(dir(), "opencode.jsonc"), "utf-8")).toBe(JSONC);
+    // The user's own list stays on one line (the plugin is spliced in as text); their other server is
+    // formatted the way jsonc-parser formats (it reflows an inline sibling when adding ours -- ahood#980 behaviour).
+    const theirs =
+      '{\n  "plugins": ["their-plugin", { "package": "other", "options": {} }],\n  "mcp": {\n    "servers": {\n      "x": {\n        "type": "remote",\n        "url": "https://x.example"\n      }\n    }\n  }\n}\n';
+    writeFileSync(join(dir(), "opencode.jsonc"), theirs);
+    chmodSync(join(dir(), "opencode.jsonc"), 0o600); // a world-readable file only gets the token on a separate yes
+    process.env.AHOOD_TOKEN = "tok_byte_identical";
+    await setup(["opencode", "--yes", "--store-token"]);
+    expect(readFileSync(join(dir(), "opencode.jsonc"), "utf-8")).toContain("Bearer tok_byte_identical");
+    await setup(["--remove", "opencode", "--yes"]);
+    expect(readFileSync(join(dir(), "opencode.jsonc"), "utf-8")).toBe(theirs);
   });
 
   it("edits an existing opencode.jsonc in place, keeping comments and other keys, with a backup", async () => {
@@ -403,6 +473,7 @@ describe("ahood setup opencode (ahood#980)", () => {
     await setup(["--remove", "opencode", "--yes"]);
     const text = readFileSync(join(dir(), "opencode.jsonc"), "utf-8");
     expect(entryOf(text)).toBeUndefined();
+    expect(pluginsOf(text)).toBeUndefined();
     expect(text).toContain("// my comment");
     expect(text).toContain('"theme": "dark"');
     expect(listFiles(commandsDir())).toEqual(["mine.md"]);

@@ -73,6 +73,12 @@ export interface Harness {
   planRemove(): SetupPlan;
   inspect(): ConfigState;
   tokenStore?: TokenStore;
+  /**
+   * An npm package the harness installs by itself when it starts (the opencode
+   * plugin). `ahood doctor` checks npm has it at this CLI's version, because a
+   * harness that cannot install it may skip it without saying so.
+   */
+  npmPackage?: string;
 }
 
 export function emptyPlan(): SetupPlan {
