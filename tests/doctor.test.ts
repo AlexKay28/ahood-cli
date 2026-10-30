@@ -1,17 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { doctor, NPM_LATEST_URL } from "../src/setup/doctor-command.js";
+import { doctor, NPM_LATEST_URL, npmVersionUrl } from "../src/setup/doctor-command.js";
 import { setup } from "../src/setup/setup-command.js";
 import { CLI_VERSION } from "../src/version.js";
 import { captureConsole } from "./helpers/me-env.js";
 import { upsertBlock } from "../src/setup/marked-block.js";
 import { CODEX_TOML_MARKERS, codexMcpBlock, codexSkill } from "../src/setup/templates/codex.js";
+import { opencodeCommandFiles, opencodeMcpEntry } from "../src/setup/templates/opencode.js";
 import { fakeClaude, fakeCodex, fakeOpencode, fakeRunner, setupHomeEnv } from "./helpers/harness-env.js";
 
 const MCP_URL = "https://www.ahood.dev/api/mcp";
 
-type Net = { mcp?: number | "down"; npm?: string };
+/** `plugin`: the HTTP status npm gives for @ahood/opencode-plugin at this CLI's version (default 200). */
+type Net = { mcp?: number | "down"; npm?: string; plugin?: number };
 function stubNet(net: Net = {}) {
   const urls: string[] = [];
   vi.stubGlobal(
@@ -24,6 +26,7 @@ function stubNet(net: Net = {}) {
         return new Response("", { status: net.mcp ?? 405 });
       }
       if (url === NPM_LATEST_URL) return new Response(JSON.stringify({ version: net.npm ?? CLI_VERSION }), { status: 200 });
+      if (url === npmVersionUrl("@ahood/opencode-plugin", CLI_VERSION)) return new Response("{}", { status: net.plugin ?? 200 });
       return new Response(JSON.stringify({ error: "unexpected" }), { status: 500 });
     }),
   );
@@ -146,7 +149,7 @@ describe("ahood doctor (ahood#980)", () => {
     stubNet({ npm: "999.0.0" });
     await setup(["opencode", "--yes"]);
     const file = join(env.home, ".config", "opencode", "opencode.json");
-    writeFileSync(file, JSON.stringify({ mcp: { servers: { ahood: { type: "remote", url: MCP_URL } } } }));
+    writeFileSync(file, JSON.stringify({ mcp: { servers: { ahood: { type: "remote", url: MCP_URL } } }, plugins: ["@ahood/opencode-plugin"] }));
     await doctor(["--json"]);
     expect(harness("opencode").config.state).toBe("stale");
     expect(check("opencode", "MCP token")).toMatchObject({ status: "warn" });
@@ -208,12 +211,43 @@ describe("ahood doctor (ahood#980)", () => {
       expect(check("codex", "plugin")).toMatchObject({ status: "fail" });
     });
 
-    it("opencode: separate MCP config and commands checks, both ok once set up", async () => {
+    it("opencode: separate MCP config and plugin checks, both ok once set up (ahood#1009)", async () => {
       stubNet();
       await setup(["opencode", "--yes"]);
       await doctor(["--offline", "--json"]);
       expect(check("opencode", "MCP config")).toMatchObject({ status: "ok" });
-      expect(check("opencode", "commands")).toMatchObject({ status: "ok" });
+      expect(check("opencode", "plugin")).toMatchObject({ status: "ok" });
+      expect(check("opencode", "plugin on npm")).toMatchObject({ status: "skip" });
+      expect(check("opencode", "old command files")).toBeUndefined();
+      expect(harness("opencode").config.state).toBe("ok");
+    });
+
+    it("opencode: warns clearly when @ahood/opencode-plugin is not on npm at this version (opencode would skip it silently)", async () => {
+      stubNet({ plugin: 404 });
+      await setup(["opencode", "--yes"]);
+      await doctor(["--json"]);
+      const npm = check("opencode", "plugin on npm");
+      expect(npm).toMatchObject({ status: "warn" });
+      expect(npm.detail).toContain(`@ahood/opencode-plugin@${CLI_VERSION} is NOT on npm`);
+      expect(npm.detail).toMatch(/no \/ahood commands/);
+    });
+
+    it("opencode: plugin on npm is ok when that version is published", async () => {
+      stubNet();
+      await setup(["opencode", "--yes"]);
+      await doctor(["--json"]);
+      expect(check("opencode", "plugin on npm")).toMatchObject({ status: "ok" });
+    });
+
+    it("opencode: a setup from before ahood#1009 (MCP entry + command files, no plugin) is partial, with the old files flagged", async () => {
+      const dir = join(env.home, ".config", "opencode");
+      mkdirSync(join(dir, "commands"), { recursive: true });
+      writeFileSync(join(dir, "opencode.json"), JSON.stringify({ mcp: { servers: { ahood: opencodeMcpEntry() } } }));
+      for (const { file, content } of opencodeCommandFiles()) writeFileSync(join(dir, "commands", file), content);
+      await doctor(["--offline", "--json"]);
+      expect(harness("opencode").config.state).toBe("partial");
+      expect(check("opencode", "plugin")).toMatchObject({ status: "fail" });
+      expect(check("opencode", "old command files")).toMatchObject({ status: "warn" });
     });
 
     it("a harness that was never set up reports no per-feature checks (nothing to break down)", async () => {

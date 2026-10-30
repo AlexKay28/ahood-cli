@@ -8,7 +8,8 @@ opt-in snap prompt.
 
 ## Install
 
-Add it to the `plugins` list of your global opencode config
+`npx @ahood/cli@latest setup opencode` does this for you (and adds the ahood MCP entry, with your
+token stored there if you agree). By hand: add it to the `plugins` list of your global opencode config
 (`~/.config/opencode/opencode.json` or `opencode.jsonc`):
 
 ```json
