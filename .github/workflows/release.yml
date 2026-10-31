@@ -43,6 +43,25 @@ jobs:
       - name: Verify every plugin version matches package.json
         run: node scripts/check-plugin-version.mjs
 
+      # ahood#1018 step E: Claude Code's "Plugin updated" notice points at the
+      # plugin's changelog, so a release without a section there is refused
+      # (`npm version`'s preversion hook runs the same check).
+      - name: Verify the plugin changelog has this version
+        run: node scripts/check-changelog.mjs
+
+      # ahood#1018 step E: Claude Code's own manifest check, before anything is
+      # published. --strict because the problems worth stopping for are
+      # warnings otherwise (verified on 2.1.282): a version set in both the
+      # marketplace entry and plugin.json, an unknown field. `.` checks the
+      # marketplace and the plugin.json of every entry; `plugins/ahood` the
+      # plugin's commands, skills and hooks. Pinned so a new claude release
+      # cannot start failing (or passing) a release on its own; validate needs
+      # no login.
+      - name: Validate the Claude Code marketplace and plugin
+        run: |
+          npx -y @anthropic-ai/claude-code@2.1.282 plugin validate --strict .
+          npx -y @anthropic-ai/claude-code@2.1.282 plugin validate --strict plugins/ahood
+
       - uses: ./.github/actions/verify
         with:
           registry-url: "https://registry.npmjs.org"

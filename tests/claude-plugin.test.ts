@@ -49,6 +49,8 @@ function frontMatter(file: string): { fields: Record<string, string | string[]>;
 describe("plugin manifest and marketplace", () => {
   it("plugin.json names the ahood plugin with a semver version and no secrets", () => {
     expect(manifest.name).toBe("ahood");
+    // ahood#1018 step E: the label can change without touching `name`, the id installs are keyed by
+    expect(manifest.displayName).toBe("ahood");
     expect(manifest.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(manifest.description).toEqual(expect.any(String));
     expect(manifest.author.name).toEqual(expect.any(String));
