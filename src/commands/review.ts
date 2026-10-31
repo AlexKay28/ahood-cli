@@ -1,4 +1,4 @@
-import { apiJson } from "../http.js";
+import { ApiError, apiJson } from "../http.js";
 import { askLine, isInteractive } from "../confirm.js";
 import { flagValue, unrecognizedArgs } from "../flags.js";
 import { SEMVER_RE } from "../spec.js";
@@ -8,6 +8,7 @@ import { UsageError } from "../usage-error.js";
 const LIST_USAGE = "Usage: ahood review [--limit <n>] [--json]";
 const APPROVE_USAGE = "Usage: ahood review approve <id> [--version <semver>] [--json]";
 const REJECT_USAGE = "Usage: ahood review reject <id> [--json]";
+const SHOW_USAGE = "Usage: ahood review show <id> [--json]";
 
 // `ahood review` (ahood#979): the owner's queue of pending self-evolution
 // proposals, from GET /api/v1/me/proposals (ahood#978,
@@ -40,10 +41,63 @@ export type Proposal = {
   review_path: string | null;
 };
 export type ProposalPage = { total: number; items: Proposal[]; next_cursor: string | null };
+
+// GET /api/v1/enhancements/candidates/{id}/diff (ahood#693, lib/enhancements/diff.ts
+// CandidateDiff): the base version's archive against the candidate's, the same
+// diff the web owner panel shows before Approve. `diff` holds unified-diff
+// hunks without file headers; null for a binary or a file past the server's cap.
+export type CandidateFileDiff = {
+  path: string;
+  change: "added" | "modified" | "deleted";
+  binary: boolean;
+  diff: string | null;
+  truncated: boolean;
+};
+export type CandidateDiff = { files: CandidateFileDiff[]; unchanged_binaries: string[]; truncated: boolean };
+/** A proposal as `ahood review --json` prints it: the API item plus its diff (null when it could not be read). */
+export type ProposalWithDiff = Proposal & { diff: CandidateDiff | null; diff_error?: string };
 export type DecisionBody = { status: "promoting" | "stale" | "rejected"; versionId?: string; reason?: string };
 
 /** Pages followed when no --limit is given: 20 x the server's default 25. */
 const MAX_PAGES = 20;
+
+export async function fetchCandidateDiff(id: string): Promise<CandidateDiff> {
+  return apiJson<CandidateDiff>(`/api/v1/enhancements/candidates/${encodeURIComponent(id)}/diff`);
+}
+
+/** The diff, or why it is missing -- one unreadable diff must not stop the review of the rest. */
+async function diffOrError(id: string): Promise<{ diff: CandidateDiff | null; diff_error?: string }> {
+  try {
+    return { diff: await fetchCandidateDiff(id) };
+  } catch (error) {
+    return { diff: null, diff_error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** The diff as terminal lines. Proposal content is generated text: every line is sanitized. */
+export function formatDiff(d: CandidateDiff): string[] {
+  const s = (v: unknown) => sanitizeForTerminal(v, 1000);
+  if (d.files.length === 0 && d.unchanged_binaries.length === 0) return ["  (no file changes)"];
+  const lines: string[] = [];
+  for (const f of d.files) {
+    lines.push(`  --- ${f.change === "added" ? "/dev/null" : `a/${s(f.path)}`}`);
+    lines.push(`  +++ ${f.change === "deleted" ? "/dev/null" : `b/${s(f.path)}`}`);
+    if (f.binary) lines.push(`  (binary file ${f.change})`);
+    else if (f.diff === null) lines.push("  (diff omitted: past the size cap -- see the web review page)");
+    else for (const line of f.diff.replace(/\n$/, "").split("\n")) lines.push(`  ${s(line)}`);
+    if (f.truncated && f.diff !== null) lines.push("  ... diff truncated");
+  }
+  if (d.unchanged_binaries.length > 0) lines.push(`  unchanged binaries: ${d.unchanged_binaries.map(s).join(", ")}`);
+  if (d.truncated) lines.push("  (some files were cut short; the web review page has the rest)");
+  return lines;
+}
+
+async function printDiff(id: string): Promise<void> {
+  const { diff, diff_error } = await diffOrError(id);
+  console.log("  diff:");
+  if (diff) for (const line of formatDiff(diff)) console.log(line);
+  else console.log(`  (could not load the diff: ${sanitizeForTerminal(diff_error ?? "unknown error")})`);
+}
 
 const proposalPath = (id: string, verb: "approve" | "reject") => `/api/v1/me/proposals/${encodeURIComponent(id)}/${verb}`;
 
@@ -123,6 +177,21 @@ async function rejectCommand(args: string[]): Promise<void> {
   console.log(args.includes("--json") ? JSON.stringify({ id, ...body }) : describeDecision(id, body));
 }
 
+async function showCommand(args: string[]): Promise<void> {
+  const id = parseId(args, SHOW_USAGE, []);
+  const page = await fetchProposals(undefined);
+  const proposal = page.items.find((p) => p.candidate_id === id);
+  if (!proposal) throw new ApiError(404, `No pending proposal ${sanitizeForTerminal(id)} -- \`ahood review\` lists the ones waiting.`);
+  if (args.includes("--json")) {
+    console.log(JSON.stringify({ ...proposal, ...(await diffOrError(id)) }));
+    return;
+  }
+  for (const line of describe(proposal)) console.log(line);
+  await printDiff(id);
+  console.log("");
+  console.log(`Decide with \`ahood review approve ${id}\` or \`ahood review reject ${id}\`.`);
+}
+
 async function interactiveDecide(p: Proposal): Promise<"quit" | void> {
   for (;;) {
     const answer = (await askLine("[a]pprove, [r]eject, [s]kip, [q]uit? ")).toLowerCase();
@@ -156,7 +225,11 @@ async function listCommand(args: string[]): Promise<void> {
   }
   const page = await fetchProposals(limitArg === undefined ? undefined : Number(limitArg));
   if (args.includes("--json")) {
-    console.log(JSON.stringify(page));
+    // One diff request per proposal, in order (the diff route has its own
+    // 120/hour bucket, separate from the decision budget).
+    const items: ProposalWithDiff[] = [];
+    for (const p of page.items) items.push({ ...p, ...(await diffOrError(p.candidate_id)) });
+    console.log(JSON.stringify({ ...page, items }));
     return;
   }
   if (page.items.length === 0) {
@@ -168,11 +241,13 @@ async function listCommand(args: string[]): Promise<void> {
   for (const p of page.items) {
     console.log("");
     for (const line of describe(p)) console.log(line);
-    if (interactive && (await interactiveDecide(p)) === "quit") return;
+    if (!interactive) continue;
+    await printDiff(p.candidate_id);
+    if ((await interactiveDecide(p)) === "quit") return;
   }
   if (!interactive) {
     console.log("");
-    console.log("Decide one with `ahood review approve <id>` or `ahood review reject <id>`.");
+    console.log("See one's diff with `ahood review show <id>`; decide with `ahood review approve <id>` or `ahood review reject <id>`.");
   }
 }
 
@@ -180,6 +255,7 @@ export async function review(args: string[]): Promise<void> {
   const [verb, ...rest] = args;
   if (verb === "approve") return approveCommand(rest);
   if (verb === "reject") return rejectCommand(rest);
+  if (verb === "show") return showCommand(rest);
   if (verb === "list") return listCommand(rest);
   return listCommand(args);
 }

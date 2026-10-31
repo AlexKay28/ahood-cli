@@ -100,14 +100,25 @@ The plugin brings two things:
 
 | Type | Does |
 | --- | --- |
-| `/ahood` | Dashboard from `ahood status --json`: installed vs latest versions, pins, pending evolution proposals, evolution on/off |
-| `/ahood sync` or `/ahood-sync` | `ahood sync --dry-run`, a diff per update, then `ahood sync <owner>/<slug> --yes` only for the updates you approve in chat |
-| `/ahood review` or `/ahood-review` | `ahood review`, each proposal with its evidence, then `ahood review approve\|reject <id>` only on your decision |
-| `/ahood snap` or `/ahood-snap` | Drafts a structured, private snap of the session, shows it, and runs `ahood snap create ...` only if you say yes |
+| `/ahood` | Hub: `ahood status --json` as a table (installed vs latest, pins, pending proposals, evolution on/off), a menu of every command below, and one suggested next action |
+| `/ahood-find <need> [--kind <kind>]` | `ahood find --json`: the top 5 matches with kind, purpose, stars and downloads, and why each fits; offers try or install |
+| `/ahood-trending [--kind <kind>]` | `ahood find --sort downloads`: the most installed artifacts |
+| `/ahood-try <owner/slug>` | `ahood try`: reads the artifact's root document into the session for this task, installs nothing |
+| `/ahood-install <owner/slug>` | Previews it (`ahood skill view`, `ahood try`: version, contents, risks, where it writes), then runs `ahood <kind> add` only after your yes |
+| `/ahood-prompt <owner/slug>` | Asks for each declared input, fills the prompt with `ahood prompt get`, shows it, and uses it once |
+| `/ahood-loop <owner/slug>` | Loads a loop's rules (`ahood try`) and, after your yes, follows them for this session |
+| `/ahood-project` | `ahood project --json`: this repository's project guide from ahood, or an offer to write and publish one |
+| `/ahood-star <owner/slug>` | Stars it with `ahood skill star` after your yes |
+| `/ahood-publish` | Finds the artifact in this directory by its root file, shows the diff against the published version, and runs `ahood skill publish` only after your yes |
+| `/ahood-stats` | `ahood stats --json`: your artifacts' downloads and stars, totals, recent activity and evolution counts |
+| `/ahood-sync` | `ahood sync --dry-run`, a diff per update, then `ahood sync <owner>/<slug> --yes` only for the updates you approve in chat |
+| `/ahood-review` | `ahood review --json`, each proposal with its unified diff and evidence, then `ahood review approve\|reject <id>` only on your decision |
+| `/ahood-snap` | Drafts a structured, private snap of the session, shows it, and runs `ahood snap create ...` only if you say yes |
 
 Every command is namespaced too (`/ahood:ahood`, `/ahood:ahood-sync`, ...) for when another plugin
-takes the bare name. Each one pre-approves only its read-only calls (`ahood status --json`,
-`ahood sync --dry-run --json`, `ahood skill diff`, `ahood review --json`); anything that changes
+takes the bare name. In Claude Code `/ahood <verb>` (e.g. `/ahood find pdf`) runs the same
+steps. Each one pre-approves only its read-only calls (`ahood status --json`, `ahood find`, `ahood try`,
+`ahood stats --json`, `ahood sync --dry-run --json`, `ahood skill diff`, `ahood review --json`, ...); anything that changes
 state still goes through Claude Code's permission prompt after you have agreed in chat. See
 [`plugins/ahood/README.md`](plugins/ahood/README.md) for the full setup. The command files are
 generated from `src/setup/templates/ahood-commands.ts` (shared with the Codex and opencode setup);
@@ -141,7 +152,7 @@ regenerates `plugin.json` on a release bump.
 
 [`packages/opencode-plugin/`](packages/opencode-plugin) is `@ahood/opencode-plugin`, an opencode v2
 server plugin (not yet published to npm). Listed in the `plugins` array of
-`~/.config/opencode/opencode.json`, it registers the four `/ahood` commands, the hosted `ahood` MCP
+`~/.config/opencode/opencode.json`, it registers the `/ahood` commands, the hosted `ahood` MCP
 server (sending `$AHOOD_TOKEN` from opencode's environment; a `mcp.servers.ahood` entry already in
 your config, such as the one `--store-token` writes, stays in charge) and the opt-in snap prompt
 (`AHOOD_SNAP_HOOK=1`, once per top-level session, asks before saving). Its `package.json` and
@@ -371,7 +382,10 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood sync [<owner>/<slug> \| <slug> ...] [--yes] [--dry-run] [--json]` | Update installs that are behind, showing each one's diff and asking y/N first. |
 | `ahood pin <owner>/<slug>[@version] [--json]` | Hold an install at one version so `ahood sync` never moves it past that. |
 | `ahood unpin <owner>/<slug> [--json]` | Remove a pin so `ahood sync` offers the latest version again. |
-| `ahood review [approve <id> [--version <semver>] \| reject <id>] [--limit <n>] [--json]` | List the self-evolution proposals waiting for your review, and approve or reject them. |
+| `ahood review [show <id> \| approve <id> [--version <semver>] \| reject <id>] [--limit <n>] [--json]` | List the self-evolution proposals waiting for your review with their diffs, and approve or reject them. |
+| `ahood find [<query>] [--kind <kind>] [--sort rank\|downloads\|stars\|recent\|updated] [--limit <n>] [--json]` | Find skills, agents, MCP servers, docs, project guides, loops and prompts in the registry. |
+| `ahood try <owner>/<slug> [--json]` | Print an artifact's root document (SKILL.md, AGENT.md, LOOP.md, ...) without installing it. |
+| `ahood stats [--json]` | Show your own artifacts with their downloads and stars, the totals, recent activity and self-evolution counts. |
 | `ahood setup [claude\|codex\|opencode] [--remove <harness>] [--yes] [--dry-run] [--store-token\|--no-store-token]` | Add ahood (MCP server and /ahood commands) to Claude Code, Codex or opencode, or remove it again. |
 | `ahood doctor [--offline] [--json]` | Check each harness's ahood setup, the MCP server, your login and the CLI version. |
 | `ahood completion <bash\|zsh\|fish>` | Print a shell completion script for the command names. |

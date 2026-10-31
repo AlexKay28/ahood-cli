@@ -121,22 +121,23 @@ export function codexPluginSkill(): string {
 
 function renderCodexSkill(note: string): string {
   const sections = AHOOD_COMMANDS.map((c) => {
-    const heading = c.name === "ahood" ? "`ahood` (no argument): dashboard" : `\`${c.name.replace("ahood-", "ahood ")}\``;
+    const heading = c.name === "ahood" ? "`ahood` (no argument): hub" : `\`${c.name.replace("ahood-", "ahood ")}\``;
     return `## ${heading}\n\n${c.body}`;
   });
   return [
     "---",
     "name: ahood",
-    "description: Manage the user's ahood (ahood.dev) skills from Codex -- a dashboard of installed skills and newer " +
-      "versions, syncing updates with consent, reviewing self-evolution proposals, and capturing private snaps. Use " +
-      'when the user says "ahood", "/ahood", "ahood status", "ahood sync", "ahood review" or "ahood snap".',
+    "description: Use ahood (ahood.dev) from Codex -- find, try and install skills, agents, MCP servers and other " +
+      "artifacts, use prompts and loops, publish, star, see your stats, sync updates with consent, review " +
+      'self-evolution proposals, and capture private snaps. Use when the user says "ahood", "/ahood" or "ahood <verb>" ' +
+      "(find, trending, try, install, prompt, loop, project, star, publish, stats, sync, review, snap).",
     "---",
     "",
     note,
     "",
     "# ahood",
     "",
-    "Pick the section that matches what the user asked for; with no argument, show the dashboard.",
+    "Pick the section that matches what the user asked for; with no argument, show the hub.",
     "",
     sections.join("\n\n"),
     "",

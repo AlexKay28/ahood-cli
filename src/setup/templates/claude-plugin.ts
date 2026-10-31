@@ -31,8 +31,18 @@ export const CLAUDE_PLUGIN_DIR = "plugins/ahood";
 const bash = (args: string) => `Bash(${AHOOD_CLI} ${args})`;
 export const CLAUDE_COMMAND_ALLOWED_TOOLS: Record<string, string[]> = {
   ahood: [bash("status --json")],
+  "ahood-find": [bash("find *")],
+  "ahood-trending": [bash("find *")],
+  "ahood-try": [bash("try *")],
+  "ahood-install": [bash("skill view *"), bash("try *")],
+  "ahood-prompt": [bash("prompt read *"), bash("prompt get *")],
+  "ahood-loop": [bash("try *")],
+  "ahood-project": [bash("project --json")],
+  "ahood-star": [],
+  "ahood-publish": [bash("stats --json"), bash("try *")],
+  "ahood-stats": [bash("stats --json")],
   "ahood-sync": [bash("sync --dry-run --json"), bash("skill diff *")],
-  "ahood-review": [bash("review --json")],
+  "ahood-review": [bash("review --json"), bash("review show *")],
   "ahood-snap": [],
 };
 
@@ -58,7 +68,7 @@ function byName(name: string): AhoodCommand {
   return found;
 }
 
-/** `/ahood [sync|review|snap]`: the dashboard, or the matching command's steps. */
+/** `/ahood [<verb>]`: the hub, or the matching command's steps. */
 function dashboardFile(): string {
   const dashboard = byName("ahood");
   const verbs = AHOOD_COMMANDS.filter((c) => c.name !== "ahood");
@@ -69,9 +79,9 @@ function dashboardFile(): string {
     GENERATED_NOTE,
     "",
     "The user ran `/ahood $ARGUMENTS`. Pick the section that matches the first word of the arguments: " +
-      `${CLAUDE_AHOOD_VERBS.map((v) => `\`${v}\``).join(", ")}. With no arguments (or \`status\`), show the dashboard.`,
+      `${CLAUDE_AHOOD_VERBS.map((v) => `\`${v}\``).join(", ")}. With no arguments (or \`status\`), show the hub.`,
     "",
-    "## Dashboard",
+    "## Hub",
     "",
     dashboard.body,
     ...verbs.flatMap((c) => ["", `## ${c.name.replace(/^ahood-/, "")}`, "", c.body]),
@@ -117,7 +127,8 @@ export function claudePluginManifest(): string {
       version: CLI_VERSION,
       description:
         "ahood in Claude Code: the registry's MCP tools (search, fetch, publish skills, agents, MCP servers, docs), plus " +
-        "/ahood commands for your dashboard, syncing updates, reviewing evolution proposals and capturing private snaps.",
+        "/ahood commands to find, try and install artifacts, use prompts and loops, publish, star, see your stats, " +
+        "sync updates, review evolution proposals and capture private snaps.",
       author: { name: "ahood", url: REPO_URL },
       homepage: "https://www.ahood.dev/docs#mcp",
       repository: REPO_URL,

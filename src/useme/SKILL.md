@@ -69,6 +69,8 @@ ahood login                                  # or set AHOOD_TOKEN (see below)
 ahood skill search "merge pdf files" --kind skill
 ahood agent search "code review"
 ahood mcp search github
+ahood find "paddle webhooks" --kind skill --limit 5 --json   # any kind; stars, downloads
+ahood find --sort downloads --kind mcp                      # most installed, no query
 ```
 
 Search covers **public** entries only; `ahood <kind> list` shows your own (public and
@@ -82,6 +84,7 @@ ahood skill read alice/pdf-tools       # prints SKILL.md verbatim, installs noth
 ahood agent read alice/code-reviewer   # prints AGENT.md
 ahood mcp read alice/github-server     # prints server.json -- check what it runs
 ahood skill view alice/pdf-tools       # metadata: version, license, tags, stars
+ahood try alice/release-loop           # alias of `skill read`, any kind: use once, install nothing
 ```
 
 Downloads and stars are weak signals, not proof of safety. A skill can ship a `scripts/`
@@ -119,7 +122,9 @@ ahood status --json                    # installed vs latest, pins, evolution on
 ahood sync --dry-run                   # unified diff per artifact that is behind; changes nothing
 ahood sync --yes                       # apply them all; without --yes and a terminal it refuses (exit 2)
 ahood pin alice/pdf-tools@1.2.0        # sync never moves it past this; `ahood unpin` releases it
-ahood review --json                    # your pending self-evolution proposals
+ahood review --json                    # your pending self-evolution proposals, each with its diff
+ahood review show <id>                 # one proposal and its unified diff
+ahood stats --json                     # your artifacts' downloads/stars, totals, recent activity
 ahood review approve <id>              # or `reject <id>`; needs the token's publish scope
 ```
 

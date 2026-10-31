@@ -2,7 +2,7 @@
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "ahood",
   "version": "0.15.0",
-  "description": "ahood in Claude Code: the registry's MCP tools (search, fetch, publish skills, agents, MCP servers, docs), plus /ahood commands for your dashboard, syncing updates, reviewing evolution proposals and capturing private snaps.",
+  "description": "ahood in Claude Code: the registry's MCP tools (search, fetch, publish skills, agents, MCP servers, docs), plus /ahood commands to find, try and install artifacts, use prompts and loops, publish, star, see your stats, sync updates, review evolution proposals and capture private snaps.",
   "author": {
     "name": "ahood",
     "url": "https://github.com/AlexKay28/ahood-cli"

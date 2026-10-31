@@ -53,8 +53,8 @@ function packageJson(): string {
     name: OPENCODE_PLUGIN_PACKAGE,
     version: CLI_VERSION,
     description:
-      "ahood in opencode: the registry's hosted MCP server, the /ahood dashboard, sync, review and snap commands, " +
-      "and an opt-in snap prompt.",
+      "ahood in opencode: the registry's hosted MCP server, the /ahood hub and its commands (find, try, install, " +
+      "prompt, loop, project, star, publish, stats, sync, review, snap), and an opt-in snap prompt.",
     license: "MIT",
     homepage: "https://www.ahood.dev/docs#mcp",
     repository: { type: "git", url: `git+${REPO_URL}.git`, directory: OPENCODE_PLUGIN_DIR },

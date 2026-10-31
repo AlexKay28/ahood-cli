@@ -3,8 +3,8 @@
 ahood in Claude Code. The plugin connects a session to [ahood](https://www.ahood.dev)'s MCP
 server, so an agent can search, fetch, read and publish skills, agents, MCP servers and docs
 (the 20+ tools documented at [ahood.dev/docs#mcp](https://www.ahood.dev/docs#mcp)). It also adds
-`/ahood` commands for your dashboard, syncing updates, reviewing evolution proposals and
-capturing private snaps.
+`/ahood` commands to find, try and install artifacts, use prompts and loops, publish, star, see
+your stats, sync updates, review evolution proposals and capture private snaps.
 
 This plugin is published from the [`AlexKay28/ahood-cli`](https://github.com/AlexKay28/ahood-cli)
 marketplace. Install it with:
@@ -43,19 +43,30 @@ secrets: `.mcp.json` names the `AHOOD_TOKEN` variable, never a token.
 
 | Type | Does |
 | --- | --- |
-| `/ahood` | Dashboard: runs `ahood status --json` (as `npx -y @ahood/cli@<plugin version>`) and summarises installed vs latest versions, pins, pending evolution proposals, and whether evolution is on |
-| `/ahood sync` or `/ahood-sync` | Runs `ahood sync --dry-run --json`, shows a diff per update, and applies only the updates you approve (`ahood sync <owner>/<slug> --yes`). Never silent |
-| `/ahood review` or `/ahood-review` | Runs `ahood review --json`, shows each proposal with its evidence, and approves or rejects (`ahood review approve\|reject <id>`) only on your decision |
-| `/ahood snap` or `/ahood-snap` | Drafts a structured snap of the session (summary, failed, worked, fix, lesson, artifact), shows it, and saves it with `ahood snap create` only if you say yes |
+| `/ahood` | Hub: `ahood status --json` as a table (installed vs latest, pins, pending proposals, evolution on/off), a menu of every command below, and one suggested next action |
+| `/ahood-find <need> [--kind <kind>]` | `ahood find --json`: the top 5 matches with kind, purpose, stars and downloads, and why each fits; offers try or install |
+| `/ahood-trending [--kind <kind>]` | `ahood find --sort downloads`: the most installed artifacts |
+| `/ahood-try <owner/slug>` | `ahood try`: reads the artifact's root document into the session for this task, installs nothing |
+| `/ahood-install <owner/slug>` | Previews it (`ahood skill view`, `ahood try`: version, contents, risks, where it writes), then runs `ahood <kind> add` only after your yes |
+| `/ahood-prompt <owner/slug>` | Asks for each declared input, fills the prompt with `ahood prompt get`, shows it, and uses it once |
+| `/ahood-loop <owner/slug>` | Loads a loop's rules (`ahood try`) and, after your yes, follows them for this session |
+| `/ahood-project` | `ahood project --json`: this repository's project guide from ahood, or an offer to write and publish one |
+| `/ahood-star <owner/slug>` | Stars it with `ahood skill star` after your yes |
+| `/ahood-publish` | Finds the artifact in this directory by its root file, shows the diff against the published version, and runs `ahood skill publish` only after your yes |
+| `/ahood-stats` | `ahood stats --json`: your artifacts' downloads and stars, totals, recent activity and evolution counts |
+| `/ahood-sync` | `ahood sync --dry-run`, a diff per update, then `ahood sync <owner>/<slug> --yes` only for the updates you approve in chat |
+| `/ahood-review` | `ahood review --json`, each proposal with its unified diff and evidence, then `ahood review approve\|reject <id>` only on your decision |
+| `/ahood-snap` | Drafts a structured, private snap of the session, shows it, and runs `ahood snap create ...` only if you say yes |
 
 Each is also reachable namespaced (`/ahood:ahood`, `/ahood:ahood-sync`, ...) when another plugin
 uses the bare name. You start these commands; Claude does not invoke them on its own
 (`disable-model-invocation`).
 
 **What is pre-approved.** Each command's `allowed-tools` lists only the read-only calls it starts
-with: `ahood status --json`, `ahood sync --dry-run --json`, `ahood skill diff ...` and
-`ahood review --json`. Everything that changes state (syncing, approving, rejecting, pinning,
-saving a snap) is left out on purpose, so after you agree in chat Claude Code still asks its own
+with: `ahood status --json`, `ahood find ...`, `ahood try ...`, `ahood skill view ...`,
+`ahood prompt read|get ...`, `ahood project --json`, `ahood stats --json`, `ahood sync --dry-run --json`,
+`ahood skill diff ...`, `ahood review --json` and `ahood review show ...`. Everything that changes state
+(installing, starring, publishing, syncing, approving, rejecting, pinning, saving a snap) is left out on purpose, so after you agree in chat Claude Code still asks its own
 permission before running it.
 
 Snaps are private to you: only you can read them, unless you create a share link. They feed

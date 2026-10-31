@@ -102,8 +102,25 @@ describe("/ahood command files", () => {
     }
   });
 
-  it("there is one per shared command: /ahood, /ahood-sync, /ahood-review, /ahood-snap", () => {
-    expect(readdirSync(commandsDir).sort()).toEqual(["ahood-review.md", "ahood-snap.md", "ahood-sync.md", "ahood.md"]);
+  it("there is one per shared command: the /ahood hub and its thirteen verbs (ahood#1019)", () => {
+    expect(readdirSync(commandsDir).sort()).toEqual(
+      [
+        "ahood.md",
+        "ahood-find.md",
+        "ahood-trending.md",
+        "ahood-try.md",
+        "ahood-install.md",
+        "ahood-prompt.md",
+        "ahood-loop.md",
+        "ahood-project.md",
+        "ahood-star.md",
+        "ahood-publish.md",
+        "ahood-stats.md",
+        "ahood-sync.md",
+        "ahood-review.md",
+        "ahood-snap.md",
+      ].sort(),
+    );
     expect(Object.keys(CLAUDE_COMMAND_ALLOWED_TOOLS).sort()).toEqual(AHOOD_COMMANDS.map((c) => c.name).sort());
   });
 
@@ -134,7 +151,7 @@ describe("/ahood command files", () => {
         expect(AHOOD_CLI).toBe(`npx -y @ahood/cli@${CLI_VERSION}`);
         expect(body).toContain(`\`npx -y @ahood/cli@${CLI_VERSION} `);
         // A bare `ahood <verb>` in backticks would run whatever is on PATH.
-        expect(body).not.toMatch(/`ahood (status|sync|skill|pin|review|snap|login)\b/);
+        expect(body).not.toMatch(/`ahood (status|sync|skill|pin|review|snap|login|find|try|stats|prompt|project|loop|agent|mcp|doc)\b/);
       });
 
       it("never tells the agent to pass --yes except for updates the user approved", () => {
@@ -145,10 +162,11 @@ describe("/ahood command files", () => {
     });
   }
 
-  it("/ahood routes `/ahood sync|review|snap` to the matching steps", () => {
+  it("/ahood routes `/ahood <verb>` to the matching steps", () => {
     const { fields, body } = frontMatter(join(commandsDir, "ahood.md"));
-    expect(fields["argument-hint"]).toBe("[sync|review|snap]");
-    expect(CLAUDE_AHOOD_VERBS).toEqual(["sync", "review", "snap"]);
+    const verbs = ["find", "trending", "try", "install", "prompt", "loop", "project", "star", "publish", "stats", "sync", "review", "snap"];
+    expect(fields["argument-hint"]).toBe(`[${verbs.join("|")}]`);
+    expect(CLAUDE_AHOOD_VERBS).toEqual(verbs);
     expect(body).toContain("`/ahood $ARGUMENTS`");
     for (const verb of CLAUDE_AHOOD_VERBS) expect(body).toContain(`\n## ${verb}\n`);
     expect(body).toContain(`${AHOOD_CLI} status --json`);

@@ -96,21 +96,62 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     examples: ["ahood unpin alice/pdf-tools"],
   },
   {
-    usage: "ahood review [approve <id> [--version <semver>] | reject <id>] [--limit <n>] [--json]",
-    summary: "List the self-evolution proposals waiting for your review, and approve or reject them.",
+    usage: "ahood review [show <id> | approve <id> [--version <semver>] | reject <id>] [--limit <n>] [--json]",
+    summary: "List the self-evolution proposals waiting for your review with their diffs, and approve or reject them.",
     desc:
       "Bare `ahood review` lists your pending enhancement proposals across all your artifacts (GET " +
       "/api/v1/me/proposals) with their evidence: checks, sandbox and probe results, risk findings, the review " +
-      "window and why automatic mode held it. In a terminal it then asks approve/reject/skip/quit for each; " +
-      "piped, it only lists. `ahood review approve <id>` publishes the proposal as a new version (--version " +
+      "window and why automatic mode held it. In a terminal it then shows each proposal's unified diff (GET " +
+      "/api/v1/enhancements/candidates/<id>/diff, the diff the web owner panel shows) and asks " +
+      "approve/reject/skip/quit; piped, it only lists. `ahood review show <id>` prints one proposal with its " +
+      "diff. `ahood review approve <id>` publishes the proposal as a new version (--version " +
       "when it needs one chosen) and `ahood review reject <id>` discards it -- the same decision as the web " +
-      "owner panel. Listing needs the token's 'read' scope, deciding its 'publish' scope.",
+      "owner panel. Listing needs the token's 'read' scope; the diff and deciding need its 'publish' scope.",
     flags: [
       "--version <semver>  (approve) The version to publish; default is the suggested next patch.",
       "--limit <n>         (list) One page of at most n (1-100) instead of the whole queue.",
-      "--json              Emit the raw API response.",
+      "--json              Emit the API response; each proposal carries its `diff` ({files, unchanged_binaries, truncated}, null with `diff_error` when unreadable).",
     ],
-    examples: ["ahood review", "ahood review --json", "ahood review approve <id>", "ahood review reject <id>"],
+    examples: ["ahood review", "ahood review show <id>", "ahood review --json", "ahood review approve <id>", "ahood review reject <id>"],
+  },
+  {
+    usage: "ahood find [<query>] [--kind <kind>] [--sort rank|downloads|stars|recent|updated] [--limit <n>] [--json]",
+    summary: "Find skills, agents, MCP servers, docs, project guides, loops and prompts in the registry.",
+    desc:
+      "Searches the registry across every kind (GET /api/v1/skills, the same request as `ahood skill search`) and " +
+      "prints one line per result: owner/slug, kind, its one-line purpose, stars and downloads. --kind narrows to " +
+      "one kind (skill, agent, mcp, doc, project, loop, prompt); --sort picks the order (default: rank, the " +
+      "registry's recommended order; downloads for the most installed). The query may be left out when --kind or " +
+      "--sort is given, which browses instead of searching. Needs a login.",
+    flags: [
+      "--kind <kind>   Only this kind: skill, agent, mcp, doc, project, loop or prompt.",
+      "--sort <sort>   rank (default), downloads, stars, recent (newly added) or updated.",
+      "--limit <n>     At most n results (1-50; the registry's default is 20).",
+      "--json          Emit [{ref, owner, slug, kind, name, tagline, stars, downloads, updated_at}].",
+    ],
+    examples: ['ahood find "paddle webhooks" --kind skill', "ahood find --sort downloads --kind mcp --limit 5", "ahood find pdf --json"],
+  },
+  {
+    usage: "ahood try <owner>/<slug> [--json]",
+    summary: "Print an artifact's root document (SKILL.md, AGENT.md, LOOP.md, ...) without installing it.",
+    desc:
+      "An alias of `ahood skill read`, under the name the /ahood plugin commands use: prints the latest version's " +
+      "root document to stdout so an agent can use it once in this session, with nothing installed or written. " +
+      "Works for every kind. Plain mode prints the raw content (control sequences stripped in a terminal).",
+    flags: ["--json    Emit {version, content} as a single line instead of the raw content."],
+    examples: ["ahood try alice/pdf-tools", "ahood try alice/release-loop --json"],
+  },
+  {
+    usage: "ahood stats [--json]",
+    summary: "Show your own artifacts with their downloads and stars, the totals, recent activity and self-evolution counts.",
+    desc:
+      "Lists every artifact you have published (public and private) with downloads and stars, sums them, prints your " +
+      "recent activity (GET /api/v1/users/<you>/activity) and how many of your artifacts are evolving and how " +
+      "many proposals wait for review (GET /api/v1/enhancements/summary). The evolution dashboard's yield " +
+      "numbers need a browser session, so they are not shown here: see https://www.ahood.dev/my-evolution. " +
+      "Needs a login.",
+    flags: ["--json    Emit {owner, totals, artifacts, activity, evolution}."],
+    examples: ["ahood stats", "ahood stats --json"],
   },
   {
     usage: "ahood setup [claude|codex|opencode] [--remove <harness>] [--yes] [--dry-run] [--store-token|--no-store-token]",
@@ -123,8 +164,8 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
       "[marketplaces.ahood] and [plugins.\"ahood@ahood\"] as a marked block in $CODEX_HOME/config.toml (default " +
       "~/.codex), then `codex plugin marketplace upgrade ahood` and `codex plugin add ahood@ahood` -- and takes out " +
       "the MCP block, skill and AGENTS.md snippet earlier versions wrote. opencode: adds " +
-      "mcp.servers.ahood to the global opencode.json(c) and /ahood, /ahood-sync, /ahood-review, /ahood-snap command " +
-      "files. Not logged in? It offers `ahood login` first. Every MCP entry reads its token from $AHOOD_TOKEN " +
+      "mcp.servers.ahood to the global opencode.json(c) and lists the @ahood/opencode-plugin package, which brings the " +
+      "/ahood commands. Not logged in? It offers `ahood login` first. Every MCP entry reads its token from $AHOOD_TOKEN " +
       "($AHOOD_API_TOKEN is the deprecated old name) unless you let setup store the token in that harness's own " +
       "config -- an [mcp_servers.ahood] in the Codex block that replaces the plugin's, the opencode MCP entry, or env.AHOOD_TOKEN in ~/.claude/settings.json -- which " +
       "it asks about per harness (--store-token says yes up front; --yes alone does not store it). A file setup " +
