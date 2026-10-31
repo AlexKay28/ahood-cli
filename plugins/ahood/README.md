@@ -43,7 +43,7 @@ secrets: `.mcp.json` names the `AHOOD_TOKEN` variable, never a token.
 
 | Type | Does |
 | --- | --- |
-| `/ahood` | Dashboard: runs `ahood status --json` and summarises installed vs latest versions, pins, pending evolution proposals, and whether evolution is on |
+| `/ahood` | Dashboard: runs `ahood status --json` (as `npx -y @ahood/cli@<plugin version>`) and summarises installed vs latest versions, pins, pending evolution proposals, and whether evolution is on |
 | `/ahood sync` or `/ahood-sync` | Runs `ahood sync --dry-run --json`, shows a diff per update, and applies only the updates you approve (`ahood sync <owner>/<slug> --yes`). Never silent |
 | `/ahood review` or `/ahood-review` | Runs `ahood review --json`, shows each proposal with its evidence, and approves or rejects (`ahood review approve\|reject <id>`) only on your decision |
 | `/ahood snap` or `/ahood-snap` | Drafts a structured snap of the session (summary, failed, worked, fix, lesson, artifact), shows it, and saves it with `ahood snap create` only if you say yes |
@@ -66,8 +66,9 @@ deleted automatically about 3 days after creation.
 
 `commands/*.md` are generated from `src/setup/templates/ahood-commands.ts`, the same source the
 Codex and opencode setup renders, by `npm run sync-plugin`; `tests/claude-plugin.test.ts` fails
-when they drift. Bump `version` in `.claude-plugin/plugin.json` and the marketplace entry together
-on every change: a set `version` keeps users on it until it changes.
+when they drift. So is `.claude-plugin/plugin.json`, whose `version` is the CLI's (never bump it by
+hand; the marketplace entry sets none): a set `version` keeps users on it until it changes, and the
+commands run `npx -y @ahood/cli@<that version>`.
 
 ## Optional: snap prompt at the end of a task
 

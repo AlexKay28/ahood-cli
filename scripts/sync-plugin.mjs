@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Writes plugins/ahood/commands/*.md from src/setup/templates/claude-plugin.ts
+// Writes plugins/ahood/commands/*.md and .claude-plugin/plugin.json (its
+// version is the CLI's, ahood#1018) from src/setup/templates/claude-plugin.ts
 // (ahood#981), the Codex plugin (plugins/codex/ plus
 // .agents/plugins/marketplace.json) from src/setup/templates/codex-plugin.ts
 // and the opencode plugin's generated files (packages/opencode-plugin/
@@ -25,7 +26,7 @@ execFileSync(existsSync(tscBin) ? tscBin : "npx", existsSync(tscBin) ? ["-p", "t
   stdio: "inherit",
 });
 
-const { CLAUDE_PLUGIN_DIR, claudePluginCommandFiles } = await import(
+const { CLAUDE_PLUGIN_DIR, claudePluginFiles } = await import(
   path.join(rootDir, "dist", "setup", "templates", "claude-plugin.js")
 );
 const { codexPluginFiles } = await import(path.join(rootDir, "dist", "setup", "templates", "codex-plugin.js"));
@@ -33,7 +34,7 @@ const { opencodePluginFiles } = await import(path.join(rootDir, "dist", "setup",
 
 // Both lists as paths relative to the repo root.
 const files = [
-  ...claudePluginCommandFiles().map(({ file, content }) => ({ file: path.join(CLAUDE_PLUGIN_DIR, file), content })),
+  ...claudePluginFiles().map(({ file, content }) => ({ file: path.join(CLAUDE_PLUGIN_DIR, file), content })),
   ...codexPluginFiles(),
   ...opencodePluginFiles(),
 ];

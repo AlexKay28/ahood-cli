@@ -1,6 +1,7 @@
 // `ahood doctor [--offline] [--json]` (ahood#980): per harness -- detected?,
 // ahood's config in place?, plus the checks every harness shares: the MCP
-// server reachable, logged in, this CLI vs the latest on npm. Exits 1 when a
+// server reachable, logged in, this CLI vs the latest on npm, and a global
+// `ahood` on PATH vs this CLI (ahood#1018). Exits 1 when a
 // harness that IS set up is broken (partial or unreadable config, or the MCP
 // server it points at is unreachable); warnings alone exit 0.
 import { LEGACY_TOKEN_ENV, resolveTokenWithSource, TOKEN_ENV, type TokenSource } from "../credentials.js";
@@ -11,7 +12,8 @@ import { checkAuth } from "../commands/whoami.js";
 import { HARNESSES } from "./harnesses/index.js";
 import { HARNESS_IDS, type ConfigState, type Feature, type HarnessId } from "./harnesses/types.js";
 import { displayPath } from "./paths.js";
-import { AHOOD_MCP_URL } from "./templates/ahood-commands.js";
+import { runner } from "./runner.js";
+import { AHOOD_CLI, AHOOD_MCP_URL } from "./templates/ahood-commands.js";
 
 const USAGE = "Usage: ahood doctor [--offline] [--json]";
 const PROBE_TIMEOUT_MS = 5_000;
@@ -104,6 +106,33 @@ async function versionCheck(offline: boolean): Promise<Check> {
   } catch (error) {
     return { name, status: "warn", detail: `${CLI_VERSION}; could not reach npm (${error instanceof Error ? error.message : String(error)})` };
   }
+}
+
+/**
+ * The `ahood` on PATH, if any, against this CLI -- which is also the plugins'
+ * version (ahood#1018). The plugins' /ahood commands run `npx -y @ahood/cli@<version>`, not
+ * the global one, but a user (or an agent reading the docs) typing `ahood`
+ * gets whatever is on PATH, and 0.13.0 has no `status` at all. Warns only:
+ * nothing the plugins do depends on it.
+ */
+function globalCliCheck(): Check {
+  const name = "global ahood";
+  const bin = runner().which("ahood");
+  if (!bin) return { name, status: "ok", detail: `none on PATH (the plugins' commands use ${AHOOD_CLI})` };
+  const result = runner().run(bin, ["--version"], { timeoutMs: PROBE_TIMEOUT_MS });
+  const found = /\d+\.\d+\.\d+(?:-[\w.]+)?/.exec(result.status === 0 ? result.stdout : "")?.[0];
+  const update = `update it: npm i -g ${CLI_NAME}@${CLI_VERSION} (or remove it and use npx ${CLI_NAME})`;
+  if (!found) return { name, status: "warn", detail: `${displayPath(bin)} did not report a version (\`ahood --version\`) -- ${update}` };
+  if (newer(CLI_VERSION, found)) {
+    return {
+      name,
+      status: "warn",
+      detail:
+        `${displayPath(bin)} is ${found}, older than this CLI and its plugins (${CLI_VERSION}); \`ahood\` in a terminal ` +
+        `runs the old one (the plugins' /ahood commands are unaffected: they run ${AHOOD_CLI}) -- ${update}`,
+    };
+  }
+  return { name, status: "ok", detail: `${displayPath(bin)} is ${found}` };
 }
 
 /**
@@ -214,6 +243,7 @@ export async function doctor(args: string[]): Promise<void> {
 
   const source = tokenSourceCheck();
   const [mcp, login, version] = await Promise.all([mcpCheck(offline), loginCheck(offline), versionCheck(offline)]);
+  const globalCli = globalCliCheck();
   const packageChecks = new Map(
     await Promise.all(
       HARNESS_IDS.filter((id) => HARNESSES[id].npmPackage).map(async (id) => [id, await npmPackageCheck(HARNESSES[id].npmPackage!, offline)] as const),
@@ -223,10 +253,10 @@ export async function doctor(args: string[]): Promise<void> {
   const broken = harnesses.filter((h) => h.config.state !== "absent" && h.checks.some((c) => c.status === "fail"));
 
   if (json) {
-    console.log(JSON.stringify({ ok: broken.length === 0, cli: [source, login, version], harnesses }));
+    console.log(JSON.stringify({ ok: broken.length === 0, cli: [source, login, version, globalCli], harnesses }));
   } else {
     console.log("ahood doctor");
-    for (const c of [version, source, login, mcp]) console.log(`  [${MARK[c.status]}] ${c.name}: ${c.detail}`);
+    for (const c of [version, globalCli, source, login, mcp]) console.log(`  [${MARK[c.status]}] ${c.name}: ${c.detail}`);
     for (const h of harnesses) {
       console.log(`\n${h.label} (${h.id})`);
       for (const c of h.checks) console.log(`  [${MARK[c.status]}] ${c.name}: ${c.detail}`);

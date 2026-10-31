@@ -14,22 +14,25 @@
 //     description, argument-hint, allowed-tools, disable-model-invocation.
 //   - allowed-tools pre-approves those tools only for the turn the command is
 //     invoked in; the grant clears on the user's next message.
-import { AHOOD_COMMANDS, type AhoodCommand } from "./ahood-commands.js";
+import { CLI_VERSION } from "../../version.js";
+import { AHOOD_CLI, AHOOD_COMMANDS, type AhoodCommand } from "./ahood-commands.js";
 
 export const CLAUDE_PLUGIN_DIR = "plugins/ahood";
 
 /**
  * The only tools each command pre-approves: the read-only CLI calls it starts
- * with, as exact commands. Everything that changes state -- `ahood sync <x>
- * --yes`, `ahood review approve|reject`, `ahood snap create`, `ahood pin` --
- * is deliberately left out, so after the user says yes in chat Claude Code
+ * with, as exact commands, spelled as the bodies spell them (`npx -y
+ * @ahood/cli@<version> ...`, ahood#1018) or the grant would never match.
+ * Everything that changes state -- `sync <x> --yes`, `review approve|reject`,
+ * `snap create`, `pin` -- is deliberately left out, so after the user says yes in chat Claude Code
  * still asks its own permission before running it (a second, independent
  * consent). An empty list means the command pre-approves nothing.
  */
+const bash = (args: string) => `Bash(${AHOOD_CLI} ${args})`;
 export const CLAUDE_COMMAND_ALLOWED_TOOLS: Record<string, string[]> = {
-  ahood: ["Bash(ahood status --json)"],
-  "ahood-sync": ["Bash(ahood sync --dry-run --json)", "Bash(ahood skill diff *)"],
-  "ahood-review": ["Bash(ahood review --json)"],
+  ahood: [bash("status --json")],
+  "ahood-sync": [bash("sync --dry-run --json"), bash("skill diff *")],
+  "ahood-review": [bash("review --json")],
   "ahood-snap": [],
 };
 
@@ -95,4 +98,38 @@ export function claudePluginCommandFiles(): Array<{ file: string; content: strin
     file: `commands/${c.name}.md`,
     content: c.name === "ahood" ? dashboardFile() : verbFile(c),
   }));
+}
+
+const REPO_URL = "https://github.com/AlexKay28/ahood-cli";
+
+/**
+ * plugins/ahood/.claude-plugin/plugin.json, at the CLI's version (ahood#1018,
+ * step A): one version for the CLI and all three plugins, generated, never
+ * hand-bumped. Claude Code updates an installed plugin only when this
+ * `version` changes, and the marketplace entry must not set one too (when
+ * both are set, plugin.json wins silently and the entry only misleads).
+ */
+export function claudePluginManifest(): string {
+  return `${JSON.stringify(
+    {
+      $schema: "https://anthropic.com/claude-code/plugin.schema.json",
+      name: "ahood",
+      version: CLI_VERSION,
+      description:
+        "ahood in Claude Code: the registry's MCP tools (search, fetch, publish skills, agents, MCP servers, docs), plus " +
+        "/ahood commands for your dashboard, syncing updates, reviewing evolution proposals and capturing private snaps.",
+      author: { name: "ahood", url: REPO_URL },
+      homepage: "https://www.ahood.dev/docs#mcp",
+      repository: REPO_URL,
+      license: "MIT",
+      keywords: ["skills", "registry", "mcp", "agents", "ahood", "snaps"],
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+/** Every Claude plugin file this module owns, as paths relative to the plugin root. */
+export function claudePluginFiles(): Array<{ file: string; content: string }> {
+  return [{ file: ".claude-plugin/plugin.json", content: claudePluginManifest() }, ...claudePluginCommandFiles()];
 }
