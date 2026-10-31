@@ -342,7 +342,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 
 **`ahood skill update`/`ahood skill outdated` are deprecated (ahood#990)** in favor of the top-level `ahood sync`/`ahood status`, which cover every project on the machine instead of just the current one's lockfile -- both keep working exactly as before, with a one-line stderr note.
 
-**`ahood mcp` has two meanings.** With no arguments, or as `ahood mcp serve` (the preferred, explicit spelling), it starts this CLI's local, read-only MCP server over stdio. With a registry verb it manages MCP server manifests. Bare `ahood mcp` is ambiguous between the two and is deprecated in favor of `ahood mcp serve` -- a one-line note goes to stderr, then it starts the server exactly as before, so existing MCP host configurations keep working with no edits. Anything else (`ahood mcp srve`, `ahood mcp --flag`) fails with usage and a suggestion instead of starting a server. Neither is the hosted registry MCP endpoint at `https://www.ahood.dev/api/mcp`.
+**`ahood mcp <verb>` manages MCP server manifests** (`server.json`) in the registry. The local stdio MCP server that bare `ahood mcp` / `ahood mcp serve` used to start was removed in 0.16.0: both now print one line pointing at `npx @ahood/cli setup` and exit `2`. The ahood registry's own MCP server (the hosted `https://www.ahood.dev/api/mcp`) comes with the ahood plugin.
 
 ## Keeping installs current: status, sync, pin, review
 
@@ -375,7 +375,6 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood setup [claude\|codex\|opencode] [--remove <harness>] [--yes] [--dry-run] [--store-token\|--no-store-token]` | Add ahood (MCP server and /ahood commands) to Claude Code, Codex or opencode, or remove it again. |
 | `ahood doctor [--offline] [--json]` | Check each harness's ahood setup, the MCP server, your login and the CLI version. |
 | `ahood completion <bash\|zsh\|fish>` | Print a shell completion script for the command names. |
-| `ahood help useme` | Print the bundled ahood SKILL.md for an AI agent -- raw, offline, no login needed. |
 
 ### Skill (legacy, cross-kind)
 
@@ -423,12 +422,10 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood agent init [name]` | Scaffold a new agent folder with a minimal, valid AGENT.md. |
 | `ahood agent publish <owner>/<agent>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]` | Publish a new version of an agent from a folder containing AGENT.md, creating it first if it doesn't exist yet. |
 
-### MCP (local server and server manifests)
+### MCP (server manifests)
 
 | Command | What it does |
 | --- | --- |
-| `ahood mcp serve` | Start the local, read-only ahood MCP server over stdio (preferred spelling). |
-| `ahood mcp` | Ambiguous and deprecated (same as `ahood mcp serve`, kept working for existing MCP host configs). |
 | `ahood mcp search <query> [--json] [--limit <n>]` | Search published MCP server manifests. |
 | `ahood mcp view\|show <owner>/<server> [--json] [--web]` | Show a single MCP server manifest's details without installing it (alias: ahood mcp show). |
 | `ahood mcp read <owner>/<server> [--json]` | Print a published MCP server manifest's server.json, without installing it. |
@@ -606,9 +603,8 @@ ahood completion fish > ~/.config/fish/completions/ahood.fish
 - **No interactive login required.** Set `AHOOD_TOKEN` once (a personal API token from `ahood token create <name>`) and every command works non-interactively.
 - **Structured output everywhere.** `--json` is available on every read command and on `publish`/`update`, so an agent never has to scrape human-formatted text.
 - **Predictable failure.** A stable, documented [exit code](#exit-codes) per failure class, and error messages that never leak raw upstream infrastructure details — safe to surface directly to an agent's reasoning loop.
-- **A built-in guide for the agent itself.** `ahood help useme` prints a complete `SKILL.md` teaching an agent when and how to use ahood -- kinds, search -> read -> add -> update, publishing, `--json`, exit codes, `AHOOD_TOKEN`, the MCP options, and which commands are destructive. It is bundled with the installed CLI version, so it needs no login, no network, and writes nothing: stdout is the raw file and nothing else (diagnostics go to stderr), ready to paste into an agent's context or for an agent with a shell to read directly (`ahood help useme > ahood-SKILL.md` saves it). That is separate from `ahood skill add alexkay/ahood`, which optionally installs the registry-published ahood skill into a project as its own pinned skill.
+- **A plugin for the agent itself.** `npx @ahood/cli setup` installs the ahood plugin for Claude Code, Codex or opencode: the hosted ahood MCP server, the `using-ahood` skill that teaches an agent when and how to use ahood, and the `/ahood` commands. (`ahood help useme` and the local `ahood mcp serve` server were removed in 0.16.0.)
 - **A real "start here."** `ahood skill init <name>`, `ahood agent init <name>`, and `ahood mcp init <name>` scaffold a `SKILL.md`, `AGENT.md`, or `server.json` that passes the registry's publish validation, rather than requiring an agent to know each format up front.
-- **A native MCP server, for agents that prefer tool calls to subprocess parsing.** `ahood mcp serve` (or bare `ahood mcp`, deprecated but unchanged for existing configs) starts a Model Context Protocol server over stdio, exposing `search_skills`, `get_skill`, `read_skill`, `list_skill_versions`, `list_my_skills`, `ahood_status`, and `whoami` as typed, read-only tools -- the same data the `--json` flags above already return, reachable as structured tool calls instead. These names match the hosted registry MCP endpoint's tools (ahood#990); the original v1 names (`skill_search`, `skill_view`, `skill_read`, `skill_versions`, `skill_list`, `skill_outdated`) still work as deprecated aliases. Configure your MCP-aware agent host to run `ahood mcp serve` (or `npx @ahood/cli@latest mcp serve`) as a stdio server, e.g. `claude mcp add ahood -- ahood mcp serve`.
 
 ## Development
 

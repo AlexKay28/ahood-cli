@@ -1,18 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Built-CLI tests for ahood-cli#172: what is verified here is observable
-// process behavior -- what reaches stdout, whether a long-lived server starts,
-// exit codes, and what ships in the npm tarball -- so it runs dist/index.js
+// process behavior -- what reaches stdout and stderr, exit codes, and what ships in the npm tarball -- so it runs dist/index.js
 // (or the packed tarball's copy of it) as a real child process.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
 const cliPath = path.join(root, "dist", "index.js");
-const skillSource = path.join(root, "src", "useme", "SKILL.md");
 
 // An environment with no credentials and no reachable registry: HOME points at
 // an empty directory (no stored login), AHOOD_TOKEN is unset, and the API URL
@@ -28,104 +26,71 @@ function run(args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; cli?
   const result = spawnSync(process.execPath, [opts.cli ?? cliPath, ...args], {
     cwd: opts.cwd,
     env: opts.env,
-    // stdin closed: if anything here wrongly started the stdio MCP server, it
-    // would see EOF and exit 0 with no usage text -- so asserting exit 2 plus
-    // usage text below really does prove no server started. The timeout is a
-    // backstop so a regression fails instead of hanging the suite.
+    // stdin closed and a timeout, so a regression that waits on input fails
+    // instead of hanging the suite.
     input: "",
     timeout: 15_000,
   });
   return { stdout: result.stdout, stderr: result.stderr.toString(), status: result.status, signal: result.signal };
 }
 
-// Speaks just enough MCP over stdio to prove a real server is answering: send
-// `initialize`, read the FIRST stdout line, and require it to be that
-// request's JSON-RPC response -- any banner or log line printed before the
-// protocol would be the first line instead, and fail the parse.
-function firstStdoutLine(args: string[], env: NodeJS.ProcessEnv): Promise<string> {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(process.execPath, [cliPath, ...args], { env, stdio: ["pipe", "pipe", "pipe"] });
-    let buffer = "";
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error(`no response from \`ahood ${args.join(" ")}\` within 15s`));
-    }, 15_000);
-    child.stdout.on("data", (chunk) => {
-      buffer += chunk.toString();
-      const newline = buffer.indexOf("\n");
-      if (newline !== -1) {
-        clearTimeout(timer);
-        child.kill();
-        resolvePromise(buffer.slice(0, newline));
-      }
-    });
-    child.on("error", reject);
-    child.stdin.write(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } },
-      }) + "\n",
-    );
-  });
-}
+// ahood#1018 step 2: the removed legacy forms each print exactly one line on
+// stderr and exit 2, for one release, and run nothing else.
+const REMOVED_NOTICE = "removed in 0.16.0 -- ahood is a plugin now: npx @ahood/cli setup\n";
 
-describe("ahood mcp: the local stdio server is unchanged", () => {
-  for (const args of [["mcp"], ["mcp", "serve"]]) {
-    it(`\`ahood ${args.join(" ")}\` serves MCP over stdio, offline and unauthenticated, with nothing before the protocol`, async () => {
-      const home = mkdtempSync(path.join(tmpdir(), "ahood-mcp-serve-"));
+describe("removed legacy forms (ahood#1018): one line, exit 2, nothing else", () => {
+  for (const args of [["mcp", "serve"], ["mcp"], ["mcp", "serve", "--help"], ["mcp", "serve", "extra"], ["help", "useme"]]) {
+    it(`\`ahood ${args.join(" ")}\` prints the removal notice and exits 2, offline, writing nothing`, () => {
+      const home = mkdtempSync(path.join(tmpdir(), "ahood-removed-home-"));
+      const cwd = mkdtempSync(path.join(tmpdir(), "ahood-removed-cwd-"));
       try {
-        const line = await firstStdoutLine(args, offlineEnv(home));
-        const message = JSON.parse(line);
-        expect(message).toMatchObject({ jsonrpc: "2.0", id: 1 });
-        expect(message.result.serverInfo.name).toBe("ahood");
+        const { stdout, stderr, status, signal } = run(args, { cwd, env: offlineEnv(home) });
+        expect(signal).toBeNull();
+        expect(status).toBe(2);
+        expect(stdout.toString()).toBe("");
+        expect(stderr).toBe(REMOVED_NOTICE);
+        expect(readdirSync(cwd)).toEqual([]);
+        expect(readdirSync(home)).toEqual([]);
       } finally {
         rmSync(home, { recursive: true, force: true });
+        rmSync(cwd, { recursive: true, force: true });
       }
     });
   }
 
-  for (const args of [["mcp", "srve"], ["mcp", "--stdio"], ["mcp", "serve", "extra"]]) {
-    it(`\`ahood ${args.join(" ")}\` fails with usage (exit 2) instead of starting a server`, () => {
-      const { stdout, stderr, status, signal } = run(args);
-      expect(signal).toBeNull();
-      expect(status).toBe(2);
-      expect(stdout.toString()).toBe("");
-      expect(stderr).toMatch(/Unknown mcp command|takes no arguments/);
-      expect(stderr).toMatch(/ahood mcp serve/);
-    });
-  }
-
-  it("suggests `serve` for a near-miss", () => {
-    expect(run(["mcp", "srve"]).stderr).toContain("Did you mean 'serve'?");
+  it("the mcp-kind registry verbs still work: an unknown one fails with usage, not the notice", () => {
+    const { stderr, status } = run(["mcp", "srve"]);
+    expect(status).toBe(2);
+    expect(stderr).toContain("Unknown mcp command: srve");
+    expect(stderr).not.toContain("serve");
   });
 
   for (const args of [["mcp", "--help"], ["mcp", "-h"], ["help", "mcp"]]) {
-    it(`\`ahood ${args.join(" ")}\` prints help describing both meanings, without starting a server`, () => {
+    it(`\`ahood ${args.join(" ")}\` prints manifest help with no local server in it`, () => {
       const { stdout, status } = run(args);
       expect(status).toBe(0);
       const text = stdout.toString();
-      expect(text).toContain("ahood mcp serve");
-      expect(text).toContain("read-only MCP server over stdio");
       expect(text).toContain("ahood mcp add <owner>/<server>");
-      expect(text).toContain("https://www.ahood.dev/api/mcp");
+      expect(text).toContain("npx @ahood/cli setup");
+      expect(text).not.toContain("mcp serve");
+      expect(text).not.toContain("stdio");
     });
   }
 
-  it("`ahood mcp serve --help` and `ahood mcp add --help` print per-verb help", () => {
-    expect(run(["mcp", "serve", "--help"]).stdout.toString()).toMatch(/^ahood mcp serve\n/);
+  it("`ahood mcp add --help` prints per-verb help", () => {
     expect(run(["mcp", "add", "--help"]).stdout.toString()).toMatch(/^ahood mcp add <owner>\/<server>/);
   });
 });
 
 describe("agent/mcp command groups are discoverable", () => {
-  it("`ahood --help` lists the agent and mcp groups and the use-me guide", () => {
+  it("`ahood --help` lists the agent and mcp groups and points agents at the plugin, not the removed forms", () => {
     const text = run(["--help"]).stdout.toString();
     expect(text).toContain("Use ahood with an AI agent:");
-    expect(text).toContain("ahood help useme");
+    expect(text).toContain("npx @ahood/cli setup");
     expect(text).toContain("ahood agent <command>");
     expect(text).toContain("ahood mcp <command>");
+    expect(text).not.toContain("useme");
+    expect(text).not.toContain("mcp serve");
   });
 
   it("`ahood agent` prints agent help; `ahood agent bogus` fails with a suggestion", () => {
@@ -143,11 +108,13 @@ describe("agent/mcp command groups are discoverable", () => {
     expect(text).toContain("--kind all");
   });
 
-  it("completion offers agent/mcp verbs, `serve`, and `help useme`", () => {
+  it("completion offers agent/mcp verbs, but not `serve` or `help useme`", () => {
     const bash = run(["completion", "bash"]).stdout.toString();
     expect(bash).toMatch(/local agent_words="[^"]*\bpublish\b/);
-    expect(bash).toMatch(/local mcp_words="[^"]*\bserve\b[^"]*\binit\b/);
-    expect(bash).toMatch(/local help_words="useme /);
+    expect(bash).toMatch(/local mcp_words="[^"]*\binit\b/);
+    expect(bash).not.toMatch(/\bserve\b/);
+    expect(bash).not.toContain("useme");
+    expect(bash).toMatch(/local help_words="skill /);
     expect(bash).toMatch(/local top_words="[^"]*\bagent\b[^"]*\bmcp\b/);
   });
 
@@ -209,14 +176,6 @@ describe("ahood doc command group (ahood-cli#182)", () => {
     expect(bash).toMatch(/local help_words="[^"]*\bdoc\b/);
   });
 
-  it("the self-skill documents the doc group", () => {
-    const content = readFileSync(skillSource, "utf8");
-    expect(content).toContain("ahood doc read");
-    expect(content).toContain("ahood doc add");
-    expect(content).toContain(".claude/docs/<owner>@<doc>.md");
-    expect(content).toContain("DOC.md");
-    expect(content).not.toContain("This CLI has no `doc` group");
-  });
 });
 
 describe("ahood project command group (ahood-cli#185)", () => {
@@ -258,12 +217,6 @@ describe("ahood project command group (ahood-cli#185)", () => {
     expect(words.some((w) => !/^[a-z]/.test(w))).toBe(false);
   });
 
-  it("the self-skill documents the project group", () => {
-    const content = readFileSync(skillSource, "utf8");
-    expect(content).toContain("ahood project add");
-    expect(content).toContain(".claude/project.md");
-    expect(content).toContain("PROJECT.md");
-  });
 });
 
 describe("ahood loop command group (ahood-cli, ahood#858)", () => {
@@ -312,13 +265,6 @@ describe("ahood loop command group (ahood-cli, ahood#858)", () => {
     expect(bash).toMatch(/local help_words="[^"]*\bloop\b/);
   });
 
-  it("the self-skill documents the loop group", () => {
-    const content = readFileSync(skillSource, "utf8");
-    expect(content).toContain("ahood loop read");
-    expect(content).toContain("ahood loop add");
-    expect(content).toContain(".claude/loops/<owner>@<loop>.md");
-    expect(content).toContain("LOOP.md");
-  });
 });
 
 describe("ahood prompt command group (ahood-cli#206)", () => {
@@ -368,56 +314,10 @@ describe("ahood prompt command group (ahood-cli#206)", () => {
     expect(promptWords).not.toContain("remove");
   });
 
-  it("the self-skill documents the prompt group", () => {
-    const content = readFileSync(skillSource, "utf8");
-    expect(content).toContain("| prompt | `PROMPT.md` | not installed; `ahood prompt get` | `ahood prompt <verb>` |");
-    expect(content).toContain("ahood prompt get");
-  });
-});
-
-describe("ahood help useme", () => {
-  it("prints the bundled SKILL.md byte-for-byte, offline, unauthenticated, writing nothing", () => {
-    const home = mkdtempSync(path.join(tmpdir(), "ahood-useme-home-"));
-    const cwd = mkdtempSync(path.join(tmpdir(), "ahood-useme-cwd-"));
-    try {
-      const { stdout, stderr, status } = run(["help", "useme"], { cwd, env: offlineEnv(home) });
-      expect(status).toBe(0);
-      expect(stderr).toBe("");
-      expect(Buffer.compare(stdout, readFileSync(skillSource))).toBe(0);
-      expect(readdirSync(cwd)).toEqual([]);
-      expect(readdirSync(home)).toEqual([]);
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
-
-  it("is a valid, trigger-friendly SKILL.md with no terminal escapes", () => {
-    const content = readFileSync(skillSource, "utf8");
-    const frontmatter = content.match(/^---\n([\s\S]*?)\n---\n/);
-    expect(frontmatter).not.toBeNull();
-    const lines = frontmatter![1].split("\n");
-    expect(lines).toContain("name: ahood");
-    const description = lines.find((l) => l.startsWith("description: "))!.slice("description: ".length);
-    expect(description.length).toBeGreaterThan(100);
-    expect(description.length).toBeLessThanOrEqual(1024);
-    expect(description).not.toMatch(/[<>]/);
-    expect(lines).toHaveLength(2); // name + one-line description, nothing a strict parser could trip on
-    expect(content).not.toMatch(/\x1b/);
-  });
-
-  it("documents each kind group, mcp serve vs. manifests vs. hosted MCP, and does not repeat the old nested install path", () => {
-    const content = readFileSync(skillSource, "utf8");
-    for (const needle of ["ahood agent", "ahood mcp serve", "server.json", "AGENT.md", "AHOOD_TOKEN", "--json", "https://www.ahood.dev/api/mcp", "unpublish"]) {
-      expect(content).toContain(needle);
-    }
-    expect(content).toContain(".claude/skills/<owner>@<skill>/");
-    expect(content).not.toMatch(/\.claude\/skills\/\{owner\}\/\{skill\}/);
-  });
 });
 
 describe("npm tarball", () => {
-  it("ships the self-skill, and the installed CLI prints it identically and version-matched", () => {
+  it("ships the CLI without the removed forms, and the installed CLI is version-matched", () => {
     const work = mkdtempSync(path.join(tmpdir(), "ahood-pack-"));
     try {
       const packJson = execFileSync("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", work], {
@@ -426,29 +326,26 @@ describe("npm tarball", () => {
       });
       const [packed] = JSON.parse(packJson) as Array<{ filename: string; version: string; files: Array<{ path: string }> }>;
       const files = packed.files.map((f) => f.path);
-      expect(files).toContain("dist/useme/SKILL.md");
       expect(files).toContain("dist/index.js");
+      // ahood#1018 step 2: no bundled raw skill, no local stdio MCP server.
+      expect(files.filter((f) => /^dist\/(useme|mcp)(\/|\.)/.test(f))).toEqual([]);
 
       execFileSync("tar", ["-xzf", path.join(work, packed.filename), "-C", work]);
       const pkgDir = path.join(work, "package");
       // Dependencies come from this checkout rather than the network; the CLI
-      // code and the SKILL.md it prints come from the tarball alone.
+      // code comes from the tarball alone.
       symlinkSync(path.join(root, "node_modules"), path.join(pkgDir, "node_modules"), "dir");
       const installedCli = path.join(pkgDir, "dist", "index.js");
 
       const home = path.join(work, "home");
       const cwd = path.join(work, "cwd");
       execFileSync("mkdir", ["-p", home, cwd]);
-      const { stdout, stderr, status } = run(["help", "useme"], { cli: installedCli, cwd, env: offlineEnv(home) });
-      expect(status).toBe(0);
-      expect(stderr).toBe("");
-      expect(Buffer.compare(stdout, readFileSync(path.join(pkgDir, "dist", "useme", "SKILL.md")))).toBe(0);
-      expect(Buffer.compare(stdout, readFileSync(skillSource))).toBe(0);
       expect(run(["--version"], { cli: installedCli }).stdout.toString().trim()).toBe(`@ahood/cli ${packed.version}`);
+      const removed = run(["help", "useme"], { cli: installedCli, cwd, env: offlineEnv(home) });
+      expect(removed.status).toBe(2);
+      expect(removed.stderr).toBe(REMOVED_NOTICE);
       expect(existsSync(path.join(cwd, ".claude"))).toBe(false);
-      // ahood-cli#182: the tarball carries the doc group's help and the
-      // self-skill that documents it.
-      expect(stdout.toString()).toContain("ahood doc read");
+      // ahood-cli#182: the tarball carries the doc group's help.
       const docHelp = run(["doc", "--help"], { cli: installedCli, cwd, env: offlineEnv(home) });
       expect(docHelp.status).toBe(0);
       expect(docHelp.stdout.toString()).toContain("ahood doc -- docs (DOC.md) in the ahood registry");

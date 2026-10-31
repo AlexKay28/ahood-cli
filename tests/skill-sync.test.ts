@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { canonicalBody, renderPluginSkill, renderRegistrySkill, targets, CANONICAL_PATH } from "../scripts/sync-skill.mjs";
+import { canonicalBody, renderPluginSkill, targets, CANONICAL_PATH } from "../scripts/sync-skill.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
 
@@ -57,14 +57,14 @@ describe("the canonical self-skill body (src/skill/using-ahood.md)", () => {
   });
 });
 
-describe("renderPluginSkill() / renderRegistrySkill()", () => {
-  it("each has its own name and description, over the shared canonical body", () => {
+describe("renderPluginSkill()", () => {
+  it("has its own name and description, over the shared canonical body", () => {
     const plugin = renderPluginSkill();
-    const registry = renderRegistrySkill();
     expect(plugin).toMatch(/^---\nname: using-ahood\n/);
-    expect(registry).toMatch(/^---\nname: ahood\n/);
-    const body = canonicalBody();
-    expect(plugin.endsWith(body)).toBe(true);
-    expect(registry.endsWith(body)).toBe(true);
+    expect(plugin.endsWith(canonicalBody())).toBe(true);
+  });
+
+  it("is the only kind of target: no registry copy, no `ahood help useme` file (ahood#1018)", () => {
+    for (const { path } of targets()) expect(path).toMatch(/^plugins\/[a-z]+\/skills\/using-ahood\/SKILL\.md$/);
   });
 });
