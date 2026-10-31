@@ -19,7 +19,6 @@ import { read } from "./commands/read.js";
 import { versions } from "./commands/versions.js";
 import { diff } from "./commands/diff.js";
 import { completion } from "./commands/completion.js";
-import { mcp } from "./commands/mcp.js";
 import { status } from "./commands/status.js";
 import { sync } from "./commands/sync.js";
 import { pin, unpin } from "./commands/pin.js";
@@ -32,7 +31,6 @@ import { CLI_KINDS, extractKindFlag, isCliKind, resolveScope, type CliKind, type
 import { INSTALL_VERBS, isInstalledKind, KINDS } from "./kind-info.js";
 import { promptGet } from "./commands/prompt-get.js";
 import { findProjectGuides } from "./commands/project-guides.js";
-import { readUseme } from "./useme.js";
 import { UsageError } from "./usage-error.js";
 import { init } from "./commands/init.js";
 import {
@@ -265,12 +263,9 @@ async function dispatchRegistry(noun: CliKind, args: string[]): Promise<void> {
   if (!handler) {
     console.error(`Unknown ${noun} command: ${sub}`);
     const known = [...Object.keys(kindVerbs), ...Object.keys(SKILL_COMMANDS)];
-    const suggestion = closestOf(sub, noun === "mcp" ? ["serve", ...known] : known);
+    const suggestion = closestOf(sub, known);
     if (suggestion) console.error(`Did you mean '${suggestion}'?`);
     console.error(`Run \`ahood ${noun} --help\` for a list of commands.`);
-    if (noun === "mcp") {
-      console.error("To start the local MCP server, run `ahood mcp serve` (or `ahood mcp` with no arguments).");
-    }
     process.exit(2);
   }
 
@@ -374,37 +369,23 @@ async function dispatchProject(args: string[]): Promise<void> {
   await dispatchRegistry("project", args);
 }
 
-// `ahood mcp` keeps its original contract byte-for-byte: with NO arguments it
-// is the local stdio MCP server that existing host configs launch -- nothing
-// is printed to STDOUT and nothing else runs first (the stdio protocol owns
-// stdout for the life of the process). `ahood mcp serve` is the same server
-// under an explicit, documented name. Every other first word is a registry
-// verb for mcp-kind entries, help, or an error: an unrecognized one fails
-// with usage (dispatchRegistry) rather than silently starting a long-lived
-// server that a typo would otherwise leave hanging.
+// ahood#1018 step 2: the one line every removed legacy form prints (on
+// stderr, exit 2) for one release -- `ahood mcp`, `ahood mcp serve`,
+// `ahood help useme`. Drop it, and the callers below, in 0.18.0.
+export const REMOVED_NOTICE = "removed in 0.17.0 -- ahood is a plugin now: npx @ahood/cli setup";
+
+function removedForm(): never {
+  console.error(REMOVED_NOTICE);
+  process.exit(2);
+}
+
+// ahood#1018 step 2: the local stdio MCP server (`ahood mcp` with no
+// arguments, `ahood mcp serve`) was removed in 0.17.0 -- the plugin brings the
+// hosted MCP server now. For one release those spellings print REMOVED_NOTICE
+// and exit 2 instead of "Unknown mcp command"; every other first word is still
+// a registry verb for mcp-kind entries (server.json manifests).
 async function dispatchMcp(args: string[]): Promise<void> {
-  if (args.length === 0) {
-    // ahood#990: bare `ahood mcp` is ambiguous with `ahood mcp <verb>` (the
-    // mcp-kind registry commands below) -- deprecated in favor of the
-    // explicit `ahood mcp serve`, stderr only so the stdio protocol's stdout
-    // is untouched and an existing host config keeps working byte-for-byte.
-    console.error("Deprecated: bare `ahood mcp` is ambiguous; run `ahood mcp serve` for the local MCP server. Starting it anyway.");
-    await mcp(args);
-    return;
-  }
-  const [sub, ...rest] = args;
-  if (sub === "serve") {
-    if (rest.includes("--help") || rest.includes("-h")) {
-      const entry = findCommandHelp("mcp", "serve");
-      console.log(entry ? formatCommandHelp(entry) : formatKindHelp("mcp"));
-      return;
-    }
-    if (rest.length > 0) {
-      throw new UsageError(`\`ahood mcp serve\` takes no arguments (got: ${rest.join(" ")}).\nUsage: ahood mcp serve`);
-    }
-    await mcp([]);
-    return;
-  }
+  if (args.length === 0 || args[0] === "serve") removedForm();
   await dispatchRegistry("mcp", args);
 }
 
@@ -490,21 +471,8 @@ async function main() {
 
   if (command === "help") {
     const sub = args[0];
-    // `ahood help useme` (ahood-cli#172): the bundled self-skill, as raw
-    // bytes on stdout and nothing else -- no banner, no trailing newline of
-    // our own -- so the output IS the SKILL.md. No network, no credentials,
-    // no project writes.
-    if (sub === "useme") {
-      let content: Buffer;
-      try {
-        content = readUseme();
-      } catch (error) {
-        console.error(`Could not read the bundled ahood SKILL.md: ${error instanceof Error ? error.message : String(error)}`);
-        process.exit(1);
-      }
-      process.stdout.write(content);
-      return;
-    }
+    // ahood#1018 step 2: the bundled raw skill was removed in 0.17.0.
+    if (sub === "useme") removedForm();
     if (isCliKind(sub)) {
       const verb = args[1];
       const entry = verb ? findCommandHelp(sub, verb) : undefined;

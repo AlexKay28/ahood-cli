@@ -10,16 +10,10 @@
 //     registry entry, ships straight from this git repo).
 //   - plugins/codex/skills/using-ahood/SKILL.md -- the same skill in the
 //     Codex plugin (ahood#1009), next to its `ahood` command skill.
-//   - .claude/skills/alexkay@ahood/SKILL.md -- this repo's own dev-installed
-//     copy of the registry-published "alexkay/ahood" skill (name: ahood).
-//     Publishing a new version from it is a separate, owner-run step (see
-//     the command printed by `--check`'s failure message / this script's
-//     own trailing log) -- this script only keeps the on-disk copy in sync
-//     with the canonical body so there's something correct to publish.
 //
-// `ahood help useme` (src/useme/SKILL.md) is a third, deliberately separate
-// document -- a full CLI reference, not an agent-facing "how to use ahood in
-// a session" crib -- so it is not generated from this file.
+// Plugin skills only (ahood#1018): the registry copy (alexkay/ahood) and the
+// raw `ahood help useme` skill were the other ways to get this guidance, and
+// both are retired -- ahood ships as the CLI and the plugin, nothing else.
 //
 // Usage:
 //   node scripts/sync-skill.mjs          # rewrite the generated files in place
@@ -50,33 +44,16 @@ export const PLUGIN_SKILL_DESCRIPTION =
   'server, says "snap this" or "remember this lesson", after you hand over a deliverable, or right after the user ' +
   "corrects you.";
 
-export const REGISTRY_SKILL_DESCRIPTION =
-  "How to use the ahood CLI (@ahood/cli) and MCP tools, the registry for reusable AI-agent skills, subagent " +
-  "definitions, MCP server manifests and docs. Load BEFORE running any ahood command; before writing a " +
-  "non-trivial reusable skill, subagent or MCP integration from scratch (search the registry first); when " +
-  "installing, updating, removing, publishing or sharing one; when capturing a private snap; or when setting up " +
-  "headless/CI access with AHOOD_TOKEN. Triggers -- ahood, skill registry, is there a skill for this, install a " +
-  "skill, publish a skill, snap this, remember this lesson, AHOOD_TOKEN.";
-
 export function renderPluginSkill() {
   return `${frontMatter("using-ahood", PLUGIN_SKILL_DESCRIPTION)}\n\n${GENERATED_NOTE}\n\n${canonicalBody()}`;
 }
 
-export function renderRegistrySkill() {
-  return `${frontMatter("ahood", REGISTRY_SKILL_DESCRIPTION)}\n\n${GENERATED_NOTE}\n\n${canonicalBody()}`;
-}
-
-// `.claude/skills/alexkay@ahood` only exists at all because this repo
-// dogfoods its own registry skill (`ahood skill add alexkay/ahood`) -- a
-// fresh clone or a clone of a fork without that install has nothing to
-// regenerate, so that target is skipped rather than created from nothing
-// (creating it here would also desync the real `.claude/skills.lock.json`
-// pin/checksum, which only `ahood skill add`/`update` may touch).
+// A target whose directory is missing (a trimmed checkout) is skipped rather
+// than created from nothing.
 export function targets() {
   const all = [
     { path: "plugins/ahood/skills/using-ahood/SKILL.md", render: renderPluginSkill },
     { path: "plugins/codex/skills/using-ahood/SKILL.md", render: renderPluginSkill },
-    { path: ".claude/skills/alexkay@ahood/SKILL.md", render: renderRegistrySkill },
   ];
   return all.filter((t) => existsSync(path.join(rootDir, path.dirname(t.path))));
 }
@@ -101,10 +78,6 @@ function main() {
     process.exit(1);
   }
   console.log(stale.length === 0 ? "Self-skill files already up to date." : `Updated: ${stale.join(", ")}`);
-  console.log(
-    "Owner step (not run by this script): publish the registry copy with " +
-      "`ahood skill publish alexkay/ahood@<new-version> --path .claude/skills/alexkay@ahood --changelog \"...\"`.",
-  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main();
