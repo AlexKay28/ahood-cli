@@ -325,6 +325,19 @@ function planRemove(): SetupPlan {
 
 // ---- doctor -------------------------------------------------------------------
 
+/**
+ * `auto-update: on|off` (ahood#1018 step C). Codex needs no switch: at startup
+ * it upgrades every configured git marketplace from its ref (`git ls-remote`,
+ * openai/codex#17425) and refreshes the plugins installed from it. On a tag
+ * that never moves, though, nothing new ever arrives.
+ */
+function autoUpdateFeature(ref: string | null): Feature {
+  if (ref !== null && /^v\d/.test(ref)) {
+    return { name: "auto-update", state: "stale", detail: `off in effect: pinned to the tag ${ref}, which never moves -- re-run \`ahood setup codex\`` };
+  }
+  return { name: "auto-update", state: "ok", detail: `on (Codex upgrades the configured marketplace from ${describeRef(ref)} when it starts)` };
+}
+
 /** Which ref Codex reads the plugin from (ahood#1018 step B); none without our block. */
 function channelFeature(ref: string | null | undefined): Feature | null {
   if (ref === undefined) return null;
@@ -379,8 +392,9 @@ function inspect(): ConfigState {
     { name: "plugin config", state: config, detail: configDetail },
     { name: "plugin", state: pluginState, detail: pluginDetail },
   ];
-  const channel = channelFeature(blockRef(text, path));
-  if (channel) features.push(channel);
+  const ref = blockRef(text, path);
+  const channel = channelFeature(ref);
+  if (channel && ref !== undefined) features.push(channel, autoUpdateFeature(ref));
   const leftovers = [legacySkillPath(), legacySnippetPath()].filter((p) => (readIfExists(p) ?? "").includes(OWNED_MARKER));
   if (leftovers.length > 0) {
     features.push({ name: "old setup files", state: "stale", detail: `${leftovers.map(displayPath).join(", ")} -- re-run \`ahood setup codex\` to remove` });

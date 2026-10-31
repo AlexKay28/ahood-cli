@@ -14,7 +14,7 @@ vi.mock("../src/confirm.js", async (orig) => ({
 // `ahood setup` offers `ahood login` when no token is found (ahood#990); never run the real device flow here.
 vi.mock("../src/commands/login.js", () => ({ login: vi.fn(async () => {}) }));
 
-import { confirmYesNo, isInteractive } from "../src/confirm.js";
+import { askLine, confirmYesNo, isInteractive } from "../src/confirm.js";
 import { setup } from "../src/setup/setup-command.js";
 import { UsageError } from "../src/usage-error.js";
 import { writeBackup } from "../src/setup/file-changes.js";
@@ -546,9 +546,10 @@ describe("ahood setup claude (ahood#980)", () => {
     await setup(["claude", "--yes"]);
     expect(mutating()).toEqual(["plugin marketplace add AlexKay28/ahood-cli#release", "plugin install ahood@ahood"]);
     expect(claude.state.installed).toBe(true);
-    // the only file is the declaration the claude CLI itself wrote
+    // the only file is the declaration the claude CLI itself wrote (no backup: there was nothing before)
     expect(listFiles(env.home)).toEqual([".claude/settings.json"]);
-    expect(JSON.parse(readFileSync(settings(), "utf-8")).extraKnownMarketplaces.ahood).toEqual(declared("release"));
+    // with --yes, auto-update is on (ahood#1018 step C), set after `add` rewrote the declaration
+    expect(JSON.parse(readFileSync(settings(), "utf-8")).extraKnownMarketplaces.ahood).toEqual({ ...declared("release"), autoUpdate: true });
   });
 
   it("is idempotent: an installed plugin runs nothing", async () => {
@@ -582,9 +583,9 @@ describe("ahood setup claude (ahood#980)", () => {
         expect(mutating()).toEqual(["plugin marketplace add AlexKay28/ahood-cli#release", "plugin update ahood@ahood"]);
         expect(io.stdout()).toContain(`marketplace moved from ${ref ?? "unpinned"}`);
         const after = JSON.parse(readFileSync(settings(), "utf-8"));
-        expect(after.extraKnownMarketplaces.ahood).toEqual(declared("release"));
+        expect(after.extraKnownMarketplaces.ahood).toEqual({ ...declared("release"), autoUpdate: true });
         expect(after.theme).toBe("dark");
-        const [backup] = backups(listFiles(join(env.home, ".claude")));
+        const [backup] = backups(listFiles(join(env.home, ".claude"))).sort();
         expect(readFileSync(join(env.home, ".claude", backup), "utf-8")).toBe(before);
         // a re-run has nothing left to do
         runner.calls.length = 0;
@@ -685,6 +686,118 @@ describe("ahood setup claude (ahood#980)", () => {
     await setup(["claude", "--yes"]);
     expect(process.exitCode).toBe(1);
     expect(io.stderr()).toMatch(/could not install the ahood plugin/);
+  });
+});
+
+describe("ahood setup claude: auto-update with consent (ahood#1018 step C)", () => {
+  const settings = () => join(env.home, ".claude", "settings.json");
+  const entry = () => JSON.parse(readFileSync(settings(), "utf-8")).extraKnownMarketplaces?.ahood;
+  const writeSettings = (value: unknown) => {
+    mkdirSync(join(env.home, ".claude"), { recursive: true });
+    writeFileSync(settings(), `${JSON.stringify(value, null, 2)}\n`);
+  };
+  const ours = { source: { source: "github", repo: "AlexKay28/ahood-cli", ref: "release" } };
+  const asked = () => vi.mocked(askLine).mock.calls.map(([q]) => q).filter((q) => q.includes("up to date automatically"));
+  let claude: ReturnType<typeof fakeClaude>;
+  const useClaude = (state: Parameters<typeof fakeClaude>[0] = {}) => {
+    runner.restore();
+    claude = fakeClaude(state);
+    runner = fakeRunner({ claude: claude.bin });
+  };
+
+  it("asks once in a terminal; Enter means yes and autoUpdate lands after `marketplace add` rewrote the entry", async () => {
+    useClaude();
+    vi.mocked(isInteractive).mockReturnValue(true);
+    vi.mocked(askLine).mockResolvedValue("");
+    await setup(["claude"]);
+    expect(asked()).toEqual(["\nClaude Code: Keep ahood up to date automatically? [Y/n] "]);
+    expect(entry()).toEqual({ ...ours, autoUpdate: true });
+    // asked once: on already, a re-run does not ask again
+    vi.mocked(askLine).mockClear();
+    await setup(["claude"]);
+    expect(asked()).toEqual([]);
+  });
+
+  it("backs the user's settings.json up before `marketplace add` rewrites it, token redacted", async () => {
+    writeSettings({ theme: "dark", env: { AHOOD_TOKEN: "tok-secret", AHOOD_TOKEN_SET_BY: "ahood setup (remove with `ahood setup --remove claude`)" } });
+    const before = readFileSync(settings(), "utf-8");
+    useClaude();
+    await setup(["claude", "--yes", "--store-token"]);
+    const found = backups(listFiles(join(env.home, ".claude")));
+    expect(found).toHaveLength(1);
+    expect(readFileSync(join(env.home, ".claude", found[0]), "utf-8")).toBe(before.replace("tok-secret", "<ahood token removed from this backup>"));
+    expect(entry()).toEqual({ ...ours, autoUpdate: true });
+  });
+
+  it("a no in the terminal leaves it off", async () => {
+    useClaude();
+    vi.mocked(isInteractive).mockReturnValue(true);
+    vi.mocked(askLine).mockResolvedValue("n");
+    await setup(["claude"]);
+    expect(entry()).toEqual(ours);
+  });
+
+  it("--no-auto-update neither asks nor writes it", async () => {
+    useClaude();
+    vi.mocked(isInteractive).mockReturnValue(true);
+    await setup(["claude", "--yes", "--no-auto-update"]);
+    expect(asked()).toEqual([]);
+    expect(entry()).toEqual(ours);
+  });
+
+  it("an install that is already on release only gets the flag: a settings edit with a backup, no command", async () => {
+    writeSettings({ theme: "dark", extraKnownMarketplaces: { ahood: ours } });
+    const before = readFileSync(settings(), "utf-8");
+    useClaude({ marketplace: true, installed: true });
+    await setup(["claude", "--yes"]);
+    expect(runner.calls.filter((c) => !c.args.includes("--help") && !c.args.includes("--json"))).toEqual([]);
+    expect(entry()).toEqual({ ...ours, autoUpdate: true });
+    const [backup] = backups(listFiles(join(env.home, ".claude")));
+    expect(readFileSync(join(env.home, ".claude", backup), "utf-8")).toBe(before);
+  });
+
+  it("a migration keeps an autoUpdate the user had on, even with --no-auto-update (`add` would drop it)", async () => {
+    writeSettings({ extraKnownMarketplaces: { ahood: { source: { source: "github", repo: "AlexKay28/ahood-cli" }, autoUpdate: true } } });
+    useClaude({ marketplace: true, ref: undefined, installed: true });
+    await setup(["claude", "--yes", "--no-auto-update"]);
+    expect(entry()).toEqual({ ...ours, autoUpdate: true });
+  });
+
+  it("--dry-run says the flag is set after the commands, and writes nothing", async () => {
+    useClaude();
+    await setup(["claude", "--dry-run"]);
+    expect(io.stdout()).toContain("then update  ~/.claude/settings.json -- extraKnownMarketplaces.ahood.autoUpdate: true");
+    expect(listFiles(env.home)).toEqual([]);
+  });
+
+  it("a failed command leaves the flag unwritten", async () => {
+    useClaude({ failInstall: true });
+    await setup(["claude", "--yes"]);
+    expect(process.exitCode).toBe(1);
+    expect(entry()).toEqual(ours);
+  });
+
+  it("--remove with the claude CLI: `marketplace remove` takes the whole entry, autoUpdate included", async () => {
+    useClaude();
+    await setup(["claude", "--yes"]);
+    await setup(["--remove", "claude", "--yes"]);
+    expect(entry()).toBeUndefined();
+  });
+
+  it("--remove without the claude CLI takes setup's autoUpdate back out, byte-identical to before it", async () => {
+    writeSettings({ theme: "dark", extraKnownMarketplaces: { ahood: ours } });
+    const before = readFileSync(settings(), "utf-8");
+    useClaude({ marketplace: true, installed: true });
+    await setup(["claude", "--yes"]);
+    expect(entry()).toEqual({ ...ours, autoUpdate: true });
+    runner.restore();
+    runner = fakeRunner({});
+    await setup(["--remove", "claude", "--yes"]);
+    expect(readFileSync(settings(), "utf-8")).toBe(before);
+  });
+
+  it("--remove with --no-auto-update is a usage error", async () => {
+    await expect(setup(["--remove", "claude", "--no-auto-update"])).rejects.toBeInstanceOf(UsageError);
   });
 });
 

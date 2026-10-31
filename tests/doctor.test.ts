@@ -479,3 +479,37 @@ describe("the release channel (ahood#1018 step B)", () => {
     }
   });
 });
+
+describe("auto-update per host (ahood#1018 step C)", () => {
+  it("Claude Code: on after setup --yes, off with --no-auto-update, with how to turn it on", async () => {
+    stubNet();
+    runner.restore();
+    runner = fakeRunner({ claude: fakeClaude().bin });
+    await setup(["claude", "--yes", "--no-auto-update"]);
+    await doctor(["--offline", "--json"]);
+    expect(check("claude", "auto-update")).toMatchObject({ status: "warn", detail: expect.stringContaining("off in ~/.claude/settings.json") });
+    expect(check("claude", "auto-update").detail).toContain("re-run `ahood setup claude`");
+    await setup(["claude", "--yes"]);
+    await doctor(["--offline", "--json"]);
+    expect(check("claude", "auto-update")).toMatchObject({ status: "ok", detail: expect.stringContaining("on (extraKnownMarketplaces.ahood.autoUpdate") });
+  });
+
+  it("Codex: on for the release branch, off in effect for a tag pin", async () => {
+    stubNet();
+    useCodex();
+    await setup(["codex", "--yes"]);
+    await doctor(["--offline", "--json"]);
+    expect(check("codex", "auto-update")).toMatchObject({ status: "ok", detail: expect.stringContaining("from release when it starts") });
+    const path = join(env.home, ".codex", "config.toml");
+    writeFileSync(path, readFileSync(path, "utf-8").replace('ref = "release"', 'ref = "v0.16.0"'));
+    await doctor(["--offline", "--json"]);
+    expect(check("codex", "auto-update")).toMatchObject({ status: "warn", detail: expect.stringContaining("pinned to the tag v0.16.0") });
+  });
+
+  it("opencode: on for the bare package name setup lists", async () => {
+    stubNet();
+    await setup(["opencode", "--yes"]);
+    await doctor(["--offline", "--json"]);
+    expect(check("opencode", "auto-update")).toMatchObject({ status: "ok", detail: expect.stringContaining("bare @ahood/opencode-plugin") });
+  });
+});

@@ -93,6 +93,15 @@ released. `ahood setup claude` moves an install made from `main` or a tag over t
 marketplace's `ref` in `~/.claude/settings.json`, with a backup), and `ahood doctor` shows the
 channel. The branch exists from the first release after it was introduced.
 
+Claude Code updates a third-party marketplace's plugins in the background only when that is turned
+on, so `ahood setup claude` asks once, "Keep ahood up to date automatically? [Y/n]" (default yes;
+`--yes` means yes, `--no-auto-update` skips it), and sets `"autoUpdate": true` on
+`extraKnownMarketplaces.ahood` in `~/.claude/settings.json`, after `claude plugin marketplace add`
+(which rewrites that entry without it), with the file backed up first. `ahood setup --remove claude`
+takes it out with the marketplace. Codex upgrades a configured git marketplace when it starts, and
+opencode re-checks a plugin listed without a version, so neither needs a switch. `ahood doctor`
+shows `auto-update: on|off` for each host.
+
 The plugin brings two things:
 
 - **ahood's hosted MCP server** (`https://www.ahood.dev/api/mcp`): `search_skills`, `get_skill`,
@@ -393,7 +402,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood find [<query>] [--kind <kind>] [--sort rank\|downloads\|stars\|recent\|updated] [--limit <n>] [--json]` | Find skills, agents, MCP servers, docs, project guides, loops and prompts in the registry. |
 | `ahood try <owner>/<slug> [--json]` | Print an artifact's root document (SKILL.md, AGENT.md, LOOP.md, ...) without installing it. |
 | `ahood stats [--json]` | Show your own artifacts with their downloads and stars, the totals, recent activity and self-evolution counts. |
-| `ahood setup [claude\|codex\|opencode] [--remove <harness>] [--yes] [--dry-run] [--store-token\|--no-store-token]` | Add ahood (MCP server and /ahood commands) to Claude Code, Codex or opencode, or remove it again. |
+| `ahood setup [claude\|codex\|opencode] [--remove <harness>] [--yes] [--dry-run] [--store-token\|--no-store-token] [--no-auto-update]` | Add ahood (MCP server and /ahood commands) to Claude Code, Codex or opencode, or remove it again. |
 | `ahood doctor [--offline] [--json]` | Check each harness's ahood setup, the MCP server, your login and the CLI version. |
 | `ahood completion <bash\|zsh\|fish>` | Print a shell completion script for the command names. |
 
