@@ -1,6 +1,6 @@
 {
   "name": "ahood",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "ahood in Codex: the registry's MCP tools (search, fetch, publish skills, agents, MCP servers, docs), plus the ahood skill to find, try and install artifacts, use prompts and loops, publish, star, see your stats, sync updates, review evolution proposals and capture private snaps.",
   "author": {
     "name": "ahood",
