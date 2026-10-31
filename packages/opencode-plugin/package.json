@@ -1,6 +1,6 @@
 {
   "name": "@ahood/opencode-plugin",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "ahood in opencode: the registry's hosted MCP server, the /ahood dashboard, sync, review and snap commands, and an opt-in snap prompt.",
   "license": "MIT",
   "homepage": "https://www.ahood.dev/docs#mcp",
