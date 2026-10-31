@@ -46,16 +46,16 @@ export function listFiles(dir: string): string[] {
 }
 
 export type FakeBin = (args: string[]) => RunResult | string;
-export type RunCall = { bin: string; args: string[] };
+export type RunCall = { bin: string; args: string[]; timeoutMs?: number };
 
 /** Installs a runner where only `bins` exist on PATH; returns the recorded calls and a restore. */
 export function fakeRunner(bins: Record<string, FakeBin>) {
   const calls: RunCall[] = [];
   const restore = setRunnerForTests({
     which: (bin) => (bins[bin] ? `/fake/bin/${bin}` : null),
-    run(path, args) {
+    run(path, args, opts) {
       const bin = basename(path);
-      calls.push({ bin, args });
+      calls.push({ bin, args, ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}) });
       const handler = bins[bin];
       if (!handler) return { status: 127, stdout: "", stderr: "not found" };
       const result = handler(args);

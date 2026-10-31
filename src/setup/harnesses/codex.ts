@@ -113,30 +113,38 @@ function supportsPluginCli(binary: string): boolean {
   return plugin.status === 0 && marketplace.status === 0 && helpLists(plugin.stdout, "add") && helpLists(marketplace.stdout, "upgrade");
 }
 
-function runJson<T>(binary: string, args: string[]): T | null {
-  const result = runner().run(binary, args);
-  if (result.status !== 0) return null;
+/** Why asking the codex CLI gave no answer: it ran out of time, exited non-zero, or printed something that is not JSON. */
+type NoAnswer = "timeout" | "exit" | "parse";
+type JsonResult<T> = { ok: true; value: T } | { ok: false; why: NoAnswer };
+
+function runJson<T>(binary: string, args: string[], timeoutMs?: number): JsonResult<T> {
+  const result = runner().run(binary, args, { timeoutMs });
+  // No exit status means the runner killed it, which it only does on its timeout.
+  if (result.timedOut || result.status === null) return { ok: false, why: "timeout" };
+  if (result.status !== 0) return { ok: false, why: "exit" };
   try {
-    return JSON.parse(result.stdout) as T;
+    return { ok: true, value: JSON.parse(result.stdout) as T };
   } catch {
-    return null;
+    return { ok: false, why: "parse" };
   }
 }
 
-type InstalledPlugin = { version: string | null; enabled: boolean };
+/** `codex plugin list` also refreshes the remote catalog, so the first run after a marketplace change can take well over the default 15 s (ahood-cli#212). */
+const PLUGIN_LIST_TIMEOUT_MS = 45_000;
 
-/**
- * Our plugin as Codex has it installed, or null. Asks `codex plugin list
- * --json` when there is a CLI (it fails while the marketplace was never
- * cloned: then nothing is installed either); without one, reads the plugin
- * cache and the `enabled` flag in config.toml.
- */
-function installedPlugin(binary: string | null): InstalledPlugin | null {
-  if (binary) {
-    type Listed = { installed?: Array<{ pluginId?: string; version?: string; installed?: boolean; enabled?: boolean }> };
-    const ours = runJson<Listed>(binary, ["plugin", "list", "--json"])?.installed?.find((p) => p.pluginId === CODEX_PLUGIN_ID);
-    return ours?.installed ? { version: ours.version ?? null, enabled: ours.enabled === true } : null;
-  }
+const couldNotAsk = (why: NoAnswer) => `couldn't ask codex (${why}) -- falling back to the plugin cache`;
+
+/** Setup/remove say so when codex gave no answer -- except a non-zero exit, which is what a never-cloned marketplace (every first setup) gives. */
+function pushUnaskedNote(plan: SetupPlan, unasked: NoAnswer | undefined): void {
+  if (unasked && unasked !== "exit") plan.notes.push(`${couldNotAsk(unasked)} to see whether ${CODEX_PLUGIN_ID} is installed.`);
+}
+
+type InstalledPlugin = { version: string | null; enabled: boolean };
+/** `unasked` is set when there is a CLI but it gave no answer, so `plugin` came from the cache instead. */
+type PluginLookup = { plugin: InstalledPlugin | null; unasked?: NoAnswer };
+
+/** Our plugin per the plugin cache and the `enabled` flag in config.toml, or null. */
+function cachedPlugin(): InstalledPlugin | null {
   const versions = existsSync(pluginCacheDir()) ? readdirSync(pluginCacheDir()).sort() : [];
   if (versions.length === 0) return null;
   let enabled = false;
@@ -148,9 +156,31 @@ function installedPlugin(binary: string | null): InstalledPlugin | null {
   return { version: versions[versions.length - 1], enabled };
 }
 
-function marketplaceCloned(binary: string): boolean {
+/**
+ * Our plugin as Codex has it installed. Asks `codex plugin list --json` when
+ * there is a CLI; without one, or when it gives no answer (a timeout, a
+ * non-zero exit -- it fails while the marketplace was never cloned -- or
+ * unparseable output), reads the plugin cache instead and says why in
+ * `unasked`, so a slow CLI is never reported as "not installed" (ahood-cli#212).
+ */
+function installedPlugin(binary: string | null): PluginLookup {
+  if (!binary) return { plugin: cachedPlugin() };
+  type Listed = { installed?: Array<{ pluginId?: string; version?: string; installed?: boolean; enabled?: boolean }> };
+  const listed = runJson<Listed>(binary, ["plugin", "list", "--json"], PLUGIN_LIST_TIMEOUT_MS);
+  if (!listed.ok) return { plugin: cachedPlugin(), unasked: listed.why };
+  const ours = listed.value?.installed?.find((p) => p.pluginId === CODEX_PLUGIN_ID);
+  return { plugin: ours?.installed ? { version: ours.version ?? null, enabled: ours.enabled === true } : null };
+}
+
+/**
+ * Whether the ahood marketplace is cloned: true, false, or the reason codex
+ * gave no answer. A non-zero exit is "not cloned" (the list fails while a
+ * configured marketplace was never cloned); a timeout or garbled output is unknown.
+ */
+function marketplaceCloned(binary: string): boolean | NoAnswer {
   const listed = runJson<{ marketplaces?: Array<{ name?: string }> }>(binary, ["plugin", "marketplace", "list", "--json"]);
-  return (listed?.marketplaces ?? []).some((m) => m.name === CODEX_MARKETPLACE_NAME);
+  if (!listed.ok) return listed.why === "exit" ? false : listed.why;
+  return (listed.value?.marketplaces ?? []).some((m) => m.name === CODEX_MARKETPLACE_NAME);
 }
 
 // ---- config.toml ------------------------------------------------------------
@@ -240,7 +270,9 @@ function planSetup(opts: SetupOptions): SetupPlan {
     );
     return plan;
   }
-  if (installedPlugin(binary)) {
+  const lookup = installedPlugin(binary);
+  pushUnaskedNote(plan, lookup.unasked);
+  if (lookup.plugin) {
     // Installed from a marketplace checked out elsewhere (unpinned, or an older
     // CLI's tag): `marketplace upgrade` checks the new ref out and refreshes
     // the installed plugin with it (codex-cli 0.165.0).
@@ -277,9 +309,14 @@ function planRemove(): SetupPlan {
     return plan;
   }
   // Both run after the block is gone; neither then touches config.toml.
-  if (installedPlugin(binary)) plan.commands.push({ bin: binary, args: [...CODEX_REMOVE_ARGS.pluginRemove], what: "uninstall the ahood plugin" });
-  if (marketplaceCloned(binary)) {
+  const lookup = installedPlugin(binary);
+  pushUnaskedNote(plan, lookup.unasked);
+  if (lookup.plugin) plan.commands.push({ bin: binary, args: [...CODEX_REMOVE_ARGS.pluginRemove], what: "uninstall the ahood plugin" });
+  const cloned = marketplaceCloned(binary);
+  if (cloned === true) {
     plan.commands.push({ bin: binary, args: [...CODEX_REMOVE_ARGS.marketplaceRemove], what: "remove the ahood plugin marketplace" });
+  } else if (cloned !== false) {
+    plan.notes.push(`couldn't ask codex (${cloned}) whether the ${CODEX_MARKETPLACE_NAME} marketplace is cloned; if it is, run \`${commandLine(CODEX_REMOVE_ARGS.marketplaceRemove)}\`.`);
   }
   return plan;
 }
@@ -316,15 +353,16 @@ function inspect(): ConfigState {
     }
   }
   const { binary } = detect();
-  const plugin = installedPlugin(binary);
-  const pluginState: Feature["state"] = plugin === null ? "absent" : plugin.enabled ? "ok" : "stale";
+  const { plugin, unasked } = installedPlugin(binary);
+  // A cache answer is second-hand: at best a warning, never a clean [ok].
+  const pluginState: Feature["state"] = plugin === null ? "absent" : plugin.enabled && !unasked ? "ok" : "stale";
   const version = plugin?.version ? ` ${plugin.version}` : "";
-  const pluginDetail =
-    plugin === null
-      ? `${CODEX_PLUGIN_ID} not installed -- ${commandLine(CODEX_INSTALL_ARGS.pluginAdd)}`
-      : plugin.enabled
-        ? `${CODEX_PLUGIN_ID}${version} installed, enabled`
-        : `${CODEX_PLUGIN_ID}${version} installed but disabled (enable it in Codex's /plugins, or re-run \`ahood setup codex\`)`;
+  const addHint = commandLine(CODEX_INSTALL_ARGS.pluginAdd);
+  let pluginDetail: string;
+  if (plugin === null) pluginDetail = unasked ? `${CODEX_PLUGIN_ID} is not in it -- ${addHint}` : `${CODEX_PLUGIN_ID} not installed -- ${addHint}`;
+  else if (plugin.enabled) pluginDetail = `${CODEX_PLUGIN_ID}${version} installed, enabled`;
+  else pluginDetail = `${CODEX_PLUGIN_ID}${version} installed but disabled (enable it in Codex's /plugins, or re-run \`ahood setup codex\`)`;
+  if (unasked) pluginDetail = `${couldNotAsk(unasked)}: ${pluginDetail}`;
   const features: Feature[] = [
     { name: "plugin config", state: config, detail: configDetail },
     { name: "plugin", state: pluginState, detail: pluginDetail },

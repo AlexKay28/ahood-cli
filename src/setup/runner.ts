@@ -5,7 +5,12 @@ import { spawnSync } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
-export type RunResult = { status: number | null; stdout: string; stderr: string };
+/**
+ * `status` is null when the program never exited on its own (killed by a
+ * signal, or never started); `timedOut` says it was the timeout that killed it
+ * (spawnSync's `error.code === "ETIMEDOUT"`).
+ */
+export type RunResult = { status: number | null; stdout: string; stderr: string; timedOut?: boolean };
 
 export type Runner = {
   which(bin: string): string | null;
@@ -35,7 +40,8 @@ const realRunner: Runner = {
       timeout: opts.timeoutMs ?? 15_000,
       stdio: opts.inherit ? "inherit" : ["ignore", "pipe", "pipe"],
     });
-    return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+    const timedOut = (result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT";
+    return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "", timedOut };
   },
 };
 
