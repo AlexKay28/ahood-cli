@@ -26,7 +26,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/index.js && mkdir -p dist/useme && cp src/useme/SKILL.md dist/useme/SKILL.md && npm run build:opencode-plugin",
+    "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/index.js && npm run build:opencode-plugin",
     "build:opencode-plugin": "rm -rf packages/opencode-plugin/dist && tsc -p packages/opencode-plugin/tsconfig.json",
     "prepublishOnly": "npm run build",
     "pretest": "npm run build",
@@ -37,12 +37,10 @@
     "version": "node scripts/sync-plugin.mjs && node scripts/check-plugin-version.mjs && git add plugins/ahood/.claude-plugin/plugin.json plugins/ahood/commands plugins/codex/.codex-plugin/plugin.json plugins/codex/skills/ahood/SKILL.md packages/opencode-plugin/package.json packages/opencode-plugin/src/generated.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
     "diff": "^9.0.0",
     "jsonc-parser": "^3.3.1",
     "smol-toml": "^1.9.1",
-    "tar-stream": "^3.2.1",
-    "zod": "^4.5.4"
+    "tar-stream": "^3.2.1"
   },
   "devDependencies": {
     "@types/node": "^20",

@@ -12,8 +12,7 @@
 //   - SKILL_COMMANDS_HELP: every registry verb, reached as `ahood skill
 //     <verb>` -- legacy and cross-kind in this release (ahood-cli#172).
 //   - AGENT_COMMANDS_HELP / MCP_COMMANDS_HELP: the same verbs, kind-scoped,
-//     generated from one template (registryCommandsHelp); MCP's list also
-//     carries `ahood mcp` / `ahood mcp serve`, the local stdio server.
+//     generated from one template (registryCommandsHelp).
 //   - GROUP_COMMANDS_HELP / SNAP_COMMANDS_HELP: the other entity nouns.
 //
 // `summary` is a genuinely one-sentence blurb used only by the top-level
@@ -202,18 +201,6 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     summary: "Print a shell completion script for the command names.",
     desc: "Print a shell completion script for the command names.",
     examples: ["ahood completion bash >> ~/.bashrc"],
-  },
-  {
-    usage: "ahood help useme",
-    summary: "Print the bundled ahood SKILL.md for an AI agent -- raw, offline, no login needed.",
-    desc:
-      "Print the ahood self-skill bundled with this exact CLI version: a complete SKILL.md teaching an AI agent " +
-      "(or a human) when and how to use ahood. Stdout is the raw file and nothing else -- no banner, no colors -- " +
-      "so it can be pasted into an agent's context, redirected into a file, or read directly by an agent with " +
-      "shell access. Works offline and without credentials, and never writes to your project. It is not the " +
-      "same as `ahood skill add alexkay/ahood`, which installs the registry-published copy as a separate, " +
-      "pinned project skill.",
-    examples: ["ahood help useme", "ahood help useme > ahood-SKILL.md"],
   },
 ];
 
@@ -673,40 +660,7 @@ export const PROJECT_COMMANDS_HELP: CommandHelp[] = [
   ),
 ];
 
-// `ahood mcp` is two things (ADR 0007 in the ahood repo separates the hosted
-// registry MCP endpoint from this CLI's local one): with no verb, or with
-// `serve`, it is the local, read-only stdio MCP server that MCP hosts spawn;
-// with a registry verb it manages mcp-kind registry entries (server.json
-// manifests). Both are listed here so `ahood mcp --help` explains both.
-export const MCP_SERVE_HELP: CommandHelp[] = [
-  {
-    usage: "ahood mcp serve",
-    summary: "Start the local, read-only ahood MCP server over stdio (preferred spelling).",
-    desc:
-      "Start a Model Context Protocol server over stdio, exposing search_skills, get_skill, read_skill, " +
-      "list_skill_versions, list_my_skills, ahood_status, and whoami as MCP tools -- the same data ahood's " +
-      "--json commands already return, reachable as typed tool calls instead of parsed CLI output. Names match " +
-      "the hosted registry MCP endpoint's tools (ahood#990); the original v1 names (skill_search, skill_view, " +
-      "skill_read, skill_versions, skill_list, skill_outdated) still work as deprecated aliases, so an existing " +
-      "host config never breaks. Meant to be launched by an MCP-aware agent host (e.g. Claude Code's MCP server " +
-      "configuration), not run interactively. Read-only by design. This is not the hosted registry MCP endpoint " +
-      "(https://www.ahood.dev/api/mcp), which is a separate server with write tools.",
-    examples: ['claude mcp add ahood -- ahood mcp serve', "npx @ahood/cli@latest mcp serve"],
-  },
-  {
-    usage: "ahood mcp",
-    summary: "Ambiguous and deprecated (same as `ahood mcp serve`, kept working for existing MCP host configs).",
-    desc:
-      "With no arguments at all, `ahood mcp` starts the same stdio server as `ahood mcp serve` -- nothing is printed " +
-      "to stdout before the protocol starts (a deprecation note goes to stderr instead), and no login or network is " +
-      "needed to start it. Bare `ahood mcp` is ambiguous with the mcp-kind registry verbs below (`ahood mcp <verb>`), " +
-      "so it is deprecated in favor of the explicit `ahood mcp serve` -- it keeps working byte-for-byte, with no " +
-      "behavior change, for existing host configs. Any other first word must be `serve`, `--help`, or a registry " +
-      "verb below; anything unrecognized fails with usage instead of starting a server.",
-  },
-];
-
-export const MCP_COMMANDS_HELP: CommandHelp[] = [...MCP_SERVE_HELP, ...registryCommandsHelp("mcp")];
+export const MCP_COMMANDS_HELP: CommandHelp[] = registryCommandsHelp("mcp");
 
 // Every group-entity verb, all reached as `ahood group <verb>` -- mirrors
 // SKILL_COMMANDS_HELP above, just for the "Groups" feature: private groups,
@@ -1084,14 +1038,11 @@ export function formatAgentHelp(): string {
 
 export function formatMcpHelp(): string {
   return formatRegistryKindHelp(
-    "ahood mcp -- the local MCP server, and MCP server manifests (server.json) in the ahood registry",
+    "ahood mcp -- MCP server manifests (server.json) in the ahood registry",
     [
-      "Two meanings, told apart by the first word:",
-      "  ahood mcp / ahood mcp serve   start this CLI's local, read-only MCP server over stdio",
-      "                                (what MCP host configs launch; `serve` is the preferred spelling)",
-      "  ahood mcp <verb>              manage mcp-kind registry entries (installs merge into .mcp.json)",
-      "Neither is the hosted registry MCP endpoint, https://www.ahood.dev/api/mcp.",
-      "Registry verbs act on MCP server manifests only; another kind is refused before any side effect.",
+      "Every verb here acts on MCP server manifests only: a target of another kind is refused before",
+      "any side effect. Installs merge an entry into .mcp.json.",
+      "The ahood registry's own MCP server comes with the ahood plugin: npx @ahood/cli setup",
     ],
     MCP_COMMANDS_HELP,
     "mcp",
@@ -1210,7 +1161,7 @@ export function formatHelp(): string {
   const agentGroupSummary = "The same verbs, for agent definitions only -- run `ahood agent --help` for the full list.";
   const mcpGroupUsage = "ahood mcp <command>";
   const mcpGroupSummary =
-    "The same verbs, for MCP server manifests only; bare `ahood mcp` or `ahood mcp serve` starts the local MCP server.";
+    "The same verbs, for MCP server manifests only -- run `ahood mcp --help` for the full list.";
   const docGroupUsage = "ahood doc <command>";
   const docGroupSummary = "The same verbs, for docs (DOC.md) only -- run `ahood doc --help` for the full list.";
   const projectGroupUsage = "ahood project <command>";
@@ -1248,9 +1199,8 @@ export function formatHelp(): string {
     "  ahood skill add <owner>/<skill>",
     "",
     "Use ahood with an AI agent:",
-    "  ahood help useme    Print a complete SKILL.md teaching an agent how to use ahood.",
-    "                      Raw stdout, offline, no login -- paste it to an agent, or let an",
-    "                      agent with a shell run it.",
+    "  npx @ahood/cli setup   Install the ahood plugin for Claude Code, Codex or opencode",
+    "                         (its MCP server, skill and /ahood commands).",
     "",
     "Commands:",
     ...lines,

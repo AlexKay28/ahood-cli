@@ -80,7 +80,7 @@ export function resetLegacyTokenNoteForTests(): void {
   legacyNoted = false;
 }
 
-// stderr, once per process: stdout may be a protocol (`ahood mcp serve`) or JSON.
+// stderr, once per process: stdout may be JSON.
 export function resolveToken(): string | null {
   const resolved = resolveTokenWithSource();
   if (resolved?.source === LEGACY_TOKEN_ENV && !legacyNoted) {

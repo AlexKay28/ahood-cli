@@ -14,7 +14,11 @@ call.
 ## Find and install
 
 - Search with the MCP tool `search_skills` (and `search_collections` for curated sets); read
-  one with `get_skill` or `fetch_skill`, its history with `list_skill_versions`.
+  one with `get_skill` or `fetch_skill`, its history with `list_skill_versions`. From the CLI:
+  `ahood find "<query>" --kind skill --limit 5 --json` searches any kind with stars and downloads
+  (`ahood find --sort downloads --kind mcp` lists the most installed, no query needed).
+- To use an artifact once without installing it: `ahood try <owner>/<slug>` prints it (an alias
+  of `ahood skill read` that works for any kind).
 - Install with the CLI so the install is recorded and pinned: `ahood skill add <owner>/<slug>`
   (`ahood agent add`, `ahood mcp add` for the other kinds). Tell the user what you are about to
   install before you run it.
@@ -52,6 +56,10 @@ snap goes.
   is the user's call: suggest `/ahood sync`, which shows each diff and asks first. Do not run
   `ahood sync --yes` unless the user approved that exact update in this conversation.
 - Evolution proposals are approved or rejected only by the user: suggest `/ahood review`.
+  `ahood review --json` lists them, each with its diff; `ahood review show <id>` prints one
+  proposal and its unified diff.
+- `ahood stats --json` shows the user's own artifacts' downloads and stars, totals and recent
+  activity.
 
 ## What you can do
 

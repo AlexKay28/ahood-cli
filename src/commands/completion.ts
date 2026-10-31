@@ -38,12 +38,12 @@ function unique(names: string[]): string[] {
 // Position 1 (the word right after "ahood"): every top-level command plus
 // every entity noun.
 function topLevelNames(): string[] {
-  return unique([...TOP_LEVEL_COMMANDS_HELP.map((c) => c.usage.split(" ")[1]), ...NOUNS.map(([noun]) => noun)]);
+  return unique([...TOP_LEVEL_COMMANDS_HELP.map((c) => c.usage.split(" ")[1]), "help", ...NOUNS.map(([noun]) => noun)]);
 }
 
 // Position 2+, once a noun has been typed: that noun's verbs, plus alias
 // names (e.g. "show" for "view") wherever the aliased verb exists, so
-// completion offers every name a user might type. A bare `ahood mcp` or
+// completion offers every name a user might type. A bare
 // `ahood project [--remote ...]` entry has no verb word and contributes nothing.
 function verbNames(entries: CommandHelp[]): string[] {
   const primary = entries.map((c) => c.usage.split(" ")[2] ?? "").filter((word) => /^[a-z]/.test(word));
@@ -51,9 +51,9 @@ function verbNames(entries: CommandHelp[]): string[] {
   return unique([...primary, ...aliases]);
 }
 
-// After `ahood help`: the self-skill guide plus every noun.
+// After `ahood help`: every noun.
 function helpNames(): string[] {
-  return ["useme", ...NOUNS.map(([noun]) => noun)];
+  return NOUNS.map(([noun]) => noun);
 }
 
 function bashCompletion(): string {
