@@ -9,6 +9,20 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 `preversion` hook (and the release workflow) refuse a version without one
 (`scripts/check-changelog.mjs`).
 
+## 0.17.0
+
+- Updates come from the `release` branch: every host now reads the plugin from
+  `AlexKay28/ahood-cli#release`, which each published release fast-forwards, so unreleased
+  commits never reach you and every release does. Re-run `npx @ahood/cli@latest setup` once to
+  move an existing install onto it.
+- Claude Code: `ahood setup claude` asks once whether to keep ahood up to date automatically
+  (default yes; `--no-auto-update` to skip). `ahood doctor` shows the channel and auto-update
+  state for each host.
+- Removed the local stdio MCP server (`ahood mcp serve`) and `ahood help useme`: ahood is a
+  plugin now, and its MCP server and skill come with it. Both commands print a one-line notice
+  for this release. The `ahood mcp` registry commands (search, add, publish MCP manifests) stay.
+- The plugin manifest is validated (`claude plugin validate --strict`) before every release.
+
 ## 0.16.0 (2026-10-31)
 
 - The full `/ahood` command set: `/ahood-find`, `/ahood-trending`, `/ahood-try`, `/ahood-install`,
