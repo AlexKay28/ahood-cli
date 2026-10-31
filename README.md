@@ -83,9 +83,15 @@ from inside a Claude Code session (or run `ahood setup claude`, which does the s
 `claude plugin` CLI):
 
 ```
-/plugin marketplace add AlexKay28/ahood-cli
+/plugin marketplace add AlexKay28/ahood-cli#release
 /plugin install ahood@ahood
 ```
+
+`#release` is the stable channel: the release workflow fast-forwards the `release` branch to each
+release tag after both npm packages are published, so a commit on `main` reaches no one until it is
+released. `ahood setup claude` moves an install made from `main` or a tag over to it (editing the
+marketplace's `ref` in `~/.claude/settings.json`, with a backup), and `ahood doctor` shows the
+channel. The branch exists from the first release after it was introduced.
 
 The plugin brings two things:
 
@@ -130,17 +136,18 @@ The same repo is a Codex plugin marketplace too: `.agents/plugins/marketplace.js
 `ahood@ahood` from [`plugins/codex/`](plugins/codex), which bundles the hosted MCP server (it
 reads `$AHOOD_TOKEN` through `bearer_token_env_var`) and two skills, `ahood:ahood` (the `/ahood`
 command set above) and `ahood:using-ahood`. `ahood setup codex` installs it: it writes
-`[marketplaces.ahood]` (pinned with `ref = "v<CLI version>"`, so Codex gets the plugin released
-with your CLI, not `main`) and `[plugins."ahood@ahood"] enabled = true` in its marked block in
+`[marketplaces.ahood]` (with `ref = "release"`, the stable channel above, so Codex gets released
+plugins only, never `main`) and `[plugins."ahood@ahood"] enabled = true` in its marked block in
 `$CODEX_HOME/config.toml`, then runs `codex plugin marketplace upgrade ahood` and
-`codex plugin add ahood@ahood`. After a CLI update, re-running it moves the pin to the new tag
-(and `marketplace upgrade` refreshes the installed plugin); `ahood doctor` shows the ref. It also takes out what earlier versions of setup wrote: the
+`codex plugin add ahood@ahood`. Codex re-checks a configured git marketplace's ref when it starts,
+so each release arrives on its own. Re-running setup moves a block pinned to a tag (`v<version>`,
+what setup wrote before) or unpinned over to `release`; `ahood doctor` shows the ref. It also takes out what earlier versions of setup wrote: the
 `[mcp_servers.ahood]` block, `$CODEX_HOME/skills/ahood/SKILL.md` and the AGENTS.md snippet, with
 the usual backups. `ahood setup --remove codex` deletes the block and runs `codex plugin remove` /
 `codex plugin marketplace remove`. By hand:
 
 ```
-codex plugin marketplace add AlexKay28/ahood-cli --ref v<CLI version>
+codex plugin marketplace add AlexKay28/ahood-cli --ref release
 codex plugin add ahood@ahood
 ```
 

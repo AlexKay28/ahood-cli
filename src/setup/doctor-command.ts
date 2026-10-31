@@ -12,6 +12,7 @@ import { checkAuth } from "../commands/whoami.js";
 import { HARNESSES } from "./harnesses/index.js";
 import { HARNESS_IDS, type ConfigState, type Feature, type HarnessId } from "./harnesses/types.js";
 import { displayPath } from "./paths.js";
+import { RELEASE_BRANCH, RELEASE_REPO, releaseBranchExists } from "./release-channel.js";
 import { runner } from "./runner.js";
 import { AHOOD_CLI, AHOOD_MCP_URL } from "./templates/ahood-commands.js";
 
@@ -163,6 +164,29 @@ async function npmPackageCheck(pkg: string, offline: boolean): Promise<Check> {
   }
 }
 
+/**
+ * Whether GitHub has the `release` branch Claude Code and Codex install the
+ * plugin from (ahood#1018 step B). Until the first release after step B it
+ * does not, and both hosts fail to fetch a ref the remote lacks.
+ */
+async function releaseChannelCheck(offline: boolean): Promise<Check> {
+  const name = "release channel";
+  const branch = `${RELEASE_REPO}#${RELEASE_BRANCH}`;
+  if (offline) return { name, status: "skip", detail: `${branch} not checked (--offline)` };
+  const exists = await releaseBranchExists();
+  if (exists === true) return { name, status: "ok", detail: `${branch} exists -- Claude Code and Codex install and update the plugin from it` };
+  if (exists === false) {
+    return {
+      name,
+      status: "warn",
+      detail:
+        `${branch} does not exist yet: the next ahood-cli release creates it. Until then \`ahood setup claude\` and ` +
+        "`ahood setup codex` refuse, and a host already pointed at it cannot fetch updates",
+    };
+  }
+  return { name, status: "warn", detail: `could not ask GitHub whether ${branch} exists` };
+}
+
 const CONFIG_STATUS: Record<ConfigState["state"], CheckStatus> = { ok: "ok", absent: "skip", stale: "warn", partial: "fail", broken: "fail" };
 
 /**
@@ -242,7 +266,7 @@ export async function doctor(args: string[]): Promise<void> {
   const json = args.includes("--json");
 
   const source = tokenSourceCheck();
-  const [mcp, login, version] = await Promise.all([mcpCheck(offline), loginCheck(offline), versionCheck(offline)]);
+  const [mcp, login, version, channel] = await Promise.all([mcpCheck(offline), loginCheck(offline), versionCheck(offline), releaseChannelCheck(offline)]);
   const globalCli = globalCliCheck();
   const packageChecks = new Map(
     await Promise.all(
@@ -253,10 +277,10 @@ export async function doctor(args: string[]): Promise<void> {
   const broken = harnesses.filter((h) => h.config.state !== "absent" && h.checks.some((c) => c.status === "fail"));
 
   if (json) {
-    console.log(JSON.stringify({ ok: broken.length === 0, cli: [source, login, version, globalCli], harnesses }));
+    console.log(JSON.stringify({ ok: broken.length === 0, cli: [source, login, version, globalCli, channel], harnesses }));
   } else {
     console.log("ahood doctor");
-    for (const c of [version, globalCli, source, login, mcp]) console.log(`  [${MARK[c.status]}] ${c.name}: ${c.detail}`);
+    for (const c of [version, globalCli, source, login, mcp, channel]) console.log(`  [${MARK[c.status]}] ${c.name}: ${c.detail}`);
     for (const h of harnesses) {
       console.log(`\n${h.label} (${h.id})`);
       for (const c of h.checks) console.log(`  [${MARK[c.status]}] ${c.name}: ${c.detail}`);

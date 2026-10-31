@@ -14,6 +14,7 @@ import { hasBlock, readBlock, removeBlock, upsertBlock } from "../marked-block.j
 import { codexHome, displayPath } from "../paths.js";
 import { helpLists, runner } from "../runner.js";
 import { AHOOD_MCP_URL } from "../templates/ahood-commands.js";
+import { releaseBranchMissing } from "../release-channel.js";
 import {
   agentsSnippetFile,
   CODEX_AGENTS_MARKERS,
@@ -257,6 +258,7 @@ function legacyRemovals(notes: string[]): FileChange[] {
 const commandLine = (args: readonly string[]) => `codex ${args.join(" ")}`;
 
 function planSetup(opts: SetupOptions): SetupPlan {
+  if (opts.releaseBranch === false) throw new SetupRefusedError(releaseBranchMissing("Codex"));
   const plan = emptyPlan();
   const previousRef = blockRef(readIfExists(configPath()), configPath());
   plan.files.push(planConfig(false, opts.token)!);
@@ -273,19 +275,19 @@ function planSetup(opts: SetupOptions): SetupPlan {
   const lookup = installedPlugin(binary);
   pushUnaskedNote(plan, lookup.unasked);
   if (lookup.plugin) {
-    // Installed from a marketplace checked out elsewhere (unpinned, or an older
-    // CLI's tag): `marketplace upgrade` checks the new ref out and refreshes
-    // the installed plugin with it (codex-cli 0.165.0).
+    // Installed from a marketplace checked out elsewhere (unpinned, or the tag
+    // an earlier CLI pinned): `marketplace upgrade` checks the release branch
+    // out and refreshes the installed plugin with it (codex-cli 0.165.0).
     if (previousRef !== CODEX_MARKETPLACE_REF) {
       plan.commands.push({
         bin: binary,
         args: [...CODEX_INSTALL_ARGS.marketplaceUpgrade],
-        what: `check the ahood plugin marketplace out at ${CODEX_MARKETPLACE_REF} (updates the installed plugin)`,
+        what: `check the ahood plugin marketplace out at the ${CODEX_MARKETPLACE_REF} branch (updates the installed plugin)`,
       });
       return plan;
     }
     plan.notes.push(
-      `${CODEX_PLUGIN_ID} is already installed from ${CODEX_MARKETPLACE_REF}; after updating the CLI, re-run \`ahood setup codex\` to move it to the new release.`,
+      `${CODEX_PLUGIN_ID} is already installed from the ${CODEX_MARKETPLACE_REF} branch; Codex upgrades it to each new release when it starts.`,
     );
     return plan;
   }
@@ -323,6 +325,16 @@ function planRemove(): SetupPlan {
 
 // ---- doctor -------------------------------------------------------------------
 
+/** Which ref Codex reads the plugin from (ahood#1018 step B); none without our block. */
+function channelFeature(ref: string | null | undefined): Feature | null {
+  if (ref === undefined) return null;
+  if (ref === CODEX_MARKETPLACE_REF) {
+    return { name: "channel", state: "ok", detail: `${CODEX_MARKETPLACE_REF} branch -- each release reaches Codex at its next start` };
+  }
+  const why = ref === null ? "unpinned: tracks the default branch, unreleased commits included" : `${ref}: frozen at that ref`;
+  return { name: "channel", state: "stale", detail: `${why} -- re-run \`ahood setup codex\` to move to the ${CODEX_MARKETPLACE_REF} branch` };
+}
+
 function inspect(): ConfigState {
   const path = configPath();
   const text = readIfExists(path);
@@ -348,7 +360,7 @@ function inspect(): ConfigState {
         configDetail +=
           ref === CODEX_MARKETPLACE_REF
             ? ` (marketplace ref ${ref})`
-            : ` (marketplace ref ${describeRef(ref)}; this CLI pins ${CODEX_MARKETPLACE_REF} -- re-run \`ahood setup codex\`)`;
+            : ` (marketplace ref ${describeRef(ref)}; this CLI tracks the ${CODEX_MARKETPLACE_REF} branch -- re-run \`ahood setup codex\`)`;
       }
     }
   }
@@ -367,6 +379,8 @@ function inspect(): ConfigState {
     { name: "plugin config", state: config, detail: configDetail },
     { name: "plugin", state: pluginState, detail: pluginDetail },
   ];
+  const channel = channelFeature(blockRef(text, path));
+  if (channel) features.push(channel);
   const leftovers = [legacySkillPath(), legacySnippetPath()].filter((p) => (readIfExists(p) ?? "").includes(OWNED_MARKER));
   if (leftovers.length > 0) {
     features.push({ name: "old setup files", state: "stale", detail: `${leftovers.map(displayPath).join(", ")} -- re-run \`ahood setup codex\` to remove` });

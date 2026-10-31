@@ -13,6 +13,7 @@ import { actionOf, applyChanges, backupStamp, fileMode, formatChanges } from "./
 import { HARNESSES } from "./harnesses/index.js";
 import { HARNESS_IDS, isHarnessId, type Harness, type HarnessId, type SetupPlan } from "./harnesses/types.js";
 import { displayPath } from "./paths.js";
+import { releaseBranchExists } from "./release-channel.js";
 import { runner } from "./runner.js";
 
 const USAGE =
@@ -187,14 +188,17 @@ function printPlan(harness: Harness, plan: SetupPlan, remove: boolean, preview: 
 
 type Outcome = "done" | "nothing" | "dry-run" | "declined" | "needs-consent" | "refused" | "failed";
 
-async function runOne(harness: Harness, parsed: Parsed, stamp: string): Promise<Outcome> {
+/** The harnesses that install the plugin from the `release` branch (ahood#1018 step B); opencode reads npm. */
+const READS_RELEASE_BRANCH: readonly HarnessId[] = ["claude", "codex"];
+
+async function runOne(harness: Harness, parsed: Parsed, stamp: string, releaseBranch: boolean | null): Promise<Outcome> {
   let plan: SetupPlan;
   try {
     if (parsed.remove) {
       plan = harness.planRemove();
     } else {
       const decision = await decideToken(harness, parsed);
-      plan = harness.planSetup({ yes: parsed.yes, token: decision.token });
+      plan = harness.planSetup({ yes: parsed.yes, token: decision.token, releaseBranch });
       if (decision.mode !== undefined) {
         for (const change of plan.files) if (change.path === harness.tokenStore?.file() && change.after !== null) change.mode = decision.mode;
       }
@@ -238,7 +242,8 @@ export async function setup(args: string[]): Promise<void> {
   const targets = parsed.targets ?? (await chooseTargets(parsed.yes));
   const stamp = backupStamp();
   const outcomes: Outcome[] = [];
-  for (const id of targets) outcomes.push(await runOne(HARNESSES[id], parsed, stamp));
+  const releaseBranch = !parsed.remove && targets.some((id) => READS_RELEASE_BRANCH.includes(id)) ? await releaseBranchExists() : null;
+  for (const id of targets) outcomes.push(await runOne(HARNESSES[id], parsed, stamp, releaseBranch));
 
   if (outcomes.includes("dry-run")) console.log("\nNothing was changed (--dry-run).");
   if (outcomes.some((o) => o === "refused" || o === "failed")) process.exitCode = 1;

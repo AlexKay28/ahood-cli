@@ -54,8 +54,10 @@ export type ConfigState = {
  * `token`: the ahood token to store in the harness's own config -- set only
  * after the user consented (ahood#990, decision B). null = the config names
  * $AHOOD_TOKEN instead, and any token setup stored earlier is taken out.
+ * `releaseBranch`: whether GitHub has the `release` branch the plugin is
+ * installed from (ahood#1018 step B) -- false refuses, null = could not ask.
  */
-export type SetupOptions = { yes: boolean; token: string | null };
+export type SetupOptions = { yes: boolean; token: string | null; releaseBranch: boolean | null };
 
 /**
  * A harness whose config can hold the token itself. `file` is the one file

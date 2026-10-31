@@ -10,6 +10,7 @@ import { CODEX_TOML_MARKERS, codexMcpBlock, codexSkill } from "../src/setup/temp
 import { opencodeCommandFiles, opencodeMcpEntry } from "../src/setup/templates/opencode.js";
 import { fakeClaude, fakeCodex, fakeOpencode, fakeRunner, setupHomeEnv } from "./helpers/harness-env.js";
 import type { RunResult } from "../src/setup/runner.js";
+import { setReleaseProbeForTests } from "../src/setup/release-channel.js";
 
 const MCP_URL = "https://www.ahood.dev/api/mcp";
 
@@ -77,7 +78,8 @@ describe("ahood doctor (ahood#980)", () => {
     await doctor(["--json"]);
     expect(harness("codex").config.state).toBe("ok");
     expect(check("codex", "plugin")).toMatchObject({ status: "ok", detail: "ahood@ahood 0.14.0 installed, enabled" });
-    expect(check("codex", "plugin config")).toMatchObject({ status: "ok", detail: expect.stringContaining(`(marketplace ref v${CLI_VERSION})`) });
+    expect(check("codex", "plugin config")).toMatchObject({ status: "ok", detail: expect.stringContaining("(marketplace ref release)") });
+    expect(check("codex", "channel")).toMatchObject({ status: "ok", detail: expect.stringContaining("release branch") });
     expect(check("codex", "MCP server reachable")).toMatchObject({ status: "ok" });
     expect(check("codex", "MCP token")).toMatchObject({ status: "ok" });
     expect(report().ok).toBe(true);
@@ -123,7 +125,7 @@ describe("ahood doctor (ahood#980)", () => {
     expect(process.exitCode).toBe(1); // the plugin itself is not installed yet
   });
 
-  it("a Codex block that does not pin this CLI's tag (ahood#1009) is stale and names both refs", async () => {
+  it("a Codex block not on the release branch (ahood#1018 step B) is stale and names both refs", async () => {
     stubNet();
     useCodex();
     await setup(["codex", "--yes"]);
@@ -131,15 +133,16 @@ describe("ahood doctor (ahood#980)", () => {
     const pinned = readFileSync(path, "utf-8");
     for (const [ref, shown] of [
       [null, "unpinned (the repo's default branch)"],
-      ["v0.0.1", "v0.0.1"],
+      [`v${CLI_VERSION}`, `v${CLI_VERSION}`],
     ] as const) {
-      const line = `ref = "v${CLI_VERSION}"\n`;
+      const line = `ref = "release"\n`;
       writeFileSync(path, pinned.replace(line, ref === null ? "" : `ref = "${ref}"\n`));
       await doctor(["--offline", "--json"]);
       expect(check("codex", "plugin config")).toMatchObject({
         status: "warn",
-        detail: expect.stringContaining(`(marketplace ref ${shown}; this CLI pins v${CLI_VERSION} -- re-run \`ahood setup codex\`)`),
+        detail: expect.stringContaining(`(marketplace ref ${shown}; this CLI tracks the release branch -- re-run \`ahood setup codex\`)`),
       });
+      expect(check("codex", "channel")).toMatchObject({ status: "warn", detail: expect.stringContaining("move to the release branch") });
     }
   });
 
@@ -422,5 +425,57 @@ describe("ahood doctor: a global `ahood` on PATH (ahood#1018)", () => {
     withGlobal(() => ({ status: 1, stdout: "", stderr: "boom" }));
     await doctor(["--offline", "--json"]);
     expect(globalCli()).toMatchObject({ status: "warn", detail: expect.stringContaining("did not report a version") });
+  });
+});
+
+describe("the release channel (ahood#1018 step B)", () => {
+  const cliCheck = (name: string) => report().cli.find((c: { name: string }) => c.name === name);
+
+  it("reports whether GitHub has the release branch, and skips asking with --offline", async () => {
+    stubNet();
+    let answer: boolean | null = true;
+    let asked = 0;
+    const restore = setReleaseProbeForTests(async () => (asked++, answer));
+    try {
+      await doctor(["--json"]);
+      expect(cliCheck("release channel")).toMatchObject({ status: "ok", detail: expect.stringContaining("AlexKay28/ahood-cli#release exists") });
+      answer = false;
+      await doctor(["--json"]);
+      expect(cliCheck("release channel")).toMatchObject({ status: "warn", detail: expect.stringContaining("the next ahood-cli release creates it") });
+      answer = null;
+      await doctor(["--json"]);
+      expect(cliCheck("release channel")).toMatchObject({ status: "warn", detail: expect.stringContaining("could not ask GitHub") });
+      asked = 0;
+      await doctor(["--offline", "--json"]);
+      expect(cliCheck("release channel")).toMatchObject({ status: "skip" });
+      expect(asked).toBe(0);
+    } finally {
+      restore();
+    }
+  });
+
+  it("Claude Code: the channel is the declaration's ref -- release is ok, main or a tag is stale", async () => {
+    stubNet();
+    runner.restore();
+    const claude = fakeClaude();
+    runner = fakeRunner({ claude: claude.bin });
+    await setup(["claude", "--yes"]);
+    await doctor(["--offline", "--json"]);
+    expect(check("claude", "channel")).toMatchObject({ status: "ok", detail: expect.stringContaining("release branch (AlexKay28/ahood-cli#release)") });
+    expect(harness("claude").config.state).toBe("ok");
+    const path = join(env.home, ".claude", "settings.json");
+    for (const [ref, shown] of [
+      [undefined, "unpinned"],
+      ["v0.16.0", "v0.16.0"],
+    ] as const) {
+      const value = JSON.parse(readFileSync(path, "utf-8"));
+      value.extraKnownMarketplaces.ahood.source = { source: "github", repo: "AlexKay28/ahood-cli", ...(ref ? { ref } : {}) };
+      writeFileSync(path, JSON.stringify(value));
+      claude.state.ref = ref;
+      await doctor(["--offline", "--json"]);
+      expect(check("claude", "channel")).toMatchObject({ status: "warn", detail: expect.stringContaining(shown) });
+      expect(check("claude", "channel").detail).toContain("re-run `ahood setup claude`");
+      expect(harness("claude").config.state).toBe("stale");
+    }
   });
 });
