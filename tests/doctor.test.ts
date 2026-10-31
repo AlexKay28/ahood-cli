@@ -9,6 +9,7 @@ import { upsertBlock } from "../src/setup/marked-block.js";
 import { CODEX_TOML_MARKERS, codexMcpBlock, codexSkill } from "../src/setup/templates/codex.js";
 import { opencodeCommandFiles, opencodeMcpEntry } from "../src/setup/templates/opencode.js";
 import { fakeClaude, fakeCodex, fakeOpencode, fakeRunner, setupHomeEnv } from "./helpers/harness-env.js";
+import type { RunResult } from "../src/setup/runner.js";
 
 const MCP_URL = "https://www.ahood.dev/api/mcp";
 
@@ -206,6 +207,81 @@ describe("ahood doctor (ahood#980)", () => {
     await doctor(["--offline", "--json"]);
     expect(harness("claude").config.state).toBe("partial");
     expect(process.exitCode).toBe(1);
+  });
+
+  describe("a codex CLI that gives no answer to `plugin list` (ahood-cli#212)", () => {
+    const LIST = "plugin list --json";
+    const cacheDir = () => join(env.home, ".codex", "plugins", "cache", "ahood", "ahood", "0.15.0");
+
+    /** Sets Codex up for real, then has `codex plugin list --json` answer `answer` from now on. */
+    async function setUpThenList(answer: RunResult | string, { cached = true } = {}) {
+      const cx = useCodex();
+      await setup(["codex", "--yes"]);
+      if (cached) mkdirSync(cacheDir(), { recursive: true });
+      runner.restore();
+      runner = fakeRunner({ opencode: fakeOpencode(), codex: (args) => (args.join(" ") === LIST ? answer : cx.bin(args)) });
+      return cx;
+    }
+
+    it.each([
+      ["timeout", { status: null, stdout: "", stderr: "" }],
+      ["timeout", { status: null, stdout: "", stderr: "", timedOut: true }],
+      ["exit", { status: 1, stdout: "", stderr: "Error: something went wrong" }],
+      ["parse", "Refreshing the remote catalog...\n{not json"],
+    ] as const)("no answer (%s) is a warning read from the plugin cache, never 'not installed'", async (why, answer) => {
+      stubNet();
+      await setUpThenList(answer as RunResult | string);
+      await doctor(["--offline", "--json"]);
+      const plugin = check("codex", "plugin");
+      expect(plugin).toMatchObject({
+        status: "warn",
+        detail: `couldn't ask codex (${why}) -- falling back to the plugin cache: ahood@ahood 0.15.0 installed, enabled`,
+      });
+      expect(plugin.detail).not.toContain("not installed");
+      expect(process.exitCode).toBe(0);
+    });
+
+    it("an empty plugin cache after a timeout still fails, but says it is the cache that lacks it", async () => {
+      stubNet();
+      await setUpThenList({ status: null, stdout: "", stderr: "" }, { cached: false });
+      await doctor(["--offline", "--json"]);
+      const plugin = check("codex", "plugin");
+      expect(plugin).toMatchObject({ status: "fail", detail: expect.stringContaining("couldn't ask codex (timeout) -- falling back to the plugin cache: ahood@ahood is not in it") });
+      expect(plugin.detail).not.toContain("not installed");
+    });
+
+    it("a valid list is still [ok], and `plugin list` gets 45 s, not the runner's default 15 s", async () => {
+      stubNet();
+      useCodex();
+      await setup(["codex", "--yes"]);
+      runner.calls.length = 0;
+      await doctor(["--offline", "--json"]);
+      expect(check("codex", "plugin")).toMatchObject({ status: "ok", detail: "ahood@ahood 0.14.0 installed, enabled" });
+      const lists = runner.calls.filter((c) => c.bin === "codex" && c.args.join(" ") === LIST);
+      expect(lists.length).toBeGreaterThan(0);
+      for (const call of lists) expect(call.timeoutMs).toBe(45_000);
+    });
+
+    it("--remove after timeouts uninstalls from the cache's answer and says it could not ask about the marketplace", async () => {
+      stubNet();
+      const cx = await setUpThenList({ status: null, stdout: "", stderr: "", timedOut: true });
+      const realCodex = cx.bin;
+      runner.restore();
+      runner = fakeRunner({
+        opencode: fakeOpencode(),
+        codex: (args) => {
+          const cmd = args.join(" ");
+          if (cmd === LIST || cmd === "plugin marketplace list --json") return { status: null, stdout: "", stderr: "", timedOut: true };
+          return realCodex(args);
+        },
+      });
+      await setup(["--remove", "codex", "--yes"]);
+      const ran = runner.calls.map((c) => c.args.join(" "));
+      expect(ran).toContain("plugin remove ahood@ahood");
+      expect(ran).not.toContain("plugin marketplace remove ahood");
+      expect(io.stdout()).toContain("couldn't ask codex (timeout) -- falling back to the plugin cache");
+      expect(io.stdout()).toContain("couldn't ask codex (timeout) whether the ahood marketplace is cloned");
+    });
   });
 
   it("rejects unknown arguments", async () => {
