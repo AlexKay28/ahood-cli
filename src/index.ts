@@ -24,6 +24,8 @@ import { status } from "./commands/status.js";
 import { sync } from "./commands/sync.js";
 import { pin, unpin } from "./commands/pin.js";
 import { review } from "./commands/review.js";
+import { find } from "./commands/find.js";
+import { stats } from "./commands/stats.js";
 import { setup } from "./setup/setup-command.js";
 import { doctor } from "./setup/doctor-command.js";
 import { CLI_KINDS, extractKindFlag, isCliKind, resolveScope, type CliKind, type KindScope } from "./kinds.js";
@@ -150,6 +152,13 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   pin,
   unpin,
   review,
+  // ahood#1019: the discovery and owner verbs the /ahood plugin commands call.
+  // `find` is `skill search` across kinds with --kind/--sort (one request,
+  // search.ts); `try` IS `ahood skill read` (the legacy, any-kind handler,
+  // unchanged) under the name the plugin uses; `stats` is the owner's numbers.
+  find,
+  try: (args) => read(args),
+  stats,
   // ahood#980: wire ahood into Claude Code / Codex / opencode, and check it.
   setup,
   doctor,

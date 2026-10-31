@@ -28,7 +28,7 @@ export const CODEX_MARKETPLACE_FILE = ".agents/plugins/marketplace.json";
 
 const REPO_URL = "https://github.com/AlexKay28/ahood-cli";
 const CATEGORY = "Productivity";
-const SHORT_DESCRIPTION = "ahood's registry MCP tools, plus a skill for your dashboard, updates, reviews and snaps";
+const SHORT_DESCRIPTION = "ahood's registry MCP tools, plus a skill to find, install and publish artifacts, sync, review and snap";
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -38,7 +38,8 @@ function manifest(): string {
     version: CLI_VERSION,
     description:
       "ahood in Codex: the registry's MCP tools (search, fetch, publish skills, agents, MCP servers, docs), plus the " +
-      "ahood skill for your dashboard, syncing updates, reviewing evolution proposals and capturing private snaps.",
+      "ahood skill to find, try and install artifacts, use prompts and loops, publish, star, see your stats, sync " +
+      "updates, review evolution proposals and capture private snaps.",
     author: { name: "ahood", url: REPO_URL },
     homepage: "https://www.ahood.dev/docs#mcp",
     repository: REPO_URL,
@@ -52,8 +53,9 @@ function manifest(): string {
       longDescription:
         "ahood (ahood.dev) is a registry for AI agent skills, agents, MCP servers and docs, with versioning, private " +
         "session notes (snaps) and owner-approved self-evolution. This plugin wires up ahood's hosted MCP server " +
-        `(it reads your token from $${AHOOD_MCP_TOKEN_ENV}) and bundles two skills: \`ahood\`, a dashboard of ` +
-        "installed skills that syncs updates and reviews evolution proposals only with your consent, and " +
+        `(it reads your token from $${AHOOD_MCP_TOKEN_ENV}) and bundles two skills: \`ahood\`, a hub for ` +
+        "finding, trying, installing and publishing artifacts that syncs updates and reviews evolution proposals " +
+        "only with your consent, and " +
         "`using-ahood`, how to search, install and snap from inside a session.",
       developerName: "ahood",
       category: CATEGORY,

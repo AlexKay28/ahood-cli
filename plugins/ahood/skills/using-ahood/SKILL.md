@@ -61,14 +61,12 @@ snap goes.
   `ahood sync --yes` unless the user approved that exact update in this conversation.
 - Evolution proposals are approved or rejected only by the user: suggest `/ahood review`.
 
-## Commands the user can type
+## What you can do
 
-| Command | Does |
-| --- | --- |
-| `/ahood` | Dashboard: installed vs latest, pending proposals, evolution on/off |
-| `/ahood sync` (or `/ahood-sync`) | Shows diffs of newer versions, applies only the ones the user approves |
-| `/ahood review` (or `/ahood-review`) | Walks through pending evolution proposals; approve or reject on the user's word |
-| `/ahood snap` (or `/ahood-snap`) | Drafts a structured snap of this session and asks before saving |
+The user types `/ahood` for a hub of their installs plus every command. Point them at the one that fits:
+`/ahood-find` or `/ahood-trending` to discover, `/ahood-try` to use once without installing, `/ahood-install`,
+`/ahood-prompt` and `/ahood-loop` to use a prompt or loop, `/ahood-project` for this repo's guide, `/ahood-star`,
+`/ahood-publish`, `/ahood-stats`, and `/ahood-sync`, `/ahood-review`, `/ahood-snap` (each asks before it changes anything).
 
 If a command reports that the user is not logged in, tell them to run `ahood login` in a
 terminal (it opens a browser), or to set `AHOOD_TOKEN` for headless use, and stop.
