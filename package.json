@@ -34,7 +34,7 @@
     "sync-readme": "node scripts/sync-readme.mjs",
     "sync-plugin": "node scripts/sync-plugin.mjs",
     "sync-skill": "node scripts/sync-skill.mjs",
-    "version": "node scripts/sync-plugin.mjs && node scripts/check-plugin-version.mjs && git add plugins/codex/.codex-plugin/plugin.json packages/opencode-plugin/package.json"
+    "version": "node scripts/sync-plugin.mjs && node scripts/check-plugin-version.mjs && git add plugins/ahood/.claude-plugin/plugin.json plugins/ahood/commands plugins/codex/.codex-plugin/plugin.json plugins/codex/skills/ahood/SKILL.md packages/opencode-plugin/package.json packages/opencode-plugin/src/generated.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

@@ -12,6 +12,7 @@ import { codexPluginSkill, codexSkill } from "../src/setup/templates/codex.js";
 import { opencodeCommandFiles } from "../src/setup/templates/opencode.js";
 import { claudePluginCommandFiles, CLAUDE_PLUGIN_DIR } from "../src/setup/templates/claude-plugin.js";
 import { COMMANDS as OPENCODE_PLUGIN_COMMANDS } from "../packages/opencode-plugin/src/generated.js";
+import { CLI_VERSION } from "../src/version.js";
 
 const ROOT = join(import.meta.dirname, "..");
 
@@ -86,6 +87,38 @@ describe("AHOOD_COMMANDS is the single source for every harness's /ahood wording
       expect(text).toMatch(/private/i);
     }
   });
+});
+
+describe("every rendering runs the CLI the plugin was built with (ahood#1018)", () => {
+  // A stale global `ahood` on PATH (0.13.0 has no `status`) broke /ahood; the
+  // generated files pin the CLI by version instead, baked in at sync time.
+  const pinned = `npx -y @ahood/cli@${CLI_VERSION}`;
+  // A bare `ahood <verb>` in backticks outside a heading (the Codex skill's
+  // section headings name what the user says, e.g. "## `ahood sync`").
+  const bareCall = /^(?!#).*`ahood (status|sync|skill|pin|review|snap|login)\b/m;
+  const onDisk: Record<string, string> = {
+    "plugins/codex/skills/ahood/SKILL.md": readFileSync(join(ROOT, "plugins", "codex", "skills", "ahood", "SKILL.md"), "utf-8"),
+    // The commands only: the module's SNAP_PROMPT is the snap hook's text, kept
+    // equal to the import-free hook script's copy (below), and not a command.
+    "packages/opencode-plugin/src/generated.ts (COMMANDS)": OPENCODE_PLUGIN_COMMANDS.map((c) => c.template).join("\n"),
+    ...Object.fromEntries(
+      AHOOD_COMMANDS.map((c) => [`commands/${c.name}.md`, readFileSync(join(ROOT, CLAUDE_PLUGIN_DIR, "commands", `${c.name}.md`), "utf-8")]),
+    ),
+  };
+
+  for (const [file, text] of Object.entries(onDisk)) {
+    it(`${file} references @ahood/cli@${CLI_VERSION} and never a bare \`ahood <verb>\``, () => {
+      expect(text).toContain(pinned);
+      expect(text).not.toMatch(bareCall);
+    });
+  }
+
+  for (const c of AHOOD_COMMANDS) {
+    it(`${c.name}: every CLI call in the body is pinned`, () => {
+      expect(c.body).toContain(`\`${pinned} `);
+      expect(c.body).not.toMatch(bareCall);
+    });
+  }
 });
 
 describe("the opt-in snap hook's switch and prompt have exactly one literal value each", () => {

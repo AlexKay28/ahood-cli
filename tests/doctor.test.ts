@@ -378,3 +378,49 @@ describe("ahood doctor (ahood#980)", () => {
     });
   });
 });
+
+describe("ahood doctor: a global `ahood` on PATH (ahood#1018)", () => {
+  const globalCli = () => report().cli.find((c: { name: string }) => c.name === "global ahood");
+  const withGlobal = (ahood: (args: string[]) => RunResult | string) => {
+    runner.restore();
+    runner = fakeRunner({ opencode: fakeOpencode(), ahood });
+  };
+
+  it("warns, exit 0, when the global CLI is older than this CLI and its plugins, and says how to update", async () => {
+    withGlobal((args) => (args[0] === "--version" ? "@ahood/cli 0.13.0\n" : { status: 1, stdout: "", stderr: "Unknown command" }));
+    await doctor(["--offline", "--json"]);
+    expect(globalCli()).toMatchObject({ status: "warn" });
+    expect(globalCli().detail).toContain("0.13.0");
+    expect(globalCli().detail).toContain(`older than this CLI and its plugins (${CLI_VERSION})`);
+    expect(globalCli().detail).toContain(`npm i -g @ahood/cli@${CLI_VERSION}`);
+    expect(globalCli().detail).toContain(`npx -y @ahood/cli@${CLI_VERSION}`);
+    expect(runner.calls).toContainEqual(expect.objectContaining({ bin: "ahood", args: ["--version"] }));
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("prints the warning in the human report too", async () => {
+    withGlobal(() => "@ahood/cli 0.13.0\n");
+    await doctor(["--offline"]);
+    expect(io.stdout()).toMatch(/\[warn\] global ahood: .*0\.13\.0.*npm i -g @ahood\/cli@/);
+  });
+
+  it("is ok when the global CLI is this version or newer", async () => {
+    withGlobal(() => `@ahood/cli ${CLI_VERSION}\n`);
+    await doctor(["--offline", "--json"]);
+    expect(globalCli()).toMatchObject({ status: "ok", detail: expect.stringContaining(CLI_VERSION) });
+    withGlobal(() => "@ahood/cli 999.0.0\n");
+    await doctor(["--offline", "--json"]);
+    expect(globalCli()).toMatchObject({ status: "ok", detail: expect.stringContaining("999.0.0") });
+  });
+
+  it("is ok with no global `ahood` at all (the plugins use npx)", async () => {
+    await doctor(["--offline", "--json"]);
+    expect(globalCli()).toMatchObject({ status: "ok", detail: expect.stringContaining("none on PATH") });
+  });
+
+  it("warns when the global CLI reports no version", async () => {
+    withGlobal(() => ({ status: 1, stdout: "", stderr: "boom" }));
+    await doctor(["--offline", "--json"]);
+    expect(globalCli()).toMatchObject({ status: "warn", detail: expect.stringContaining("did not report a version") });
+  });
+});

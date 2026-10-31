@@ -4,12 +4,14 @@ import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AHOOD_COMMANDS } from "../src/setup/templates/ahood-commands.js";
+import { AHOOD_CLI, AHOOD_COMMANDS } from "../src/setup/templates/ahood-commands.js";
+import { CLI_VERSION } from "../src/version.js";
 import {
   CLAUDE_AHOOD_VERBS,
   CLAUDE_COMMAND_ALLOWED_TOOLS,
   CLAUDE_PLUGIN_DIR,
   claudePluginCommandFiles,
+  claudePluginManifest,
 } from "../src/setup/templates/claude-plugin.js";
 import { CLAUDE_MARKETPLACE_NAME, CLAUDE_PLUGIN_ID } from "../src/setup/templates/claude.js";
 
@@ -53,11 +55,17 @@ describe("plugin manifest and marketplace", () => {
     expect(JSON.stringify(manifest)).not.toMatch(/Bearer [A-Za-z0-9]/);
   });
 
-  it("the marketplace lists it under the id setup installs, at the same version", () => {
+  it("plugin.json is generated at the CLI's version (ahood#1018: one version, never hand-bumped)", () => {
+    expect(manifest.version).toBe(CLI_VERSION);
+    expect(readFileSync(join(PLUGIN, ".claude-plugin", "plugin.json"), "utf-8")).toBe(claudePluginManifest());
+  });
+
+  it("the marketplace lists it under the id setup installs, with no version of its own", () => {
     expect(marketplace.name).toBe(CLAUDE_MARKETPLACE_NAME);
     expect(`${entry.name}@${marketplace.name}`).toBe(CLAUDE_PLUGIN_ID);
-    // `claude plugin tag` refuses a release where these disagree.
-    expect(entry.version).toBe(manifest.version);
+    // plugin.json carries the version (ahood#1018); one set in both places
+    // can only disagree, and plugin.json wins silently when it does.
+    expect(entry).not.toHaveProperty("version");
     expect(entry.source).toBe(`./${CLAUDE_PLUGIN_DIR}`);
     expect(existsSync(join(ROOT, entry.source, ".claude-plugin", "plugin.json"))).toBe(true);
   });
@@ -115,9 +123,18 @@ describe("/ahood command files", () => {
         const allowed = (fields["allowed-tools"] ?? []) as string[];
         expect(Array.isArray(allowed)).toBe(true);
         for (const tool of allowed) {
-          expect(tool).toMatch(/^Bash\(ahood [^()]+\)$/);
-          expect(tool).not.toMatch(/--yes|\bapprove\b|\breject\b|\bpin\b|snap create|sync \*|sync <|ahood \*/);
+          // The same pinned CLI the body runs (ahood#1018), or the grant never matches.
+          expect(tool.startsWith(`Bash(npx -y @ahood/cli@${CLI_VERSION} `)).toBe(true);
+          expect(tool).toMatch(/^Bash\([^()]+\)$/);
+          expect(tool).not.toMatch(/--yes|\bapprove\b|\breject\b|\bpin\b|snap create|sync \*|sync <|@\S+ \*/);
         }
+      });
+
+      it("runs the CLI as `npx -y @ahood/cli@<plugin version>`, never a bare `ahood` on PATH (ahood#1018)", () => {
+        expect(AHOOD_CLI).toBe(`npx -y @ahood/cli@${CLI_VERSION}`);
+        expect(body).toContain(`\`npx -y @ahood/cli@${CLI_VERSION} `);
+        // A bare `ahood <verb>` in backticks would run whatever is on PATH.
+        expect(body).not.toMatch(/`ahood (status|sync|skill|pin|review|snap|login)\b/);
       });
 
       it("never tells the agent to pass --yes except for updates the user approved", () => {
@@ -134,8 +151,8 @@ describe("/ahood command files", () => {
     expect(CLAUDE_AHOOD_VERBS).toEqual(["sync", "review", "snap"]);
     expect(body).toContain("`/ahood $ARGUMENTS`");
     for (const verb of CLAUDE_AHOOD_VERBS) expect(body).toContain(`\n## ${verb}\n`);
-    expect(body).toContain("ahood status --json");
-    expect(body).toContain("ahood review approve <id>");
-    expect(body).toContain("ahood snap create");
+    expect(body).toContain(`${AHOOD_CLI} status --json`);
+    expect(body).toContain(`${AHOOD_CLI} review approve <id>`);
+    expect(body).toContain(`${AHOOD_CLI} snap create`);
   });
 });

@@ -31,10 +31,11 @@ jobs:
           fi
 
       # One tag publishes @ahood/cli AND @ahood/opencode-plugin (ahood#1009),
-      # and `ahood setup opencode` / `ahood doctor` look for the plugin at the
-      # CLI's own version. `npm version` keeps the two in sync (the `version`
-      # hook); this catches a hand edit before anything is published.
-      - name: Verify @ahood/opencode-plugin version matches package.json
+      # and the Codex and Claude Code plugins carry the same version
+      # (ahood#1018): their /ahood commands run `npx -y @ahood/cli@<it>`.
+      # `npm version` keeps all three in sync (the `version` hook); this
+      # catches a hand edit before anything is published.
+      - name: Verify every plugin version matches package.json
         run: node scripts/check-plugin-version.mjs
 
       - uses: ./.github/actions/verify
