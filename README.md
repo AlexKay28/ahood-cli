@@ -148,6 +148,11 @@ Its files are generated too (`npm run sync-plugin` for the manifest, `.mcp.json`
 skill; `npm run sync-skill` for `using-ahood`), and the plugin's version is the CLI's: `npm version`
 regenerates `plugin.json` on a release bump.
 
+Releasing: first add a `## <version>` section to [`plugins/ahood/CHANGELOG.md`](plugins/ahood/CHANGELOG.md)
+and commit it. `npm version`'s `preversion` hook refuses a version without one (before it changes
+any file), and so does the release workflow, which also runs `claude plugin validate --strict` on the
+marketplace and the plugin before publishing.
+
 ### opencode plugin
 
 [`packages/opencode-plugin/`](packages/opencode-plugin) is `@ahood/opencode-plugin`, an opencode v2

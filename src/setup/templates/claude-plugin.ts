@@ -118,12 +118,17 @@ const REPO_URL = "https://github.com/AlexKay28/ahood-cli";
  * hand-bumped. Claude Code updates an installed plugin only when this
  * `version` changes, and the marketplace entry must not set one too (when
  * both are set, plugin.json wins silently and the entry only misleads).
+ * `displayName` is the label Claude Code shows (ahood#1018 step E), so it can
+ * change without renaming `name`, the id every install is keyed by: never
+ * change `name`; record a rename, if one is ever needed, in an append-only
+ * `renames` map instead.
  */
 export function claudePluginManifest(): string {
   return `${JSON.stringify(
     {
       $schema: "https://anthropic.com/claude-code/plugin.schema.json",
       name: "ahood",
+      displayName: "ahood",
       version: CLI_VERSION,
       description:
         "ahood in Claude Code: the registry's MCP tools (search, fetch, publish skills, agents, MCP servers, docs), plus " +
