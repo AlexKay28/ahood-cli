@@ -158,11 +158,13 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     desc:
       "With no harness, detects which of Claude Code, Codex and opencode are installed (CLI on PATH or config dir) " +
       "and asks which to set up. Claude Code: installs the ahood plugin the native way -- `claude plugin marketplace " +
-      "add AlexKay28/ahood-cli` then `claude plugin install ahood@ahood` -- or, when the claude CLI has no `plugin` " +
+      "add AlexKay28/ahood-cli#release` then `claude plugin install ahood@ahood` -- or, when the claude CLI has no `plugin` " +
       "subcommands, prints the /plugin commands to type in a session. Codex: installs the ahood Codex plugin -- " +
-      "[marketplaces.ahood] and [plugins.\"ahood@ahood\"] as a marked block in $CODEX_HOME/config.toml (default " +
+      "[marketplaces.ahood] (ref = \"release\") and [plugins.\"ahood@ahood\"] as a marked block in $CODEX_HOME/config.toml (default " +
       "~/.codex), then `codex plugin marketplace upgrade ahood` and `codex plugin add ahood@ahood` -- and takes out " +
-      "the MCP block, skill and AGENTS.md snippet earlier versions wrote. opencode: adds " +
+      "the MCP block, skill and AGENTS.md snippet earlier versions wrote. Both hosts read the plugin from the " +
+      "`release` branch, which moves only when a version is released; an install from main or a tag is moved over. " +
+      "opencode: adds " +
       "mcp.servers.ahood to the global opencode.json(c) and lists the @ahood/opencode-plugin package, which brings the " +
       "/ahood commands. Not logged in? It offers `ahood login` first. Every MCP entry reads its token from $AHOOD_TOKEN " +
       "($AHOOD_API_TOKEN is the deprecated old name) unless you let setup store the token in that harness's own " +
