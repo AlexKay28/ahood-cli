@@ -11,9 +11,14 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # write: the last step moves the `release` branch (ahood#1018 step B).
+      contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Full history, so the release-branch step below can check (and git
+          # push can prove) that the move is a fast-forward.
+          fetch-depth: 0
 
       # Refuses to publish a tag that doesn't match package.json -- a tag
       # pushed against the wrong commit, or a manual mistake, must not
@@ -99,3 +104,16 @@ jobs:
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # The stable channel (ahood#1018 step B): Claude Code and Codex install
+      # and auto-update the plugin from the `release` branch, never from
+      # `main`, so a commit on main without a release reaches no one and every
+      # release reaches everyone. Runs only after both publishes above
+      # succeeded (or were already done), so the branch never points at a
+      # version npm does not have.
+      #
+      # Never forced: a plain push of the tag's commit is a fast-forward or it
+      # fails. The first run creates the branch. A re-run of an older tag, whose
+      # commit the branch already contains, leaves it where it is.
+      - name: Fast-forward the release branch to this tag
+        run: node scripts/release-branch.mjs

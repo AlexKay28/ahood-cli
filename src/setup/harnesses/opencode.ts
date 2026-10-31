@@ -276,6 +276,12 @@ function inspect(): ConfigState {
     { name: "MCP config", state: mcp, detail: displayPath(path) },
     { name: "plugin", state: plugin, detail: `${OPENCODE_PLUGIN_PACKAGE} in ${OPENCODE_PLUGINS_KEY} of ${displayPath(path)}` },
   ];
+  // ahood#1018 step C: opencode re-checks a plugin named without a version
+  // for a newer one on npm when it starts; an exact version never moves.
+  // Setup lists the bare name, and only that (or `{ package }`) counts as ours.
+  if (plugin === "ok") {
+    features.push({ name: "auto-update", state: "ok", detail: `on (the bare ${OPENCODE_PLUGIN_PACKAGE} is updated from npm when opencode starts)` });
+  }
   if (legacy.length > 0) {
     details.push(`${legacy.length} command file(s) from an earlier setup in ${displayPath(commandsDir)}`);
     features.push({ name: "old command files", state: "stale", detail: `${displayPath(commandsDir)} -- re-run \`ahood setup opencode\` to take them out` });

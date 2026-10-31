@@ -3,20 +3,22 @@
 // this machine. The harness modules (./harnesses/) only plan; this command
 // shows the plan, asks, and applies it through ./file-changes.ts, which owns
 // the backup / idempotency / dry-run rules for every harness.
+import { existsSync } from "node:fs";
 import { askLine, confirmYesNo, isInteractive } from "../confirm.js";
 import { LEGACY_TOKEN_ENV, resolveToken, resolveTokenWithSource, TOKEN_ENV } from "../credentials.js";
 import { login } from "../commands/login.js";
 import { flagValue, unrecognizedArgs } from "../flags.js";
 import { UsageError } from "../usage-error.js";
 import { SetupRefusedError } from "./errors.js";
-import { actionOf, applyChanges, backupStamp, fileMode, formatChanges } from "./file-changes.js";
+import { actionOf, applyChanges, backupStamp, fileMode, formatChanges, writeBackup } from "./file-changes.js";
 import { HARNESSES } from "./harnesses/index.js";
 import { HARNESS_IDS, isHarnessId, type Harness, type HarnessId, type SetupPlan } from "./harnesses/types.js";
 import { displayPath } from "./paths.js";
+import { releaseBranchExists } from "./release-channel.js";
 import { runner } from "./runner.js";
 
 const USAGE =
-  "Usage: ahood setup [claude|codex|opencode] [--yes] [--dry-run] [--store-token|--no-store-token]\n" +
+  "Usage: ahood setup [claude|codex|opencode] [--yes] [--dry-run] [--store-token|--no-store-token] [--no-auto-update]\n" +
   "   or: ahood setup --remove <claude|codex|opencode> [--yes] [--dry-run]";
 
 type Parsed = {
@@ -26,6 +28,8 @@ type Parsed = {
   dryRun: boolean;
   /** true = --store-token, false = --no-store-token, null = ask (or keep what is there). */
   storeToken: boolean | null;
+  /** --no-auto-update: do not ask, do not turn background plugin updates on (ahood#1018 step C). */
+  noAutoUpdate: boolean;
 };
 
 function parseArgs(args: string[]): Parsed {
@@ -33,10 +37,12 @@ function parseArgs(args: string[]): Parsed {
   const dryRun = args.includes("--dry-run");
   const store = args.includes("--store-token");
   const noStore = args.includes("--no-store-token");
+  const noAutoUpdate = args.includes("--no-auto-update");
   if (store && noStore) throw new UsageError(`--store-token and --no-store-token contradict each other.\n${USAGE}`);
   const removeValue = flagValue(args, "--remove");
   if (removeValue !== undefined && (store || noStore)) throw new UsageError(`--remove always takes out a token setup stored.\n${USAGE}`);
-  const positionals = unrecognizedArgs(args, ["--yes", "-y", "--dry-run", "--store-token", "--no-store-token"], ["--remove"]);
+  if (removeValue !== undefined && noAutoUpdate) throw new UsageError(`--remove always takes out the auto-update setup turned on.\n${USAGE}`);
+  const positionals = unrecognizedArgs(args, ["--yes", "-y", "--dry-run", "--store-token", "--no-store-token", "--no-auto-update"], ["--remove"]);
   const unknownFlag = positionals.find((a) => a.startsWith("-"));
   if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${USAGE}`);
   if (positionals.length > 1) throw new UsageError(`One harness at a time (got: ${positionals.join(" ")}).\n${USAGE}`);
@@ -48,7 +54,7 @@ function parseArgs(args: string[]): Parsed {
     throw new UsageError(`Unknown harness "${named}" -- expected one of: ${HARNESS_IDS.join(", ")}.\n${USAGE}`);
   }
   const storeToken = store ? true : noStore ? false : null;
-  return { targets: named === undefined ? null : [named as HarnessId], remove: removeValue !== undefined, yes, dryRun, storeToken };
+  return { targets: named === undefined ? null : [named as HarnessId], remove: removeValue !== undefined, yes, dryRun, storeToken, noAutoUpdate };
 }
 
 // ---- login and the token (ahood#990, decision B) ---------------------------
@@ -125,6 +131,20 @@ async function decideToken(harness: Harness, parsed: Parsed): Promise<TokenDecis
   return { token: null };
 }
 
+/**
+ * Whether to turn on background plugin updates (ahood#1018 step C), asked
+ * once: not when they are on already, never with --no-auto-update. The
+ * default is yes, so --yes (and a preview: --dry-run, or no terminal) means yes.
+ */
+async function decideAutoUpdate(harness: Harness, parsed: Parsed): Promise<boolean> {
+  const consent = harness.autoUpdateConsent;
+  if (!consent || parsed.noAutoUpdate) return false;
+  if (consent.enabled()) return true;
+  if (parsed.yes || parsed.dryRun || !isInteractive()) return true;
+  const answer = (await askLine(`\n${harness.label}: ${consent.question}`)).toLowerCase();
+  return answer === "" || answer === "y" || answer === "yes";
+}
+
 /** Where the harness will look for the token once this run is done, when that is the user's job. */
 function tokenNotes(harness: Harness, decision: TokenDecision, plan: SetupPlan): void {
   if (!harness.tokenStore || decision.token !== null || harness.tokenStore.userSet()) return;
@@ -163,7 +183,7 @@ async function chooseTargets(yes: boolean): Promise<HarnessId[]> {
 }
 
 function hasWork(plan: SetupPlan): boolean {
-  return plan.commands.length > 0 || plan.files.some((f) => actionOf(f) !== "unchanged");
+  return plan.commands.length > 0 || plan.afterCommands.length > 0 || plan.files.some((f) => actionOf(f) !== "unchanged");
 }
 
 function commandLine(bin: string, args: string[]): string {
@@ -178,6 +198,7 @@ function printPlan(harness: Harness, plan: SetupPlan, remove: boolean, preview: 
     for (const line of formatChanges(applyChanges(plan.files, { dryRun: true, stamp: "<timestamp>" }), true)) console.log(line);
   }
   if (preview) for (const c of plan.commands) console.log(`  would run    ${commandLine(c.bin, c.args)} -- ${c.what}`);
+  if (preview) for (const d of plan.afterCommands) console.log(`  then update  ${displayPath(d.path)} -- ${d.what}`);
   if (plan.manual.length > 0) {
     console.log(`  Type these in a ${harness.label} session:`);
     for (const m of plan.manual) console.log(`    ${m}`);
@@ -187,14 +208,18 @@ function printPlan(harness: Harness, plan: SetupPlan, remove: boolean, preview: 
 
 type Outcome = "done" | "nothing" | "dry-run" | "declined" | "needs-consent" | "refused" | "failed";
 
-async function runOne(harness: Harness, parsed: Parsed, stamp: string): Promise<Outcome> {
+/** The harnesses that install the plugin from the `release` branch (ahood#1018 step B); opencode reads npm. */
+const READS_RELEASE_BRANCH: readonly HarnessId[] = ["claude", "codex"];
+
+async function runOne(harness: Harness, parsed: Parsed, stamp: string, releaseBranch: boolean | null): Promise<Outcome> {
   let plan: SetupPlan;
   try {
     if (parsed.remove) {
       plan = harness.planRemove();
     } else {
       const decision = await decideToken(harness, parsed);
-      plan = harness.planSetup({ yes: parsed.yes, token: decision.token });
+      const autoUpdate = await decideAutoUpdate(harness, parsed);
+      plan = harness.planSetup({ yes: parsed.yes, token: decision.token, releaseBranch, autoUpdate });
       if (decision.mode !== undefined) {
         for (const change of plan.files) if (change.path === harness.tokenStore?.file() && change.after !== null) change.mode = decision.mode;
       }
@@ -221,6 +246,16 @@ async function runOne(harness: Harness, parsed: Parsed, stamp: string): Promise<
   }
   const applied = applyChanges(plan.files, { dryRun: false, stamp });
   for (const line of formatChanges(applied, false)) console.log(line);
+  // A file a command is about to rewrite before a deferred change edits it
+  // (claude's settings.json) is backed up now, as the user had it -- unless
+  // setup itself just edited it, which already backed it up.
+  for (const path of new Set(plan.afterCommands.map((d) => d.path))) {
+    if (existsSync(path) && !applied.some((a) => a.path === path && a.action !== "unchanged")) {
+      // A token setup stored there is redacted, as in every other backup (ahood#990).
+      const secrets = path === harness.tokenStore?.file() ? [harness.tokenStore.stored()].filter((t): t is string => t !== null) : [];
+      console.log(`  backed up    ${displayPath(path)} (backup: ${displayPath(writeBackup(path, stamp, secrets))})`);
+    }
+  }
   for (const c of plan.commands) {
     console.log(`  running      ${commandLine(c.bin, c.args)}`);
     const result = runner().run(c.bin, c.args, { inherit: true, timeoutMs: 180_000 });
@@ -229,6 +264,14 @@ async function runOne(harness: Harness, parsed: Parsed, stamp: string): Promise<
       return "failed";
     }
   }
+  // Planned only now, on the files as the commands left them; the backup above
+  // (or setup's own edit's) holds the user's version, so none is made of the
+  // file as the command just wrote it.
+  const deferred = plan.afterCommands
+    .map((d) => d.plan())
+    .filter((c): c is NonNullable<typeof c> => c !== null)
+    .map((c) => ({ ...c, regenerable: c.before ?? undefined }));
+  for (const line of formatChanges(applyChanges(deferred, { dryRun: false, stamp }), false)) console.log(line);
   return "done";
 }
 
@@ -238,7 +281,8 @@ export async function setup(args: string[]): Promise<void> {
   const targets = parsed.targets ?? (await chooseTargets(parsed.yes));
   const stamp = backupStamp();
   const outcomes: Outcome[] = [];
-  for (const id of targets) outcomes.push(await runOne(HARNESSES[id], parsed, stamp));
+  const releaseBranch = !parsed.remove && targets.some((id) => READS_RELEASE_BRANCH.includes(id)) ? await releaseBranchExists() : null;
+  for (const id of targets) outcomes.push(await runOne(HARNESSES[id], parsed, stamp, releaseBranch));
 
   if (outcomes.includes("dry-run")) console.log("\nNothing was changed (--dry-run).");
   if (outcomes.some((o) => o === "refused" || o === "failed")) process.exitCode = 1;

@@ -8,3 +8,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.AHOOD_INSTALLED_FILE = join(mkdtempSync(join(tmpdir(), "ahood-installed-")), "installed.json");
+
+// ahood#1018 step B: `ahood setup` asks GitHub whether the `release` branch
+// exists before installing from it. No test reaches GitHub: the branch
+// "exists" unless a test swaps in another answer (setReleaseProbeForTests).
+import { setReleaseProbeForTests } from "../src/setup/release-channel.js";
+setReleaseProbeForTests(async () => true);

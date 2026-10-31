@@ -10,11 +10,12 @@ This plugin is published from the [`AlexKay28/ahood-cli`](https://github.com/Ale
 marketplace. Install it with:
 
 ```
-/plugin marketplace add AlexKay28/ahood-cli
+/plugin marketplace add AlexKay28/ahood-cli#release
 /plugin install ahood@ahood
 ```
 
-or run `ahood setup claude` in a terminal. Claude Code's own update flow
+(`#release` is the stable channel: it moves only when a version is released.) Or run
+`ahood setup claude` in a terminal. Claude Code's own update flow
 (`claude plugin update ahood@ahood`) picks up new versions.
 
 ## Setup

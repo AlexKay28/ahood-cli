@@ -3,7 +3,7 @@
 // a fake runner standing in for the claude / codex / opencode CLIs, so no test
 // ever runs a real harness binary or touches a real config.
 import { vi } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { setRunnerForTests, type RunResult } from "../../src/setup/runner.js";
@@ -80,23 +80,71 @@ Commands:
   remove|rm [options] <name>  Remove a configured marketplace
 `;
 
-/** A claude CLI with `plugin` subcommands (or without, `supportsPlugins: false`), holding its own state. */
-export function fakeClaude(state: { marketplace?: boolean; installed?: boolean; enabled?: boolean; supportsPlugins?: boolean; failInstall?: boolean } = {}) {
-  const s = { marketplace: false, installed: false, enabled: true, supportsPlugins: true, failInstall: false, ...state };
+const claudeSettingsPath = () => join(process.env.HOME!, ".claude", "settings.json");
+const readClaudeSettings = (): Record<string, any> => (existsSync(claudeSettingsPath()) ? JSON.parse(readFileSync(claudeSettingsPath(), "utf-8")) : {});
+const writeClaudeSettings = (value: Record<string, unknown>) => {
+  mkdirSync(join(process.env.HOME!, ".claude"), { recursive: true });
+  writeFileSync(claudeSettingsPath(), `${JSON.stringify(value, null, 2)}\n`);
+};
+
+/**
+ * A claude CLI with `plugin` subcommands (or without, `supportsPlugins:
+ * false`), holding its own state. Like claude 2.1.282 (ahood#1018 step B):
+ * `marketplace add <repo>#<ref>` refuses a source other than the one
+ * ~/.claude/settings.json declares, and otherwise rewrites that declaration
+ * itself -- dropping any `autoUpdate` -- and re-serializes the whole file;
+ * `marketplace list` shows a marketplace only while it matches the
+ * declaration; `marketplace remove` deletes the declaration.
+ * `ref`: the ref an already-added marketplace was cloned at (undefined = none).
+ */
+export function fakeClaude(
+  state: { marketplace?: boolean; ref?: string; installed?: boolean; enabled?: boolean; supportsPlugins?: boolean; failInstall?: boolean } = {},
+) {
+  const s = { marketplace: false, ref: "release" as string | undefined, installed: false, enabled: true, supportsPlugins: true, failInstall: false, ...state };
+  if ("ref" in state) s.ref = state.ref;
+  const declared = () => readClaudeSettings().extraKnownMarketplaces?.ahood?.source as { repo?: string; ref?: string } | undefined;
+  const matches = () => {
+    const d = declared();
+    return d === undefined || (d.repo === "AlexKay28/ahood-cli" && d.ref === s.ref);
+  };
   const bin: FakeBin = (args) => {
     const cmd = args.join(" ");
     if (!s.supportsPlugins) return { status: 1, stdout: "", stderr: "error: unknown command 'plugin'" };
     if (cmd === "plugin --help") return CLAUDE_PLUGIN_HELP;
     if (cmd === "plugin marketplace --help") return CLAUDE_MARKETPLACE_HELP;
     if (cmd === "plugin list --json") return JSON.stringify(s.installed ? [{ id: "ahood@ahood", enabled: s.enabled }] : [{ id: "other@x", enabled: true }]);
-    if (cmd === "plugin marketplace list --json") return JSON.stringify(s.marketplace ? [{ name: "ahood" }] : []);
-    if (cmd === "plugin marketplace add AlexKay28/ahood-cli") return void (s.marketplace = true), "added";
+    if (cmd === "plugin marketplace list --json") {
+      const ref = s.ref === undefined ? {} : { ref: s.ref };
+      return JSON.stringify(s.marketplace && matches() ? [{ name: "ahood", source: "github", repo: "AlexKay28/ahood-cli", ...ref }] : []);
+    }
+    const add = /^plugin marketplace add AlexKay28\/ahood-cli(?:#(\S+))?$/.exec(cmd);
+    if (add) {
+      const ref = add[1];
+      const d = declared();
+      if (d !== undefined && (d.repo !== "AlexKay28/ahood-cli" || d.ref !== ref)) {
+        return { status: 1, stdout: "", stderr: 'Cannot add marketplace "ahood": its network source differs from the one declared for it in settings' };
+      }
+      const settings = readClaudeSettings();
+      settings.extraKnownMarketplaces = { ...settings.extraKnownMarketplaces, ahood: { source: { source: "github", repo: "AlexKay28/ahood-cli", ...(ref ? { ref } : {}) } } };
+      writeClaudeSettings(settings);
+      s.marketplace = true;
+      s.ref = ref;
+      return "added";
+    }
     if (cmd === "plugin install ahood@ahood") {
       if (s.failInstall) return { status: 1, stdout: "", stderr: "boom" };
       return void (s.installed = true), "installed";
     }
+    if (cmd === "plugin update ahood@ahood") return s.installed ? "updated" : { status: 1, stdout: "", stderr: "not installed" };
     if (cmd === "plugin uninstall ahood@ahood") return void (s.installed = false), "uninstalled";
-    if (cmd === "plugin marketplace remove ahood") return void (s.marketplace = false), "removed";
+    if (cmd === "plugin marketplace remove ahood") {
+      const settings = readClaudeSettings();
+      if (settings.extraKnownMarketplaces?.ahood) {
+        delete settings.extraKnownMarketplaces.ahood;
+        writeClaudeSettings(settings);
+      }
+      return void (s.marketplace = false), "removed";
+    }
     return { status: 2, stdout: "", stderr: `unexpected: ${cmd}` };
   };
   return { state: s, bin };

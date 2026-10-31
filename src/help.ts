@@ -153,16 +153,21 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     examples: ["ahood stats", "ahood stats --json"],
   },
   {
-    usage: "ahood setup [claude|codex|opencode] [--remove <harness>] [--yes] [--dry-run] [--store-token|--no-store-token]",
+    usage: "ahood setup [claude|codex|opencode] [--remove <harness>] [--yes] [--dry-run] [--store-token|--no-store-token] [--no-auto-update]",
     summary: "Add ahood (MCP server and /ahood commands) to Claude Code, Codex or opencode, or remove it again.",
     desc:
       "With no harness, detects which of Claude Code, Codex and opencode are installed (CLI on PATH or config dir) " +
       "and asks which to set up. Claude Code: installs the ahood plugin the native way -- `claude plugin marketplace " +
-      "add AlexKay28/ahood-cli` then `claude plugin install ahood@ahood` -- or, when the claude CLI has no `plugin` " +
+      "add AlexKay28/ahood-cli#release` then `claude plugin install ahood@ahood` -- or, when the claude CLI has no `plugin` " +
       "subcommands, prints the /plugin commands to type in a session. Codex: installs the ahood Codex plugin -- " +
-      "[marketplaces.ahood] and [plugins.\"ahood@ahood\"] as a marked block in $CODEX_HOME/config.toml (default " +
+      "[marketplaces.ahood] (ref = \"release\") and [plugins.\"ahood@ahood\"] as a marked block in $CODEX_HOME/config.toml (default " +
       "~/.codex), then `codex plugin marketplace upgrade ahood` and `codex plugin add ahood@ahood` -- and takes out " +
-      "the MCP block, skill and AGENTS.md snippet earlier versions wrote. opencode: adds " +
+      "the MCP block, skill and AGENTS.md snippet earlier versions wrote. Both hosts read the plugin from the " +
+      "`release` branch, which moves only when a version is released; an install from main or a tag is moved over. " +
+      "Claude Code updates a third-party plugin in the background only when told to, so setup asks once \"Keep ahood " +
+      "up to date automatically?\" (default yes; --yes means yes) and sets autoUpdate on the ahood marketplace in " +
+      "~/.claude/settings.json; Codex and opencode update on their own. " +
+      "opencode: adds " +
       "mcp.servers.ahood to the global opencode.json(c) and lists the @ahood/opencode-plugin package, which brings the " +
       "/ahood commands. Not logged in? It offers `ahood login` first. Every MCP entry reads its token from $AHOOD_TOKEN " +
       "($AHOOD_API_TOKEN is the deprecated old name) unless you let setup store the token in that harness's own " +
@@ -179,6 +184,7 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
       "--dry-run           Print what would change; write and run nothing.",
       "--store-token       Store the ahood token in each harness's config (no question asked).",
       "--no-store-token    Never store it; the configs name $AHOOD_TOKEN (a token setup stored is taken out).",
+      "--no-auto-update    Do not ask about, or turn on, Claude Code's background plugin updates.",
     ],
     examples: ["ahood setup", "ahood setup codex --dry-run", "ahood setup opencode --yes", "ahood setup --remove codex"],
   },

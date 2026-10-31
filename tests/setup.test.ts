@@ -14,11 +14,12 @@ vi.mock("../src/confirm.js", async (orig) => ({
 // `ahood setup` offers `ahood login` when no token is found (ahood#990); never run the real device flow here.
 vi.mock("../src/commands/login.js", () => ({ login: vi.fn(async () => {}) }));
 
-import { confirmYesNo, isInteractive } from "../src/confirm.js";
+import { askLine, confirmYesNo, isInteractive } from "../src/confirm.js";
 import { setup } from "../src/setup/setup-command.js";
 import { UsageError } from "../src/usage-error.js";
 import { writeBackup } from "../src/setup/file-changes.js";
 import { upsertBlock } from "../src/setup/marked-block.js";
+import { setReleaseProbeForTests } from "../src/setup/release-channel.js";
 import {
   agentsSnippetBody,
   agentsSnippetFile,
@@ -58,7 +59,7 @@ describe("ahood setup codex (ahood#980, ahood#1009: the Codex plugin)", () => {
   const config = () => join(codex(), "config.toml");
   const USER_TOML = 'model = "o3"\n\n[projects."/x"]\ntrust_level = "trusted"\n';
   const PLUGIN_TOML = {
-    marketplaces: { ahood: { source_type: "git", source: "https://github.com/AlexKay28/ahood-cli.git", ref: `v${CLI_VERSION}` } },
+    marketplaces: { ahood: { source_type: "git", source: "https://github.com/AlexKay28/ahood-cli.git", ref: "release" } },
     plugins: { "ahood@ahood": { enabled: true } },
   };
   /** The codex commands setup ran, without its read-only probes. */
@@ -138,9 +139,9 @@ describe("ahood setup codex (ahood#980, ahood#1009: the Codex plugin)", () => {
     expect(process.exitCode).toBe(0);
   });
 
-  describe("the marketplace is pinned to this CLI's release tag (ahood#1009)", () => {
-    const REF_LINE = `ref = "v${CLI_VERSION}"`;
-    /** The block an earlier setup wrote: unpinned (no `ref`), or pinned to another tag. */
+  describe("the marketplace tracks the release branch (ahood#1018 step B; replaces ahood#1009's tag pin)", () => {
+    const REF_LINE = `ref = "release"`;
+    /** The block an earlier setup wrote: unpinned (no `ref`), or pinned to a tag (ahood#1009). */
     const blockWithRef = (ref: string | null) =>
       codexPluginBlock()
         .split("\n")
@@ -151,17 +152,18 @@ describe("ahood setup codex (ahood#980, ahood#1009: the Codex plugin)", () => {
       writeFileSync(config(), upsertBlock(USER_TOML, blockWithRef(ref), CODEX_TOML_MARKERS, config()));
     };
 
-    it('writes `ref = "v<CLI version>"` right after `source`, the way `codex plugin marketplace add --ref` does', async () => {
-      expect(CODEX_MARKETPLACE_REF).toBe(`v${CLI_VERSION}`);
+    it('writes `ref = "release"` right after `source`, the way `codex plugin marketplace add --ref` does', async () => {
+      expect(CODEX_MARKETPLACE_REF).toBe("release");
       await setup(["codex", "--yes"]);
       expect(readFileSync(config(), "utf-8")).toContain(
         `[marketplaces.ahood]\nsource_type = "git"\nsource = "https://github.com/AlexKay28/ahood-cli.git"\n${REF_LINE}\n`,
       );
-      expect(io.stdout()).toContain(`(https://github.com/AlexKay28/ahood-cli.git at v${CLI_VERSION})`);
+      expect(io.stdout()).toContain("(https://github.com/AlexKay28/ahood-cli.git at release)");
     });
 
     for (const [label, ref] of [
       ["an unpinned block", null],
+      ["a block pinned to a release tag (ahood#1009)", `v${CLI_VERSION}`],
       ["a block pinned to an older tag", "v0.0.1"],
     ] as const) {
       it(`migrates ${label}: rewrites it with the ref, backs it up, and re-checks the installed plugin out with \`marketplace upgrade\` only`, async () => {
@@ -181,9 +183,24 @@ describe("ahood setup codex (ahood#980, ahood#1009: the Codex plugin)", () => {
         runner.calls.length = 0;
         await setup(["codex", "--yes"]);
         expect(codexRuns()).toEqual([]);
-        expect(io.stdout()).toContain(`ahood@ahood is already installed from v${CLI_VERSION}`);
+        expect(io.stdout()).toContain("ahood@ahood is already installed from the release branch");
       });
     }
+
+    it("refuses, changing nothing, while GitHub has no release branch yet", async () => {
+      writeEarlierBlock(`v${CLI_VERSION}`);
+      const before = readFileSync(config(), "utf-8");
+      const restore = setReleaseProbeForTests(async () => false);
+      try {
+        await setup(["codex", "--yes"]);
+      } finally {
+        restore();
+      }
+      expect(process.exitCode).toBe(1);
+      expect(io.stderr()).toMatch(/Codex: refused -- the `release` branch of AlexKay28\/ahood-cli does not exist yet/);
+      expect(readFileSync(config(), "utf-8")).toBe(before);
+      expect(codexRuns()).toEqual([]);
+    });
 
     it("an unpinned block with nothing installed yet gets the ref and the usual fetch + install", async () => {
       writeEarlierBlock(null);
@@ -515,15 +532,24 @@ describe("ahood setup opencode (ahood#980, ahood#1009: the opencode plugin)", ()
 
 describe("ahood setup claude (ahood#980)", () => {
   const mutating = () => runner.calls.filter((c) => !c.args.includes("--help") && !c.args.includes("--json")).map((c) => c.args.join(" "));
+  const settings = () => join(env.home, ".claude", "settings.json");
+  const writeSettings = (value: unknown) => {
+    mkdirSync(join(env.home, ".claude"), { recursive: true });
+    writeFileSync(settings(), `${JSON.stringify(value, null, 2)}\n`);
+  };
+  const declared = (ref?: string) => ({ source: { source: "github", repo: "AlexKay28/ahood-cli", ...(ref ? { ref } : {}) } });
 
-  it("runs marketplace add + plugin install with --yes, and writes no files", async () => {
+  it("runs marketplace add (from the release branch) + plugin install with --yes, and edits no file itself", async () => {
     const claude = fakeClaude();
     runner.restore();
     runner = fakeRunner({ claude: claude.bin });
     await setup(["claude", "--yes"]);
-    expect(mutating()).toEqual(["plugin marketplace add AlexKay28/ahood-cli", "plugin install ahood@ahood"]);
+    expect(mutating()).toEqual(["plugin marketplace add AlexKay28/ahood-cli#release", "plugin install ahood@ahood"]);
     expect(claude.state.installed).toBe(true);
-    expect(listFiles(env.home)).toEqual([]);
+    // the only file is the declaration the claude CLI itself wrote (no backup: there was nothing before)
+    expect(listFiles(env.home)).toEqual([".claude/settings.json"]);
+    // with --yes, auto-update is on (ahood#1018 step C), set after `add` rewrote the declaration
+    expect(JSON.parse(readFileSync(settings(), "utf-8")).extraKnownMarketplaces.ahood).toEqual({ ...declared("release"), autoUpdate: true });
   });
 
   it("is idempotent: an installed plugin runs nothing", async () => {
@@ -531,7 +557,7 @@ describe("ahood setup claude (ahood#980)", () => {
     runner = fakeRunner({ claude: fakeClaude({ marketplace: true, installed: true }).bin });
     await setup(["claude", "--yes"]);
     expect(mutating()).toEqual([]);
-    expect(io.stdout()).toContain("already installed");
+    expect(io.stdout()).toContain("already installed from the release branch");
   });
 
   it("skips marketplace add when it is already there", async () => {
@@ -541,12 +567,88 @@ describe("ahood setup claude (ahood#980)", () => {
     expect(mutating()).toEqual(["plugin install ahood@ahood"]);
   });
 
+  describe("moves an existing install to the release branch (ahood#1018 step B)", () => {
+    for (const [label, ref] of [
+      ["an unpinned marketplace (main)", undefined],
+      ["a tag-pinned marketplace", "v0.16.0"],
+    ] as const) {
+      it(`${label}: edits the declaration's ref (backed up), re-adds at release, updates the plugin`, async () => {
+        const user = { theme: "dark", extraKnownMarketplaces: { ahood: declared(ref) } };
+        writeSettings(user);
+        const before = readFileSync(settings(), "utf-8");
+        const claude = fakeClaude({ marketplace: true, ref, installed: true });
+        runner.restore();
+        runner = fakeRunner({ claude: claude.bin });
+        await setup(["claude", "--yes"]);
+        expect(mutating()).toEqual(["plugin marketplace add AlexKay28/ahood-cli#release", "plugin update ahood@ahood"]);
+        expect(io.stdout()).toContain(`marketplace moved from ${ref ?? "unpinned"}`);
+        const after = JSON.parse(readFileSync(settings(), "utf-8"));
+        expect(after.extraKnownMarketplaces.ahood).toEqual({ ...declared("release"), autoUpdate: true });
+        expect(after.theme).toBe("dark");
+        const [backup] = backups(listFiles(join(env.home, ".claude"))).sort();
+        expect(readFileSync(join(env.home, ".claude", backup), "utf-8")).toBe(before);
+        // a re-run has nothing left to do
+        runner.calls.length = 0;
+        await setup(["claude", "--yes"]);
+        expect(mutating()).toEqual([]);
+      });
+    }
+
+    it("a marketplace listed at another ref with no user-settings declaration is re-added at release", async () => {
+      const claude = fakeClaude({ marketplace: true, ref: undefined });
+      runner.restore();
+      runner = fakeRunner({ claude: claude.bin });
+      await setup(["claude", "--yes"]);
+      expect(mutating()).toEqual(["plugin marketplace add AlexKay28/ahood-cli#release", "plugin install ahood@ahood"]);
+    });
+
+    it("leaves a declaration that points elsewhere (a fork, a local checkout) alone and refuses", async () => {
+      writeSettings({ extraKnownMarketplaces: { ahood: { source: { source: "directory", path: "/src/ahood-cli" } } } });
+      const before = readFileSync(settings(), "utf-8");
+      runner.restore();
+      runner = fakeRunner({ claude: fakeClaude().bin });
+      await setup(["claude", "--yes"]);
+      expect(process.exitCode).toBe(1);
+      expect(io.stderr()).toMatch(/already declares the "ahood" marketplace from directory \/src\/ahood-cli/);
+      expect(readFileSync(settings(), "utf-8")).toBe(before);
+      expect(mutating()).toEqual([]);
+    });
+  });
+
+  it("refuses, changing nothing, while GitHub has no release branch yet", async () => {
+    const restore = setReleaseProbeForTests(async () => false);
+    try {
+      runner.restore();
+      runner = fakeRunner({ claude: fakeClaude().bin });
+      await setup(["claude", "--yes"]);
+      expect(process.exitCode).toBe(1);
+      expect(io.stderr()).toMatch(/`release` branch of AlexKay28\/ahood-cli does not exist yet/);
+      expect(io.stderr()).toMatch(/created by the next ahood-cli release/);
+      expect(mutating()).toEqual([]);
+      expect(listFiles(env.home)).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("goes ahead when GitHub could not be asked (the claude CLI then reports a missing ref itself)", async () => {
+    const restore = setReleaseProbeForTests(async () => null);
+    try {
+      runner.restore();
+      runner = fakeRunner({ claude: fakeClaude().bin });
+      await setup(["claude", "--yes"]);
+      expect(mutating()).toEqual(["plugin marketplace add AlexKay28/ahood-cli#release", "plugin install ahood@ahood"]);
+    } finally {
+      restore();
+    }
+  });
+
   it("without `plugin` subcommands, prints the in-session /plugin commands and runs nothing", async () => {
     runner.restore();
     runner = fakeRunner({ claude: fakeClaude({ supportsPlugins: false }).bin });
     await setup(["claude", "--yes"]);
     expect(mutating()).toEqual([]);
-    expect(io.stdout()).toContain("/plugin marketplace add AlexKay28/ahood-cli");
+    expect(io.stdout()).toContain("/plugin marketplace add AlexKay28/ahood-cli#release");
     expect(io.stdout()).toContain("/plugin install ahood@ahood");
   });
 
@@ -561,14 +663,21 @@ describe("ahood setup claude (ahood#980)", () => {
     runner = fakeRunner({ claude: fakeClaude().bin });
     await setup(["claude", "--dry-run"]);
     expect(mutating()).toEqual([]);
+    expect(io.stdout()).toContain("would run    claude plugin marketplace add AlexKay28/ahood-cli#release");
     expect(io.stdout()).toContain("would run    claude plugin install ahood@ahood");
   });
 
-  it("--remove uninstalls the plugin and removes the marketplace", async () => {
+  it("--remove uninstalls the plugin and removes the marketplace (and with it the declaration)", async () => {
+    const user = { theme: "dark" };
+    writeSettings(user);
+    const claude = fakeClaude();
     runner.restore();
-    runner = fakeRunner({ claude: fakeClaude({ marketplace: true, installed: true }).bin });
+    runner = fakeRunner({ claude: claude.bin });
+    await setup(["claude", "--yes"]);
+    runner.calls.length = 0;
     await setup(["--remove", "claude", "--yes"]);
     expect(mutating()).toEqual(["plugin uninstall ahood@ahood", "plugin marketplace remove ahood"]);
+    expect(JSON.parse(readFileSync(settings(), "utf-8"))).toEqual({ ...user, extraKnownMarketplaces: {} });
   });
 
   it("a failing install exits 1", async () => {
@@ -577,6 +686,118 @@ describe("ahood setup claude (ahood#980)", () => {
     await setup(["claude", "--yes"]);
     expect(process.exitCode).toBe(1);
     expect(io.stderr()).toMatch(/could not install the ahood plugin/);
+  });
+});
+
+describe("ahood setup claude: auto-update with consent (ahood#1018 step C)", () => {
+  const settings = () => join(env.home, ".claude", "settings.json");
+  const entry = () => JSON.parse(readFileSync(settings(), "utf-8")).extraKnownMarketplaces?.ahood;
+  const writeSettings = (value: unknown) => {
+    mkdirSync(join(env.home, ".claude"), { recursive: true });
+    writeFileSync(settings(), `${JSON.stringify(value, null, 2)}\n`);
+  };
+  const ours = { source: { source: "github", repo: "AlexKay28/ahood-cli", ref: "release" } };
+  const asked = () => vi.mocked(askLine).mock.calls.map(([q]) => q).filter((q) => q.includes("up to date automatically"));
+  let claude: ReturnType<typeof fakeClaude>;
+  const useClaude = (state: Parameters<typeof fakeClaude>[0] = {}) => {
+    runner.restore();
+    claude = fakeClaude(state);
+    runner = fakeRunner({ claude: claude.bin });
+  };
+
+  it("asks once in a terminal; Enter means yes and autoUpdate lands after `marketplace add` rewrote the entry", async () => {
+    useClaude();
+    vi.mocked(isInteractive).mockReturnValue(true);
+    vi.mocked(askLine).mockResolvedValue("");
+    await setup(["claude"]);
+    expect(asked()).toEqual(["\nClaude Code: Keep ahood up to date automatically? [Y/n] "]);
+    expect(entry()).toEqual({ ...ours, autoUpdate: true });
+    // asked once: on already, a re-run does not ask again
+    vi.mocked(askLine).mockClear();
+    await setup(["claude"]);
+    expect(asked()).toEqual([]);
+  });
+
+  it("backs the user's settings.json up before `marketplace add` rewrites it, token redacted", async () => {
+    writeSettings({ theme: "dark", env: { AHOOD_TOKEN: "tok-secret", AHOOD_TOKEN_SET_BY: "ahood setup (remove with `ahood setup --remove claude`)" } });
+    const before = readFileSync(settings(), "utf-8");
+    useClaude();
+    await setup(["claude", "--yes", "--store-token"]);
+    const found = backups(listFiles(join(env.home, ".claude")));
+    expect(found).toHaveLength(1);
+    expect(readFileSync(join(env.home, ".claude", found[0]), "utf-8")).toBe(before.replace("tok-secret", "<ahood token removed from this backup>"));
+    expect(entry()).toEqual({ ...ours, autoUpdate: true });
+  });
+
+  it("a no in the terminal leaves it off", async () => {
+    useClaude();
+    vi.mocked(isInteractive).mockReturnValue(true);
+    vi.mocked(askLine).mockResolvedValue("n");
+    await setup(["claude"]);
+    expect(entry()).toEqual(ours);
+  });
+
+  it("--no-auto-update neither asks nor writes it", async () => {
+    useClaude();
+    vi.mocked(isInteractive).mockReturnValue(true);
+    await setup(["claude", "--yes", "--no-auto-update"]);
+    expect(asked()).toEqual([]);
+    expect(entry()).toEqual(ours);
+  });
+
+  it("an install that is already on release only gets the flag: a settings edit with a backup, no command", async () => {
+    writeSettings({ theme: "dark", extraKnownMarketplaces: { ahood: ours } });
+    const before = readFileSync(settings(), "utf-8");
+    useClaude({ marketplace: true, installed: true });
+    await setup(["claude", "--yes"]);
+    expect(runner.calls.filter((c) => !c.args.includes("--help") && !c.args.includes("--json"))).toEqual([]);
+    expect(entry()).toEqual({ ...ours, autoUpdate: true });
+    const [backup] = backups(listFiles(join(env.home, ".claude")));
+    expect(readFileSync(join(env.home, ".claude", backup), "utf-8")).toBe(before);
+  });
+
+  it("a migration keeps an autoUpdate the user had on, even with --no-auto-update (`add` would drop it)", async () => {
+    writeSettings({ extraKnownMarketplaces: { ahood: { source: { source: "github", repo: "AlexKay28/ahood-cli" }, autoUpdate: true } } });
+    useClaude({ marketplace: true, ref: undefined, installed: true });
+    await setup(["claude", "--yes", "--no-auto-update"]);
+    expect(entry()).toEqual({ ...ours, autoUpdate: true });
+  });
+
+  it("--dry-run says the flag is set after the commands, and writes nothing", async () => {
+    useClaude();
+    await setup(["claude", "--dry-run"]);
+    expect(io.stdout()).toContain("then update  ~/.claude/settings.json -- extraKnownMarketplaces.ahood.autoUpdate: true");
+    expect(listFiles(env.home)).toEqual([]);
+  });
+
+  it("a failed command leaves the flag unwritten", async () => {
+    useClaude({ failInstall: true });
+    await setup(["claude", "--yes"]);
+    expect(process.exitCode).toBe(1);
+    expect(entry()).toEqual(ours);
+  });
+
+  it("--remove with the claude CLI: `marketplace remove` takes the whole entry, autoUpdate included", async () => {
+    useClaude();
+    await setup(["claude", "--yes"]);
+    await setup(["--remove", "claude", "--yes"]);
+    expect(entry()).toBeUndefined();
+  });
+
+  it("--remove without the claude CLI takes setup's autoUpdate back out, byte-identical to before it", async () => {
+    writeSettings({ theme: "dark", extraKnownMarketplaces: { ahood: ours } });
+    const before = readFileSync(settings(), "utf-8");
+    useClaude({ marketplace: true, installed: true });
+    await setup(["claude", "--yes"]);
+    expect(entry()).toEqual({ ...ours, autoUpdate: true });
+    runner.restore();
+    runner = fakeRunner({});
+    await setup(["--remove", "claude", "--yes"]);
+    expect(readFileSync(settings(), "utf-8")).toBe(before);
+  });
+
+  it("--remove with --no-auto-update is a usage error", async () => {
+    await expect(setup(["--remove", "claude", "--no-auto-update"])).rejects.toBeInstanceOf(UsageError);
   });
 });
 

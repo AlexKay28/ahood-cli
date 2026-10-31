@@ -24,9 +24,19 @@ export type Detection = {
 /** A program setup runs for the user (only with their consent). */
 export type PlannedCommand = { bin: string; args: string[]; what: string };
 
+/**
+ * A file edit that can only be planned once the commands have run, because
+ * one of them rewrites that file (claude's `plugin marketplace add` re-writes
+ * the marketplace declaration in settings.json, dropping `autoUpdate`).
+ * `what` is shown in the preview; `plan` reads the file as the commands left it.
+ */
+export type DeferredChange = { path: string; what: string; plan(): FileChange | null };
+
 export type SetupPlan = {
   files: FileChange[];
   commands: PlannedCommand[];
+  /** Applied, through the same writer as `files`, after every command succeeded. */
+  afterCommands: DeferredChange[];
   /** Steps the user has to do by hand (e.g. typed inside a Claude Code session). */
   manual: string[];
   notes: string[];
@@ -54,8 +64,12 @@ export type ConfigState = {
  * `token`: the ahood token to store in the harness's own config -- set only
  * after the user consented (ahood#990, decision B). null = the config names
  * $AHOOD_TOKEN instead, and any token setup stored earlier is taken out.
+ * `releaseBranch`: whether GitHub has the `release` branch the plugin is
+ * installed from (ahood#1018 step B) -- false refuses, null = could not ask.
+ * `autoUpdate`: the user agreed to background plugin updates (ahood#1018
+ * step C); only a harness with `autoUpdateConsent` acts on it.
  */
-export type SetupOptions = { yes: boolean; token: string | null };
+export type SetupOptions = { yes: boolean; token: string | null; releaseBranch: boolean | null; autoUpdate: boolean };
 
 /**
  * A harness whose config can hold the token itself. `file` is the one file
@@ -74,6 +88,12 @@ export interface Harness {
   inspect(): ConfigState;
   tokenStore?: TokenStore;
   /**
+   * A harness whose background plugin updates are off until the user turns
+   * them on (Claude Code, for a third-party marketplace): setup asks once,
+   * and `enabled` says whether they are on already (then it does not ask).
+   */
+  autoUpdateConsent?: { enabled(): boolean; question: string };
+  /**
    * An npm package the harness installs by itself when it starts (the opencode
    * plugin). `ahood doctor` checks npm has it at this CLI's version, because a
    * harness that cannot install it may skip it without saying so.
@@ -82,5 +102,5 @@ export interface Harness {
 }
 
 export function emptyPlan(): SetupPlan {
-  return { files: [], commands: [], manual: [], notes: [] };
+  return { files: [], commands: [], afterCommands: [], manual: [], notes: [] };
 }
