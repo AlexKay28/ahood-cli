@@ -26,7 +26,17 @@ import {
   CLAUDE_TOKEN_MARKER_KEY,
   CLAUDE_TOKEN_MARKER_VALUE,
 } from "../templates/claude.js";
-import { emptyPlan, type ConfigState, type Detection, type Feature, type Harness, type SetupOptions, type SetupPlan, type TokenStore } from "./types.js";
+import {
+  emptyPlan,
+  type ConfigState,
+  type DeferredChange,
+  type Detection,
+  type Feature,
+  type Harness,
+  type SetupOptions,
+  type SetupPlan,
+  type TokenStore,
+} from "./types.js";
 
 type PluginEntry = { id: string; enabled?: boolean };
 
@@ -208,6 +218,34 @@ function planSettingsToken(token: string | null): FileChange | null {
   return { path, before: text, after, what: `env.${CLAUDE_TOKEN_ENV_KEY}: your ahood token, for the plugin's MCP server`, secrets };
 }
 
+// ---- auto-update (ahood#1018 step C) ---------------------------------------
+
+const AUTO_UPDATE_PATH = ["extraKnownMarketplaces", CLAUDE_MARKETPLACE_NAME, "autoUpdate"];
+const AUTO_UPDATE_ON = `extraKnownMarketplaces.${CLAUDE_MARKETPLACE_NAME}.autoUpdate: true -- Claude Code updates the plugin in the background`;
+const AUTO_UPDATE_BY_HAND = `/plugin -> Marketplaces -> ${CLAUDE_MARKETPLACE_NAME} -> Enable auto-update`;
+export const CLAUDE_AUTO_UPDATE_QUESTION = "Keep ahood up to date automatically? [Y/n] ";
+
+const setAutoUpdate = (on: boolean) => (text: string) => editSettings(text, AUTO_UPDATE_PATH, on ? true : undefined);
+
+/** Turns `autoUpdate` on in settings.json as the claude CLI left it; nothing when there is no declaration to put it on. */
+function deferredAutoUpdate(): DeferredChange {
+  return {
+    path: settingsPath(),
+    what: AUTO_UPDATE_ON,
+    plan: () => {
+      const { text, value } = readSettings();
+      const declared = declarationOf(value);
+      if (text === null || declared?.kind !== "ours" || declared.autoUpdate) return null;
+      return withSettingsEdit(null, text, setAutoUpdate(true), AUTO_UPDATE_ON);
+    },
+  };
+}
+
+function autoUpdateEnabled(): boolean {
+  const declared = settingsDeclaration();
+  return declared?.kind === "ours" && declared.autoUpdate;
+}
+
 function planSetup(opts: SetupOptions): SetupPlan {
   if (opts.releaseBranch === false) throw new SetupRefusedError(releaseBranchMissing("Claude Code"));
   const plan = emptyPlan();
@@ -232,18 +270,30 @@ function planSetup(opts: SetupOptions): SetupPlan {
       `extraKnownMarketplaces.${CLAUDE_MARKETPLACE_NAME}: marketplace moved from ${describeRef(declared.ref)} to the ${CLAUDE_MARKETPLACE_REF} branch`,
     );
   }
-  if (settingsChange) plan.files.push(settingsChange);
+  // Background updates (ahood#1018 step C): on with the user's consent, and
+  // kept on when they were on already -- `marketplace add` drops the field.
+  const wantAutoUpdate = opts.autoUpdate || (declared?.kind === "ours" && declared.autoUpdate);
+  // Straight into the declaration when there is one that stays; a migration's
+  // `add` rewrites it, so then the deferred change below sets it instead.
+  const autoUpdateHere = wantAutoUpdate && declared?.kind === "ours" && !declared.autoUpdate && !migrate;
+  if (autoUpdateHere) settingsChange = withSettingsEdit(settingsChange, text, setAutoUpdate(true), AUTO_UPDATE_ON);
   const { binary } = detect();
-  if (!binary || !claudeSupportsPluginCli(binary)) {
+  const cli = binary !== null && claudeSupportsPluginCli(binary);
+  if (!cli) {
+    if (settingsChange) plan.files.push(settingsChange);
     plan.notes.push(binary ? "this claude CLI has no `plugin` subcommands." : "the claude CLI is not on PATH.");
     plan.manual.push(...CLAUDE_IN_SESSION_INSTALL);
+    if (wantAutoUpdate && declared === undefined) {
+      plan.notes.push(`once it is installed, re-run \`ahood setup claude\` to turn on auto-update (or ${AUTO_UPDATE_BY_HAND}).`);
+    }
     return plan;
   }
-  const listed = listedMarketplace(binary);
+  const listed = listedMarketplace(binary!);
   // Listed at another ref without a user-settings declaration (one from an
   // older claude, or another scope): `add` at the release branch moves it.
   const listedElsewhere = listed !== null && declared === undefined && (listed.ref ?? null) !== CLAUDE_MARKETPLACE_REF;
-  const installed = pluginInstalled(binary);
+  const installed = pluginInstalled(binary!);
+  if (settingsChange) plan.files.push(settingsChange);
   if (installed && !migrate && !listedElsewhere && listed !== null) {
     plan.notes.push(
       `${CLAUDE_PLUGIN_ID} is already installed from the ${CLAUDE_MARKETPLACE_REF} branch; Claude Code updates it with \`claude plugin update ${CLAUDE_PLUGIN_ID}\`.`,
@@ -252,34 +302,51 @@ function planSetup(opts: SetupOptions): SetupPlan {
   }
   if (migrate || listedElsewhere || listed === null) {
     plan.commands.push({
-      bin: binary,
+      bin: binary!,
       args: [...CLAUDE_INSTALL_ARGS.marketplaceAdd],
       what: `add the ahood plugin marketplace from the ${CLAUDE_MARKETPLACE_REF} branch`,
     });
+    // `add` rewrites the declaration without `autoUpdate` (verified, claude
+    // 2.1.282), so it is set once the commands are done, on the file as
+    // `add` left it.
+    if (wantAutoUpdate) plan.afterCommands.push(deferredAutoUpdate());
   }
   plan.commands.push(
     installed
-      ? { bin: binary, args: [...CLAUDE_INSTALL_ARGS.pluginUpdate], what: `update the ahood plugin from the ${CLAUDE_MARKETPLACE_REF} branch` }
-      : { bin: binary, args: [...CLAUDE_INSTALL_ARGS.pluginInstall], what: "install the ahood plugin" },
+      ? { bin: binary!, args: [...CLAUDE_INSTALL_ARGS.pluginUpdate], what: `update the ahood plugin from the ${CLAUDE_MARKETPLACE_REF} branch` }
+      : { bin: binary!, args: [...CLAUDE_INSTALL_ARGS.pluginInstall], what: "install the ahood plugin" },
   );
   return plan;
 }
 
 function planRemove(): SetupPlan {
   const plan = emptyPlan();
-  const tokenChange = planSettingsToken(null);
-  if (tokenChange) plan.files.push(tokenChange);
+  let settingsChange = planSettingsToken(null);
   const { binary } = detect();
-  if (!binary || !claudeSupportsPluginCli(binary)) {
+  const cli = binary !== null && claudeSupportsPluginCli(binary);
+  const removesDeclaration = cli && marketplaceAdded(binary!);
+  // `marketplace remove` deletes the whole declaration, autoUpdate with it;
+  // without it, setup takes its own `autoUpdate: true` back out (ahood#1018 step C).
+  if (!removesDeclaration && autoUpdateEnabled()) {
+    const { text } = readSettings();
+    settingsChange = withSettingsEdit(
+      settingsChange,
+      text,
+      setAutoUpdate(false),
+      `extraKnownMarketplaces.${CLAUDE_MARKETPLACE_NAME}.autoUpdate removed`,
+    );
+  }
+  if (settingsChange) plan.files.push(settingsChange);
+  if (!cli) {
     plan.notes.push(binary ? "this claude CLI has no `plugin` subcommands." : "the claude CLI is not on PATH.");
     plan.manual.push(...CLAUDE_IN_SESSION_REMOVE);
     return plan;
   }
   if (pluginInstalled(binary)) {
-    plan.commands.push({ bin: binary, args: [...CLAUDE_REMOVE_ARGS.pluginUninstall], what: "uninstall the ahood plugin" });
+    plan.commands.push({ bin: binary!, args: [...CLAUDE_REMOVE_ARGS.pluginUninstall], what: "uninstall the ahood plugin" });
   }
-  if (marketplaceAdded(binary)) {
-    plan.commands.push({ bin: binary, args: [...CLAUDE_REMOVE_ARGS.marketplaceRemove], what: "remove the ahood plugin marketplace" });
+  if (removesDeclaration) {
+    plan.commands.push({ bin: binary!, args: [...CLAUDE_REMOVE_ARGS.marketplaceRemove], what: "remove the ahood plugin marketplace" });
   }
   if (plan.commands.length === 0 && plan.files.length === 0) plan.notes.push("the ahood plugin is not installed; nothing to remove.");
   return plan;
@@ -304,7 +371,20 @@ function inspect(): ConfigState {
     state.features.push(channel);
     if (channel.state === "stale" && state.state === "ok") state.state = "stale";
   }
+  if (state.state !== "absent") state.features.push(autoUpdateFeature());
   return state;
+}
+
+/** `auto-update: on|off` (ahood#1018 step C): off is Claude Code's default for a third-party marketplace. */
+function autoUpdateFeature(): Feature {
+  if (autoUpdateEnabled()) {
+    return { name: "auto-update", state: "ok", detail: `on (extraKnownMarketplaces.${CLAUDE_MARKETPLACE_NAME}.autoUpdate in ${displayPath(settingsPath())})` };
+  }
+  return {
+    name: "auto-update",
+    state: "stale",
+    detail: `off in ${displayPath(settingsPath())} -- new releases arrive only with \`claude plugin update ${CLAUDE_PLUGIN_ID}\`; turn it on: re-run \`ahood setup claude\` (or ${AUTO_UPDATE_BY_HAND})`,
+  };
 }
 
 /** Which ref Claude Code reads the marketplace from (ahood#1018 step B), per the settings.json declaration. */
@@ -354,4 +434,13 @@ const tokenStore: TokenStore = {
   what: `env.${CLAUDE_TOKEN_ENV_KEY} in Claude Code's settings.json`,
 };
 
-export const claudeHarness: Harness = { id: "claude", label: "Claude Code", detect, planSetup, planRemove, inspect, tokenStore };
+export const claudeHarness: Harness = {
+  id: "claude",
+  label: "Claude Code",
+  detect,
+  planSetup,
+  planRemove,
+  inspect,
+  tokenStore,
+  autoUpdateConsent: { enabled: autoUpdateEnabled, question: CLAUDE_AUTO_UPDATE_QUESTION },
+};
