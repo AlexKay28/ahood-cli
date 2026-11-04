@@ -72,9 +72,9 @@ export function flagValue(args: string[], flag: string): string | undefined {
 // issued an UNFILTERED request and printed every snap as though it were the
 // filtered set (ahood-cli#135). parseSearchQuery below is now a caller of this
 // helper rather than a second copy of it (folded in by ahood-cli#136, whose bug
-// existed in both copies); tagsSnap still carries its own inline copy -- fold it
-// in when the queued snap-parsing fixes (ahood-cli#137/#138) next touch it,
-// rather than growing a third variant again.
+// existed in both copies); tagsSnap now calls this same helper too (folded in
+// alongside the ahood-cli#137/#138 snap-parsing fixes), so there is no longer
+// an inline copy of these rules left to grow into a third variant.
 export function unrecognizedArgs(args: string[], booleanFlags: string[], valueFlags: string[]): string[] {
   return unrecognizedIndices(args, booleanFlags, valueFlags).map((i) => args[i]);
 }
