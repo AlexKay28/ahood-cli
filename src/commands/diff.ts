@@ -2,6 +2,7 @@ import { createPatch } from "diff";
 import { fetchVersionMeta, downloadVerifiedArchive, extractSingleFileContent, type VersionMeta } from "./add.js";
 import { parseOwnerSkill, SEMVER_RE } from "../spec.js";
 import { UsageError } from "../usage-error.js";
+import { unrecognizedArgs } from "../flags.js";
 import { assertKind, isCliKind, KINDS, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill diff <owner>/<skill> <versionA> <versionB> [--json]";
@@ -63,9 +64,18 @@ function diffManifests(
 }
 
 export async function diff(args: string[], scope?: KindScope): Promise<void> {
+  // Delegated to flags.ts's shared stripping helper rather than the naive
+  // `args.filter((a) => !a.startsWith("--"))` this used to do, which silently
+  // dropped any unrecognized "--" flag (a typo'd --jsonn proceeded as if never
+  // typed) and silently discarded any stray extra positional beyond the three
+  // expected -- the exact bug class #134/#135/#136 fixed for every sibling
+  // command that already calls unrecognizedArgs.
+  const positionals = unrecognizedArgs(args, ["--json"], []);
+  const unknownFlag = positionals.find((a) => a.startsWith("--"));
+  if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${USAGE}`);
+  if (positionals.length > 3) throw new UsageError(`Unexpected argument "${positionals[3]}".\n${USAGE}`);
   const jsonOutput = args.includes("--json");
-  const positional = args.filter((a) => !a.startsWith("--"));
-  const [spec, versionA, versionB] = positional;
+  const [spec, versionA, versionB] = positionals;
   if (!spec || !versionA || !versionB) throw new UsageError(USAGE);
 
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
