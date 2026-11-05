@@ -4,7 +4,7 @@
 // `ahood` on PATH vs this CLI (ahood#1018). Exits 1 when a
 // harness that IS set up is broken (partial or unreadable config, or the MCP
 // server it points at is unreachable); warnings alone exit 0.
-import { LEGACY_TOKEN_ENV, resolveTokenWithSource, TOKEN_ENV, type TokenSource } from "../credentials.js";
+import { resolveTokenWithSource, TOKEN_ENV, type TokenSource } from "../credentials.js";
 import { unrecognizedArgs } from "../flags.js";
 import { UsageError } from "../usage-error.js";
 import { CLI_NAME, CLI_VERSION } from "../version.js";
@@ -55,7 +55,6 @@ async function mcpCheck(offline: boolean): Promise<Check> {
 
 const SOURCE_LABEL: Record<TokenSource, string> = {
   [TOKEN_ENV]: `$${TOKEN_ENV}`,
-  [LEGACY_TOKEN_ENV]: `$${LEGACY_TOKEN_ENV} (deprecated)`,
   credentials: "stored login (`ahood login`)",
 };
 
@@ -64,13 +63,6 @@ function tokenSourceCheck(): Check {
   const name = "token source";
   const resolved = resolveTokenWithSource();
   if (!resolved) return { name, status: "warn", detail: `none -- run \`ahood login\` (or set ${TOKEN_ENV})` };
-  if (resolved.source === LEGACY_TOKEN_ENV) {
-    return {
-      name,
-      status: "warn",
-      detail: `only $${LEGACY_TOKEN_ENV} is set -- it is deprecated and works for this release cycle only; rename it to ${TOKEN_ENV}`,
-    };
-  }
   return { name, status: "ok", detail: SOURCE_LABEL[resolved.source] };
 }
 
@@ -241,13 +233,6 @@ function mcpTokenCheck(id: HarnessId, config: ConfigState): Check {
   if (config.tokenStored && store) return { name, status: "ok", detail: `stored by ahood setup in ${displayPath(store.file())}` };
   if (store?.userSet()) return { name, status: "ok", detail: `${TOKEN_ENV} set in ${displayPath(store.file())}` };
   if (process.env[TOKEN_ENV]) return { name, status: "ok", detail: `${TOKEN_ENV} is set in this shell` };
-  if (process.env[LEGACY_TOKEN_ENV]) {
-    return {
-      name,
-      status: "warn",
-      detail: `only ${LEGACY_TOKEN_ENV} is set; this harness's ahood config reads ${TOKEN_ENV} -- rename it (or \`ahood setup ${id} --store-token\`)`,
-    };
-  }
   return {
     name,
     status: "warn",

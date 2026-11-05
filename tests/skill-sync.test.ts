@@ -52,8 +52,9 @@ describe("the canonical self-skill body (src/skill/using-ahood.md)", () => {
     expect(body).toContain("Never sync on your own.");
   });
 
-  it("names the token as AHOOD_TOKEN, not the old AHOOD_API_TOKEN as primary", () => {
+  it("names the token as AHOOD_TOKEN, and no longer the removed AHOOD_API_TOKEN", () => {
     expect(body).toMatch(/`AHOOD_TOKEN`/);
+    expect(body).not.toContain("AHOOD_API_TOKEN");
   });
 });
 

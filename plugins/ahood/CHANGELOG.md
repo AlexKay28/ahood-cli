@@ -9,6 +9,20 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 `preversion` hook (and the release workflow) refuse a version without one
 (`scripts/check-changelog.mjs`).
 
+## 0.18.0
+
+- Removed the forms deprecated in ahood#990 (ahood#995):
+  - `ahood skill update` and `ahood skill outdated`: use `ahood sync` and `ahood status`, which
+    cover every project on the machine. `ahood agent|mcp|doc|project|loop update`/`outdated` stay.
+  - `ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z>`: use
+    `ahood skill publish <owner>/<skill>@<version> [--path <dir>]`. The old flags are refused.
+  - `AHOOD_API_TOKEN`: the CLI no longer reads it. Use `AHOOD_TOKEN` (or `ahood setup --store-token`).
+- The one-line notices for `ahood mcp serve` and `ahood help useme` are gone. Bare `ahood mcp`
+  now prints the mcp command list, like every other noun.
+- `ahood setup` and `ahood doctor` no longer clean up or flag what setup wrote before the plugin
+  (`$CODEX_HOME/skills/ahood/SKILL.md`, the AGENTS.md snippet, opencode's `commands/ahood*.md`).
+  Delete those by hand if you still have them.
+
 ## 0.17.0
 
 - Updates come from the `release` branch: every host now reads the plugin from

@@ -1,14 +1,13 @@
 // opencode (ahood#980, ahood#1009): the ahood MCP server at mcp.servers.ahood
 // and @ahood/opencode-plugin in the `plugins` array of the global
 // opencode.json(c), edited with jsonc-parser so the user's comments and
-// formatting survive. The plugin brings the /ahood commands, so the command
-// files setup wrote before ahood#1009 are taken out (with the usual backups).
-// Formats and locations: templates/opencode.ts.
+// formatting survive. The plugin brings the /ahood commands. Formats and
+// locations: templates/opencode.ts.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { applyEdits, findNodeAtLocation, getNodeValue, modify, parse, parseTree, printParseErrorCode, type Node as JsonNode, type ParseError } from "jsonc-parser";
 import { SetupRefusedError } from "../errors.js";
-import { OWNED_MARKER, planOwnedFileRemoval, readIfExists, type FileChange } from "../file-changes.js";
+import { readIfExists, type FileChange } from "../file-changes.js";
 import { displayPath, opencodeConfigDir } from "../paths.js";
 import { runner } from "../runner.js";
 import { AHOOD_MCP_URL } from "../templates/ahood-commands.js";
@@ -17,14 +16,10 @@ import {
   OPENCODE_CONFIG_FILES,
   OPENCODE_MCP_PATH,
   OPENCODE_PLUGINS_KEY,
-  opencodeCommandFiles,
   opencodeMcpEntry,
   opencodeStoredToken,
 } from "../templates/opencode.js";
 import { emptyPlan, type ConfigState, type Detection, type Feature, type Harness, type SetupOptions, type SetupPlan, type TokenStore } from "./types.js";
-
-// Written by setup before ahood#1009; now only ever removed.
-const legacyCommandPath = (file: string) => join(opencodeConfigDir(), "commands", file);
 
 /** Same choice `opencode mcp add --global` makes: the first config file that exists, else opencode.json. */
 function configPath(): string {
@@ -223,19 +218,10 @@ function planConfig(remove: boolean, token: string | null = null): FileChange | 
   };
 }
 
-/** The command files setup wrote before ahood#1009: deleted when ours (backed up if edited), left with a note when not. */
-function planLegacyCommandRemoval(plan: SetupPlan): void {
-  for (const { file, content } of opencodeCommandFiles()) {
-    const change = planOwnedFileRemoval(legacyCommandPath(file), content, `/${file.replace(/\.md$/, "")} command file (the plugin brings it now)`, plan.notes);
-    if (change) plan.files.push(change);
-  }
-}
-
 function planSetup(opts: SetupOptions): SetupPlan {
   refuseOldOpencode();
   const plan = emptyPlan();
   plan.files.push(planConfig(false, opts.token)!);
-  planLegacyCommandRemoval(plan);
   plan.notes.push(
     `opencode installs ${OPENCODE_PLUGIN_PACKAGE} from npm when it next starts; it brings the /ahood commands. ` +
       "If npm does not have it, opencode skips it without an error -- `ahood doctor` checks.",
@@ -247,7 +233,6 @@ function planRemove(): SetupPlan {
   const plan = emptyPlan();
   const config = planConfig(true);
   if (config) plan.files.push(config);
-  planLegacyCommandRemoval(plan);
   return plan;
 }
 
@@ -266,8 +251,6 @@ function inspect(): ConfigState {
       return { state: "broken", details: [error instanceof Error ? error.message : String(error)], features: [] };
     }
   }
-  const legacy = opencodeCommandFiles().filter(({ file }) => readIfExists(legacyCommandPath(file))?.includes(OWNED_MARKER));
-  const commandsDir = join(opencodeConfigDir(), "commands");
   const details = [
     `MCP entry in ${displayPath(path)}: ${mcp}`,
     `${OPENCODE_PLUGIN_PACKAGE} in its ${OPENCODE_PLUGINS_KEY}: ${plugin === "ok" ? "listed" : "absent"}`,
@@ -282,14 +265,10 @@ function inspect(): ConfigState {
   if (plugin === "ok") {
     features.push({ name: "auto-update", state: "ok", detail: `on (the bare ${OPENCODE_PLUGIN_PACKAGE} is updated from npm when opencode starts)` });
   }
-  if (legacy.length > 0) {
-    details.push(`${legacy.length} command file(s) from an earlier setup in ${displayPath(commandsDir)}`);
-    features.push({ name: "old command files", state: "stale", detail: `${displayPath(commandsDir)} -- re-run \`ahood setup opencode\` to take them out` });
-  }
   const tokenStored = storedToken() !== null;
-  if (mcp === "absent" && plugin === "absent" && legacy.length === 0) return { state: "absent", details, features };
+  if (mcp === "absent" && plugin === "absent") return { state: "absent", details, features };
   if (mcp === "absent" || plugin === "absent") return { state: "partial", details, features, tokenStored };
-  if (mcp === "stale" || legacy.length > 0) return { state: "stale", details, features, tokenStored };
+  if (mcp === "stale") return { state: "stale", details, features, tokenStored };
   return { state: "ok", details, features, tokenStored };
 }
 

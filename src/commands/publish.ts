@@ -57,8 +57,12 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
 }
 
 const USAGE =
-  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project|loop|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]\n" +
-  "   or: ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
+  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project|loop|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]";
+
+// ahood#995: the flags of the removed `<path> --owner <owner> --slug <skill>
+// --version <x.y.z>` form (deprecated in ahood#990). Refused by name rather
+// than ignored, so `--owner bob` can never be silently dropped.
+const REMOVED_PUBLISH_FLAGS = ["--owner", "--slug", "--version"];
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
 // `vendor/thing/.git` is skipped the same as a top-level one. Not a
@@ -270,10 +274,14 @@ function parsePublishArgs(args: string[]): {
   kind?: string;
   changelog?: string;
 } {
+  const removed = REMOVED_PUBLISH_FLAGS.filter((f) => args.some((a) => a === f || a.startsWith(`${f}=`)));
+  if (removed.length > 0) {
+    throw new UsageError(
+      `${removed.join(", ")}: the \`<path> --owner <owner> --slug <skill> --version <x.y.z>\` publish form was removed. ` +
+        `Use \`ahood skill publish <owner>/<skill>@<version> [--path <dir>]\` instead.\n${USAGE}`,
+    );
+  }
   const pathFlag = flagValue(args, "--path");
-  let owner = flagValue(args, "--owner");
-  let skill = flagValue(args, "--slug");
-  let version = flagValue(args, "--version");
   const name = flagValue(args, "--name");
   const tagline = flagValue(args, "--tagline");
   const tags = flagValue(args, "--tags");
@@ -282,35 +290,15 @@ function parsePublishArgs(args: string[]): {
   const repository = flagValue(args, "--repository");
   const kind = flagValue(args, "--kind");
   const changelog = flagValue(args, "--changelog");
-  let legacyPath: string | undefined;
-
-  // ahood#990: the `<path> --owner <owner> --slug <skill> --version <x.y.z>`
-  // form predates the primary `<owner>/<skill>@<version>` spec form and is
-  // deprecated in favor of it -- still works unchanged, one stderr note.
-  if (owner !== undefined || skill !== undefined) {
-    console.error(
-      "Deprecated: the `<path> --owner <owner> --slug <skill> --version <x.y.z>` publish form is deprecated; " +
-        "use `ahood skill publish <owner>/<skill>@<version> [--path <dir>]` instead. The legacy form still works.",
-    );
-  }
-
-  const first = args[0];
-  if (first && !first.startsWith("--")) {
-    if (first.includes("/") && first.includes("@")) {
-      // Primary form: ahood skill publish <owner>/<skill>@<version>
-      const parsed = parseOwnerSkill(first.slice(0, first.lastIndexOf("@")), USAGE);
-      owner = owner ?? parsed.owner;
-      skill = skill ?? parsed.skill;
-      version = version ?? first.slice(first.lastIndexOf("@") + 1);
-    } else {
-      // Legacy form: ahood skill publish <path> --owner ... --slug ... --version ...
-      legacyPath = first;
-    }
-  }
+  const spec = args[0];
+  // ahood skill publish <owner>/<skill>@<version>
+  if (!spec || spec.startsWith("--") || !spec.includes("/") || !spec.includes("@")) throw new UsageError(USAGE);
+  const { owner, skill } = parseOwnerSkill(spec.slice(0, spec.lastIndexOf("@")), USAGE);
+  const version = spec.slice(spec.lastIndexOf("@") + 1);
 
   if (!owner || !skill || !version) throw new UsageError(USAGE);
   if (!SEMVER_RE.test(version)) {
-    throw new UsageError(`--version must be a semver like 1.2.3 (got "${version}").\n${USAGE}`);
+    throw new UsageError(`The version must be a semver like 1.2.3 (got "${version}").\n${USAGE}`);
   }
   if (kind !== undefined && !isCliKind(kind)) {
     throw new UsageError(`--kind must be ${orList(CLI_KINDS.map((k) => `"${k}"`))} (got "${kind}").\n${USAGE}`);
@@ -324,7 +312,7 @@ function parsePublishArgs(args: string[]): {
     owner,
     skill,
     version,
-    path: pathFlag ?? legacyPath ?? ".",
+    path: pathFlag ?? ".",
     name,
     tagline,
     tags,

@@ -15,9 +15,8 @@ with versioning, private session notes ("snaps") and owner-approved self-evoluti
 Codex, opencode), and -- with your consent -- wires up the plugin or MCP server, this skill,
 and the token -- after that, the user just types `/ahood`. Everything below is also reachable
 directly: the **ahood MCP tools** (the hosted registry endpoint, needs `AHOOD_TOKEN` in the
-environment; `AHOOD_API_TOKEN` is a deprecated fallback for one release) and the **`ahood`
-CLI** (`npm i -g @ahood/cli`, or `npx -y @ahood/cli`), which `/ahood` and its sibling commands
-call.
+environment) and the **`ahood` CLI** (`npm i -g @ahood/cli`, or `npx -y @ahood/cli`), which
+`/ahood` and its sibling commands call.
 
 ## Find and install
 

@@ -198,11 +198,16 @@ describe("findCommandHelp", () => {
 });
 
 describe("kind-scoped help (ahood-cli#172)", () => {
-  it("agent and mcp offer every registry verb skill has, with one-sentence summaries", async () => {
+  it("agent and mcp offer every registry verb skill has, plus update/outdated (gone from skill, ahood#995), with one-sentence summaries", async () => {
     const { AGENT_COMMANDS_HELP, MCP_COMMANDS_HELP } = await import("../src/help.js");
     const verbs = (list: typeof SKILL_COMMANDS_HELP) => list.map((c) => c.usage.split(" ")[2]).filter(Boolean);
-    expect(verbs(AGENT_COMMANDS_HELP)).toEqual(verbs(SKILL_COMMANDS_HELP));
-    expect(verbs(MCP_COMMANDS_HELP)).toEqual(verbs(SKILL_COMMANDS_HELP));
+    const skillVerbs = verbs(SKILL_COMMANDS_HELP);
+    expect(skillVerbs).not.toContain("update");
+    expect(skillVerbs).not.toContain("outdated");
+    const withoutRemoved = (list: typeof SKILL_COMMANDS_HELP) => verbs(list).filter((v) => v !== "update" && v !== "outdated");
+    expect(withoutRemoved(AGENT_COMMANDS_HELP)).toEqual(skillVerbs);
+    expect(withoutRemoved(MCP_COMMANDS_HELP)).toEqual(skillVerbs);
+    for (const list of [AGENT_COMMANDS_HELP, MCP_COMMANDS_HELP]) expect(verbs(list)).toEqual(expect.arrayContaining(["update", "outdated"]));
     for (const { usage, summary } of [...AGENT_COMMANDS_HELP, ...MCP_COMMANDS_HELP]) {
       expect(summary, `${usage} summary should not embed a second sentence`).not.toContain(". ");
       expect(summary, `${usage} summary should end with exactly one period`).toMatch(/[^.]\.$/);

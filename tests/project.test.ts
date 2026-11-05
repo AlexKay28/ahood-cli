@@ -109,17 +109,13 @@ describe("ahood project (ahood-cli#185)", () => {
       expect(Object.keys(readLockfile(LOCKFILE_PATH))).toEqual(["alice/acme"]);
     });
 
-    it("project update moves the guide forward; legacy skill update does too, through the project path", async () => {
+    it("project update moves the guide forward", async () => {
       quiet();
       fakeRegistry({ "alice/acme": await entry("project"), "alice/rev": await entry("agent") });
       await dispatchProject(["add", "alice/acme"]);
       fakeRegistry({ "alice/acme": await entry("project", "2.0.0"), "alice/rev": await entry("agent", "2.0.0") });
       await dispatchProject(["update"]);
       expect(readLockfile(LOCKFILE_PATH)["alice/acme"]).toMatchObject({ version: "2.0.0", kind: "project" });
-
-      fakeRegistry({ "alice/acme": await entry("project", "3.0.0") });
-      await dispatchSkill(["update"]);
-      expect(readLockfile(LOCKFILE_PATH)["alice/acme"]).toMatchObject({ version: "3.0.0", kind: "project" });
       expect(existsSync(join(".claude", "skills"))).toBe(false);
     });
 

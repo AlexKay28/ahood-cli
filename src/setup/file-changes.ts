@@ -24,7 +24,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
-import { SetupRefusedError } from "./errors.js";
 import { displayPath } from "./paths.js";
 
 export type FileChange = {
@@ -155,35 +154,4 @@ export function formatChanges(results: AppliedChange[], dryRun: boolean): string
     const backup = r.backup ? ` (backup: ${displayPath(r.backup)})` : "";
     return `  ${verb[r.action].padEnd(12)} ${displayPath(r.path)} -- ${r.what}${backup}`;
   });
-}
-
-// ---- files that are wholly ours (a command file, a skill, a snippet) -------
-
-/** A line carried by every file setup owns outright; its presence is how we know the file is ours. */
-export const OWNED_MARKER = "managed by `ahood setup`";
-
-function isOwned(content: string): boolean {
-  return content.includes(OWNED_MARKER);
-}
-
-export function planOwnedFile(path: string, desired: string, what: string): FileChange {
-  const before = readIfExists(path);
-  if (before !== null && !isOwned(before)) {
-    throw new SetupRefusedError(
-      `${displayPath(path)} already exists and was not written by \`ahood setup\` -- leaving it alone. ` +
-        "Move it aside and re-run if you want ahood's version; nothing was changed.",
-    );
-  }
-  return { path, before, after: desired, what, regenerable: desired };
-}
-
-/** Deletes a file only if it is ours; a same-named file of the user's is left (and reported). */
-export function planOwnedFileRemoval(path: string, current: string, what: string, notes: string[]): FileChange | null {
-  const before = readIfExists(path);
-  if (before === null) return null;
-  if (!isOwned(before)) {
-    notes.push(`left ${displayPath(path)}: it was not written by \`ahood setup\`.`);
-    return null;
-  }
-  return { path, before, after: null, what, regenerable: current };
 }

@@ -5,7 +5,7 @@
 // the backup / idempotency / dry-run rules for every harness.
 import { existsSync } from "node:fs";
 import { askLine, confirmYesNo, isInteractive } from "../confirm.js";
-import { LEGACY_TOKEN_ENV, resolveToken, resolveTokenWithSource, TOKEN_ENV } from "../credentials.js";
+import { resolveToken, resolveTokenWithSource, TOKEN_ENV } from "../credentials.js";
 import { login } from "../commands/login.js";
 import { flagValue, unrecognizedArgs } from "../flags.js";
 import { UsageError } from "../usage-error.js";
@@ -148,9 +148,6 @@ async function decideAutoUpdate(harness: Harness, parsed: Parsed): Promise<boole
 /** Where the harness will look for the token once this run is done, when that is the user's job. */
 function tokenNotes(harness: Harness, decision: TokenDecision, plan: SetupPlan): void {
   if (!harness.tokenStore || decision.token !== null || harness.tokenStore.userSet()) return;
-  if (!process.env[TOKEN_ENV] && process.env[LEGACY_TOKEN_ENV]) {
-    plan.notes.push(`${harness.label}'s ahood config now reads ${TOKEN_ENV}, not ${LEGACY_TOKEN_ENV}: rename it where you export it.`);
-  }
   plan.notes.push(
     `${harness.label} reads the token from ${TOKEN_ENV} in the environment it starts in: add \`export ${TOKEN_ENV}=<your token>\` ` +
       `to your shell profile, or re-run \`ahood setup ${harness.id} --store-token\` to keep it in ${displayPath(harness.tokenStore.file())}.`,

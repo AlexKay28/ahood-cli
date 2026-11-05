@@ -161,8 +161,7 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
       "add AlexKay28/ahood-cli#release` then `claude plugin install ahood@ahood` -- or, when the claude CLI has no `plugin` " +
       "subcommands, prints the /plugin commands to type in a session. Codex: installs the ahood Codex plugin -- " +
       "[marketplaces.ahood] (ref = \"release\") and [plugins.\"ahood@ahood\"] as a marked block in $CODEX_HOME/config.toml (default " +
-      "~/.codex), then `codex plugin marketplace upgrade ahood` and `codex plugin add ahood@ahood` -- and takes out " +
-      "the MCP block, skill and AGENTS.md snippet earlier versions wrote. Both hosts read the plugin from the " +
+      "~/.codex), then `codex plugin marketplace upgrade ahood` and `codex plugin add ahood@ahood`. Both hosts read the plugin from the " +
       "`release` branch, which moves only when a version is released; an install from main or a tag is moved over. " +
       "Claude Code updates a third-party plugin in the background only when told to, so setup asks once \"Keep ahood " +
       "up to date automatically?\" (default yes; --yes means yes) and sets autoUpdate on the ahood marketplace in " +
@@ -170,7 +169,7 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
       "opencode: adds " +
       "mcp.servers.ahood to the global opencode.json(c) and lists the @ahood/opencode-plugin package, which brings the " +
       "/ahood commands. Not logged in? It offers `ahood login` first. Every MCP entry reads its token from $AHOOD_TOKEN " +
-      "($AHOOD_API_TOKEN is the deprecated old name) unless you let setup store the token in that harness's own " +
+      "unless you let setup store the token in that harness's own " +
       "config -- an [mcp_servers.ahood] in the Codex block that replaces the plugin's, the opencode MCP entry, or env.AHOOD_TOKEN in ~/.claude/settings.json -- which " +
       "it asks about per harness (--store-token says yes up front; --yes alone does not store it). A file setup " +
       "creates for the token is 0600; an existing one other users can read is tightened only on a separate yes. " +
@@ -278,35 +277,6 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     examples: ["ahood skill add alice/pdf-tools", "ahood skill add alice/pdf-tools@1.2.0"],
   },
   {
-    usage: "ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]",
-    summary: "Deprecated; prefer `ahood sync`, which moves the same lockfile pin(s) forward across every project on this machine.",
-    desc:
-      "Deprecated (ahood#990): prefer `ahood sync`, which does the same thing across every project on this " +
-      "machine, with a diff and your consent. This still works, with no behavior change -- a one-line deprecation " +
-      "note goes to stderr, nothing else changes. Move the lockfile pin(s) forward to the latest version. With no " +
-      "argument, updates every installed skill; one failure doesn't stop the rest. An mcp-kind entry is updated " +
-      "in place (re-resolving any secret environment variables) as long as its .mcp.json entry still matches what " +
-      "ahood last installed there -- a hand-edited or unverifiable entry is refused rather than silently overwritten.",
-    flags: [
-      "--dry-run   Preview current vs. latest version (and the changelog for anything behind) without installing anything.",
-      "--json      With --dry-run, emit structured preview objects instead of a formatted table.",
-    ],
-    examples: ["ahood skill update --dry-run", "ahood skill update alice/pdf-tools --dry-run --json"],
-  },
-  {
-    usage: "ahood skill outdated [<owner>/<skill> ...] [--json]",
-    summary: "Deprecated; prefer `ahood status`, which does the same read-only staleness check across every project on this machine.",
-    desc:
-      "Deprecated (ahood#990): prefer `ahood status`, which does the same read-only staleness check across every " +
-      "project on this machine (plus pins and evolution state on artifacts you own). This still works, with no " +
-      "behavior change -- a one-line deprecation note goes to stderr, nothing else changes. Read-only staleness " +
-      "check across installed skills -- current vs. latest version, plus the changelog for anything behind. With " +
-      "no argument, checks every installed skill; with one or more given, checks just those. Never moves a " +
-      "lockfile pin or installs anything; equivalent to `ahood skill update --dry-run`.",
-    flags: ["--json    Emit structured preview objects instead of a formatted table."],
-    examples: ["ahood skill outdated", "ahood skill outdated alice/pdf-tools --json"],
-  },
-  {
     usage: "ahood skill remove <owner>/<skill> [--yes]",
     summary: "Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed).",
     desc:
@@ -384,7 +354,6 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "A PROMPT.md is checked locally before anything is uploaded: an undeclared {{key}}, or a declared input the body never uses, is refused with an error naming the key. " +
       "--name is required when creating; optionally also pass --tagline/--tags/--license/--homepage/--repository. " +
       "Processing happens server-side after upload; this command polls and reports the final published/failed status. " +
-      "The legacy form `ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted. " +
       "Every flag also accepts the --flag=value form, needed when a value itself starts with --.",
     flags: [
       "--kind <kind>                 skill, agent, mcp, doc, project, loop, or prompt. Auto-detected from the folder's root doc when omitted.",
@@ -1003,8 +972,9 @@ export function formatSkillHelp(): string {
     "",
     "Legacy, cross-kind: in this release `ahood skill <verb>` still acts on any registry kind",
     "(skills, agents, MCP server manifests) -- `skill list`/`skill search` include every kind, and",
-    "`skill add`/`skill update` install whatever kind they resolve. Scripts relying on that keep",
-    "working. For one kind only, use `ahood agent|mcp|doc|project|loop|prompt <verb>`, or add",
+    "`skill add` installs whatever kind it resolves. Scripts relying on that keep working. To move",
+    "installed pins forward use `ahood sync` (and `ahood status` to check), which cover every project.",
+    "For one kind only, use `ahood agent|mcp|doc|project|loop|prompt <verb>`, or add",
     "`--kind skill|agent|mcp|doc|project|loop|prompt` to any verb below (`--kind all` spells out the legacy behavior).",
     "A future major version will make `ahood skill` skills-only.",
     "",

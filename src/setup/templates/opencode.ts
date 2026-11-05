@@ -12,13 +12,7 @@
 //     token policy is unchanged. A listed package opencode cannot install is
 //     skipped silently (verified with v2.1.2: empty `plugin.list`, no error),
 //     which is why `ahood doctor` checks npm has it.
-//   - Commands: before ahood#1009 setup wrote one markdown file per command
-//     into `commands/` (opencode loads `{command,commands}/**/*.md`: front
-//     matter = options, body = template, path minus .md = name). Setup now only
-//     removes those; opencodeCommandFiles() is kept as what they looked like,
-//     so an unedited one is deleted without a backup.
 //   Earlier opencode (v1) used a different MCP layout; setup refuses there.
-import { OWNED_MARKER } from "../file-changes.js";
 import { AHOOD_COMMANDS, AHOOD_MCP_TOKEN_ENV, AHOOD_MCP_URL, type AhoodCommand } from "./ahood-commands.js";
 
 export const OPENCODE_CONFIG_FILES = ["opencode.json", "opencode.jsonc"] as const;
@@ -46,28 +40,9 @@ export function opencodeStoredToken(entry: unknown): string | null {
 
 /**
  * One `/ahood` command's prompt: the shared body plus the user's arguments,
- * which opencode substitutes for $ARGUMENTS. The command files below and the
- * opencode plugin's commands (templates/opencode-plugin.ts) send the same text.
+ * which opencode substitutes for $ARGUMENTS. The opencode plugin's commands
+ * (templates/opencode-plugin.ts) send it.
  */
 export function opencodeCommandTemplate(c: AhoodCommand): string {
   return [c.body, "", "User arguments, if any: $ARGUMENTS"].join("\n");
-}
-
-export function opencodeCommandFiles(): Array<{ file: string; content: string }> {
-  return AHOOD_COMMANDS.map((c) => ({
-    file: `${c.name}.md`,
-    content: [
-      "---",
-      `description: ${JSON.stringify(c.description)}`,
-      "---",
-      "",
-      opencodeCommandTemplate(c),
-      "",
-      // The marker sits in the template body, not the front matter: opencode
-      // validates front matter against its command schema and skips a command
-      // that fails it, so an extra key there is a risk not worth taking.
-      `<!-- ${OWNED_MARKER}; remove with \`ahood setup --remove opencode\` -->`,
-      "",
-    ].join("\n"),
-  }));
 }

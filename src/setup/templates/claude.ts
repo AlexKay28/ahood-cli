@@ -39,13 +39,9 @@ export const CLAUDE_REMOVE_ARGS = {
 export const CLAUDE_IN_SESSION_INSTALL = [`/plugin marketplace add ${CLAUDE_MARKETPLACE_SOURCE}`, `/plugin install ${CLAUDE_PLUGIN_ID}`];
 export const CLAUDE_IN_SESSION_REMOVE = [`/plugin uninstall ${CLAUDE_PLUGIN_ID}`, `/plugin marketplace remove ${CLAUDE_MARKETPLACE_NAME}`];
 
-// The plugin's .mcp.json can only name an env var (`Bearer ${AHOOD_TOKEN}`),
-// and Claude Code has no working fallback between two names: verified against
-// Claude Code 2.1.282 with a header-capturing local server --
-// `${AHOOD_TOKEN:-${AHOOD_API_TOKEN}}` sends "Bearer <token>}" (a stray brace)
-// whenever AHOOD_TOKEN is set, because the default ends at the first "}".
-// What does work: the `env` map in ~/.claude/settings.json feeds that
-// expansion (same verification). So with the user's consent (ahood#990,
+// The plugin's .mcp.json can only name an env var (`Bearer ${AHOOD_TOKEN}`).
+// The `env` map in ~/.claude/settings.json feeds that expansion (verified
+// against Claude Code 2.1.282 with a header-capturing local server). So with the user's consent (ahood#990,
 // decision B) setup stores the token there, beside a marker key so
 // `ahood setup --remove claude` deletes only a token setup itself wrote.
 export const CLAUDE_TOKEN_ENV_KEY = "AHOOD_TOKEN";

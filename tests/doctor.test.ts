@@ -6,8 +6,8 @@ import { setup } from "../src/setup/setup-command.js";
 import { CLI_VERSION } from "../src/version.js";
 import { captureConsole } from "./helpers/me-env.js";
 import { upsertBlock } from "../src/setup/marked-block.js";
-import { CODEX_TOML_MARKERS, codexMcpBlock, codexSkill } from "../src/setup/templates/codex.js";
-import { opencodeCommandFiles, opencodeMcpEntry } from "../src/setup/templates/opencode.js";
+import { CODEX_TOML_MARKERS, codexMcpBlock } from "../src/setup/templates/codex.js";
+import { opencodeMcpEntry } from "../src/setup/templates/opencode.js";
 import { fakeClaude, fakeCodex, fakeOpencode, fakeRunner, setupHomeEnv } from "./helpers/harness-env.js";
 import type { RunResult } from "../src/setup/runner.js";
 import { setReleaseProbeForTests } from "../src/setup/release-channel.js";
@@ -115,13 +115,13 @@ describe("ahood doctor (ahood#980)", () => {
     expect(check("codex", "plugin")).toMatchObject({ status: "ok", detail: "ahood@ahood 0.14.0 installed, enabled" });
   });
 
-  it("a pre-plugin Codex setup (ahood#1009) is flagged so a re-run migrates it", async () => {
+  it("a pre-plugin Codex block (ahood#1009) is a stale plugin config; old setup files are no longer checked (ahood#995)", async () => {
     mkdirSync(join(env.home, ".codex", "skills", "ahood"), { recursive: true });
     writeFileSync(join(env.home, ".codex", "config.toml"), upsertBlock("", codexMcpBlock(), CODEX_TOML_MARKERS, "config.toml"));
-    writeFileSync(join(env.home, ".codex", "skills", "ahood", "SKILL.md"), codexSkill());
+    writeFileSync(join(env.home, ".codex", "skills", "ahood", "SKILL.md"), "old\n<!-- managed by `ahood setup` -->\n");
     await doctor(["--offline", "--json"]);
     expect(check("codex", "plugin config")).toMatchObject({ status: "warn" });
-    expect(check("codex", "old setup files")).toMatchObject({ status: "warn", detail: expect.stringContaining("re-run `ahood setup codex`") });
+    expect(check("codex", "old setup files")).toBeUndefined();
     expect(process.exitCode).toBe(1); // the plugin itself is not installed yet
   });
 
@@ -339,15 +339,15 @@ describe("ahood doctor (ahood#980)", () => {
       expect(check("opencode", "plugin on npm")).toMatchObject({ status: "ok" });
     });
 
-    it("opencode: a setup from before ahood#1009 (MCP entry + command files, no plugin) is partial, with the old files flagged", async () => {
+    it("opencode: a setup from before ahood#1009 (MCP entry, no plugin) is partial; old command files are no longer checked (ahood#995)", async () => {
       const dir = join(env.home, ".config", "opencode");
       mkdirSync(join(dir, "commands"), { recursive: true });
       writeFileSync(join(dir, "opencode.json"), JSON.stringify({ mcp: { servers: { ahood: opencodeMcpEntry() } } }));
-      for (const { file, content } of opencodeCommandFiles()) writeFileSync(join(dir, "commands", file), content);
+      writeFileSync(join(dir, "commands", "ahood.md"), "old\n<!-- managed by `ahood setup` -->\n");
       await doctor(["--offline", "--json"]);
       expect(harness("opencode").config.state).toBe("partial");
       expect(check("opencode", "plugin")).toMatchObject({ status: "fail" });
-      expect(check("opencode", "old command files")).toMatchObject({ status: "warn" });
+      expect(check("opencode", "old command files")).toBeUndefined();
     });
 
     it("a harness that was never set up reports no per-feature checks (nothing to break down)", async () => {

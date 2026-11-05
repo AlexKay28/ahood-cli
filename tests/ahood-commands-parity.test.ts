@@ -8,8 +8,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AHOOD_COMMANDS, AHOOD_SNAP_HOOK_ENV, AHOOD_SNAP_PROMPT, type AhoodCommand } from "../src/setup/templates/ahood-commands.js";
-import { codexPluginSkill, codexSkill } from "../src/setup/templates/codex.js";
-import { opencodeCommandFiles } from "../src/setup/templates/opencode.js";
+import { codexPluginSkill } from "../src/setup/templates/codex.js";
 import { claudePluginCommandFiles, CLAUDE_PLUGIN_DIR } from "../src/setup/templates/claude-plugin.js";
 import { COMMANDS as OPENCODE_PLUGIN_COMMANDS } from "../packages/opencode-plugin/src/generated.js";
 import { CLI_VERSION } from "../src/version.js";
@@ -33,26 +32,19 @@ const CONSENT_PHRASES: Record<string, string[]> = {
 };
 
 describe("AHOOD_COMMANDS is the single source for every harness's /ahood wording", () => {
-  const codex = codexSkill();
   const codexPlugin = codexPluginSkill();
-  const opencodeFiles = new Map(opencodeCommandFiles().map((f) => [f.file, f.content]));
   const claudeFiles = new Map(claudePluginCommandFiles().map((f) => [f.file, f.content]));
   const opencodePlugin = new Map(OPENCODE_PLUGIN_COMMANDS.map((c) => [c.name, c.template]));
 
-  it("renders one opencode command file and one Claude plugin command file per shared command", () => {
-    expect([...opencodeFiles.keys()].sort()).toEqual(AHOOD_COMMANDS.map((c) => `${c.name}.md`).sort());
+  it("renders one Claude plugin command file and one opencode plugin command per shared command", () => {
+    expect([...opencodePlugin.keys()].sort()).toEqual(AHOOD_COMMANDS.map((c) => c.name).sort());
     expect([...claudeFiles.keys()].sort()).toEqual(AHOOD_COMMANDS.map((c) => `commands/${c.name}.md`).sort());
   });
 
   for (const c of AHOOD_COMMANDS) {
     describe(c.name, () => {
-      it("the Codex skill (setup's file and the plugin's) contains this command's body verbatim", () => {
-        expect(codex).toContain(c.body);
+      it("the Codex plugin's skill contains this command's body verbatim", () => {
         expect(codexPlugin).toContain(c.body);
-      });
-
-      it("the opencode command file contains this command's body verbatim", () => {
-        expect(opencodeFiles.get(`${c.name}.md`)).toContain(c.body);
       });
 
       it("the opencode plugin's command prompt contains this command's body verbatim", () => {
@@ -66,9 +58,7 @@ describe("AHOOD_COMMANDS is the single source for every harness's /ahood wording
 
       for (const phrase of CONSENT_PHRASES[c.name] ?? []) {
         it(`every harness's rendering keeps the consent rule: ${JSON.stringify(phrase)}`, () => {
-          expect(codex).toContain(phrase);
           expect(codexPlugin).toContain(phrase);
-          expect(opencodeFiles.get(`${c.name}.md`)).toContain(phrase);
           expect(opencodePlugin.get(c.name)).toContain(phrase);
           expect(claudeFiles.get(`commands/${c.name}.md`)).toContain(phrase);
         });
@@ -86,7 +76,7 @@ describe("AHOOD_COMMANDS is the single source for every harness's /ahood wording
     const claudeSkill = readFileSync(join(ROOT, CLAUDE_PLUGIN_DIR, "skills", "using-ahood", "SKILL.md"), "utf-8");
     // Both must insist sync is never automatic and snaps are private -- the
     // two rules a single misworded template could quietly drop.
-    for (const text of [codex, claudeSkill]) {
+    for (const text of [codexPlugin, claudeSkill]) {
       expect(text).toMatch(/never sync|Never update anything without the user's explicit yes/i);
       expect(text).toMatch(/private/i);
     }
