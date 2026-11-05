@@ -23,7 +23,8 @@
     "ahood": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "commands.json"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json && chmod +x dist/index.js && npm run build:opencode-plugin",
@@ -32,6 +33,7 @@
     "pretest": "npm run build",
     "test": "vitest run",
     "sync-readme": "node scripts/sync-readme.mjs",
+    "emit-commands": "node scripts/emit-commands-json.mjs",
     "sync-plugin": "node scripts/sync-plugin.mjs",
     "sync-skill": "node scripts/sync-skill.mjs",
     "preversion": "node scripts/check-changelog.mjs \"$npm_new_version\"",
