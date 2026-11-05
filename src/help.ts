@@ -1,9 +1,9 @@
-// Canonical command list for terminal --help output. Kept in sync by hand
-// with cli/README.md's table and app/docs/page.tsx's COMMANDS array (three
-// copies of the same list, none of which can literally import from this
-// file -- README.md is plain markdown and the docs page is a separate
-// Next.js app) -- a comment in each of those two places points back here so
-// a future command addition doesn't update only one.
+// Canonical command list for terminal --help output, and the single source
+// for its two generated copies: README.md's table (scripts/sync-readme.mjs)
+// and commands.json (scripts/emit-commands-json.mjs, shipped in the npm
+// package), which the ahood website's /docs command list is generated from
+// (AlexKay28/ahood#995). After changing anything here run `npm run
+// sync-readme` and `npm run emit-commands`; CI fails on either being stale.
 //
 // The command surface is split into two tiers, gh-style:
 //   - TOP_LEVEL_COMMANDS_HELP: account/auth-scoped commands that stay flat

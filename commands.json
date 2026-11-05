@@ -1,0 +1,1566 @@
+{
+  "$comment": "Generated from src/help.ts by scripts/emit-commands-json.mjs -- do not edit by hand.",
+  "groups": [
+    {
+      "id": "top-level",
+      "commands": [
+        {
+          "usage": "ahood login",
+          "summary": "Device-code browser login, stores a token locally.",
+          "desc": "Device-code browser login, stores a token locally."
+        },
+        {
+          "usage": "ahood logout",
+          "summary": "Removes the stored token.",
+          "desc": "Removes the stored token."
+        },
+        {
+          "usage": "ahood whoami [--json]",
+          "summary": "Reports whether your stored token still authenticates.",
+          "desc": "Reports whether your stored token still authenticates.",
+          "flags": [
+            "--json    Emit a machine-readable result instead of prose."
+          ]
+        },
+        {
+          "usage": "ahood token create <name>|list [--json]|revoke <id> [--yes]",
+          "summary": "Manage personal API tokens.",
+          "desc": "Manage personal API tokens. All three subcommands require an existing browser-backed session -- a CLI session authenticated with a bearer token can't manage tokens end-to-end; use /settings/tokens in the browser instead.",
+          "flags": [
+            "--yes    (revoke only) Skip the confirmation prompt and revoke immediately."
+          ],
+          "examples": [
+            "ahood token create ci-runner",
+            "ahood token list --json",
+            "ahood token revoke <id>",
+            "ahood token revoke <id> --yes"
+          ]
+        },
+        {
+          "usage": "ahood status [--json]",
+          "summary": "Show every install on this machine against the registry: updates, pins, and evolution on your own artifacts.",
+          "desc": "Reads ~/.ahood/installed.json (every install `ahood <kind> add` has made on this machine, in any project; AHOOD_INSTALLED_FILE overrides the path) and asks the registry (POST /api/v1/me/status) for each artifact's latest version. Prints installed vs latest, whether an update is available, pins, and -- on artifacts you own -- whether self-evolution is on and how many proposals wait for your review. Installs recorded only in the current project's .claude/skills.lock.json (from before this file existed) are imported on first run. Needs a login (the token's 'read' scope).",
+          "flags": [
+            "--json    Emit {items, plan} instead of a table."
+          ],
+          "examples": [
+            "ahood status",
+            "ahood status --json"
+          ]
+        },
+        {
+          "usage": "ahood sync [<owner>/<slug> | <slug> ...] [--yes] [--dry-run] [--json]",
+          "summary": "Update installs that are behind, showing each one's diff and asking y/N first.",
+          "desc": "For every install `ahood status` reports behind (and not pinned at its version), downloads the new version, shows a unified diff against the installed files, and asks y/N per artifact before writing it -- never without consent. A pinned install is moved only to its pinned version. The write is the ordinary atomic install (`ahood <kind> add`) run in that install's own project, so its project lockfile moves with it. With no terminal to ask on, it refuses unless --yes is given. MCP servers are skipped (they can prompt for secrets): update those with `ahood mcp update`.",
+          "flags": [
+            "--yes, -y   Accept every update without asking.",
+            "--dry-run   Show the diffs, change nothing.",
+            "--json      Emit {results} (requires --yes or --dry-run: there is nobody to ask)."
+          ],
+          "examples": [
+            "ahood sync",
+            "ahood sync alice/pdf-tools --dry-run",
+            "ahood sync --yes --json"
+          ]
+        },
+        {
+          "usage": "ahood pin <owner>/<slug>[@version] [--json]",
+          "summary": "Hold an install at one version so `ahood sync` never moves it past that.",
+          "desc": "Pins every install of <owner>/<slug> on this machine at <version> (default: the version installed now), in ~/.ahood/installed.json. `ahood sync` skips a pinned install, or offers to move it to the pinned version if it is on another one.",
+          "flags": [
+            "--json    Emit {owner, slug, installs} instead of prose."
+          ],
+          "examples": [
+            "ahood pin alice/pdf-tools",
+            "ahood pin alice/pdf-tools@1.2.0"
+          ]
+        },
+        {
+          "usage": "ahood unpin <owner>/<slug> [--json]",
+          "summary": "Remove a pin so `ahood sync` offers the latest version again.",
+          "desc": "Removes the pin `ahood pin` set on every install of <owner>/<slug> on this machine.",
+          "flags": [
+            "--json    Emit {owner, slug, unpinned} instead of prose."
+          ],
+          "examples": [
+            "ahood unpin alice/pdf-tools"
+          ]
+        },
+        {
+          "usage": "ahood review [show <id> | approve <id> [--version <semver>] | reject <id>] [--limit <n>] [--json]",
+          "summary": "List the self-evolution proposals waiting for your review with their diffs, and approve or reject them.",
+          "desc": "Bare `ahood review` lists your pending enhancement proposals across all your artifacts (GET /api/v1/me/proposals) with their evidence: checks, sandbox and probe results, risk findings, the review window and why automatic mode held it. In a terminal it then shows each proposal's unified diff (GET /api/v1/enhancements/candidates/<id>/diff, the diff the web owner panel shows) and asks approve/reject/skip/quit; piped, it only lists. `ahood review show <id>` prints one proposal with its diff. `ahood review approve <id>` publishes the proposal as a new version (--version when it needs one chosen) and `ahood review reject <id>` discards it -- the same decision as the web owner panel. Listing needs the token's 'read' scope; the diff and deciding need its 'publish' scope.",
+          "flags": [
+            "--version <semver>  (approve) The version to publish; default is the suggested next patch.",
+            "--limit <n>         (list) One page of at most n (1-100) instead of the whole queue.",
+            "--json              Emit the API response; each proposal carries its `diff` ({files, unchanged_binaries, truncated}, null with `diff_error` when unreadable)."
+          ],
+          "examples": [
+            "ahood review",
+            "ahood review show <id>",
+            "ahood review --json",
+            "ahood review approve <id>",
+            "ahood review reject <id>"
+          ]
+        },
+        {
+          "usage": "ahood find [<query>] [--kind <kind>] [--sort rank|downloads|stars|recent|updated] [--limit <n>] [--json]",
+          "summary": "Find skills, agents, MCP servers, docs, project guides, loops and prompts in the registry.",
+          "desc": "Searches the registry across every kind (GET /api/v1/skills, the same request as `ahood skill search`) and prints one line per result: owner/slug, kind, its one-line purpose, stars and downloads. --kind narrows to one kind (skill, agent, mcp, doc, project, loop, prompt); --sort picks the order (default: rank, the registry's recommended order; downloads for the most installed). The query may be left out when --kind or --sort is given, which browses instead of searching. Needs a login.",
+          "flags": [
+            "--kind <kind>   Only this kind: skill, agent, mcp, doc, project, loop or prompt.",
+            "--sort <sort>   rank (default), downloads, stars, recent (newly added) or updated.",
+            "--limit <n>     At most n results (1-50; the registry's default is 20).",
+            "--json          Emit [{ref, owner, slug, kind, name, tagline, stars, downloads, updated_at}]."
+          ],
+          "examples": [
+            "ahood find \"paddle webhooks\" --kind skill",
+            "ahood find --sort downloads --kind mcp --limit 5",
+            "ahood find pdf --json"
+          ]
+        },
+        {
+          "usage": "ahood try <owner>/<slug> [--json]",
+          "summary": "Print an artifact's root document (SKILL.md, AGENT.md, LOOP.md, ...) without installing it.",
+          "desc": "An alias of `ahood skill read`, under the name the /ahood plugin commands use: prints the latest version's root document to stdout so an agent can use it once in this session, with nothing installed or written. Works for every kind. Plain mode prints the raw content (control sequences stripped in a terminal).",
+          "flags": [
+            "--json    Emit {version, content} as a single line instead of the raw content."
+          ],
+          "examples": [
+            "ahood try alice/pdf-tools",
+            "ahood try alice/release-loop --json"
+          ]
+        },
+        {
+          "usage": "ahood stats [--json]",
+          "summary": "Show your own artifacts with their downloads and stars, the totals, recent activity and self-evolution counts.",
+          "desc": "Lists every artifact you have published (public and private) with downloads and stars, sums them, prints your recent activity (GET /api/v1/users/<you>/activity) and how many of your artifacts are evolving and how many proposals wait for review (GET /api/v1/enhancements/summary). The evolution dashboard's yield numbers need a browser session, so they are not shown here: see https://www.ahood.dev/my-evolution. Needs a login.",
+          "flags": [
+            "--json    Emit {owner, totals, artifacts, activity, evolution}."
+          ],
+          "examples": [
+            "ahood stats",
+            "ahood stats --json"
+          ]
+        },
+        {
+          "usage": "ahood setup [claude|codex|opencode] [--remove <harness>] [--yes] [--dry-run] [--store-token|--no-store-token] [--no-auto-update]",
+          "summary": "Add ahood (MCP server and /ahood commands) to Claude Code, Codex or opencode, or remove it again.",
+          "desc": "With no harness, detects which of Claude Code, Codex and opencode are installed (CLI on PATH or config dir) and asks which to set up. Claude Code: installs the ahood plugin the native way -- `claude plugin marketplace add AlexKay28/ahood-cli#release` then `claude plugin install ahood@ahood` -- or, when the claude CLI has no `plugin` subcommands, prints the /plugin commands to type in a session. Codex: installs the ahood Codex plugin -- [marketplaces.ahood] (ref = \"release\") and [plugins.\"ahood@ahood\"] as a marked block in $CODEX_HOME/config.toml (default ~/.codex), then `codex plugin marketplace upgrade ahood` and `codex plugin add ahood@ahood` -- and takes out the MCP block, skill and AGENTS.md snippet earlier versions wrote. Both hosts read the plugin from the `release` branch, which moves only when a version is released; an install from main or a tag is moved over. Claude Code updates a third-party plugin in the background only when told to, so setup asks once \"Keep ahood up to date automatically?\" (default yes; --yes means yes) and sets autoUpdate on the ahood marketplace in ~/.claude/settings.json; Codex and opencode update on their own. opencode: adds mcp.servers.ahood to the global opencode.json(c) and lists the @ahood/opencode-plugin package, which brings the /ahood commands. Not logged in? It offers `ahood login` first. Every MCP entry reads its token from $AHOOD_TOKEN ($AHOOD_API_TOKEN is the deprecated old name) unless you let setup store the token in that harness's own config -- an [mcp_servers.ahood] in the Codex block that replaces the plugin's, the opencode MCP entry, or env.AHOOD_TOKEN in ~/.claude/settings.json -- which it asks about per harness (--store-token says yes up front; --yes alone does not store it). A file setup creates for the token is 0600; an existing one other users can read is tightened only on a separate yes. The token is never printed, and backups have it redacted. Only ahood's own entries are ever added or changed; a file is backed up to <file>.ahood-backup-<timestamp> before it is edited, a re-run with nothing to change writes nothing, and a malformed config or a same-named entry of yours is refused untouched. --remove takes out only ahood's entries and keeps the backups.",
+          "flags": [
+            "--remove <harness>  Remove ahood's entries from that harness instead.",
+            "--yes               Apply without asking.",
+            "--dry-run           Print what would change; write and run nothing.",
+            "--store-token       Store the ahood token in each harness's config (no question asked).",
+            "--no-store-token    Never store it; the configs name $AHOOD_TOKEN (a token setup stored is taken out).",
+            "--no-auto-update    Do not ask about, or turn on, Claude Code's background plugin updates."
+          ],
+          "examples": [
+            "ahood setup",
+            "ahood setup codex --dry-run",
+            "ahood setup opencode --yes",
+            "ahood setup --remove codex"
+          ]
+        },
+        {
+          "usage": "ahood doctor [--offline] [--json]",
+          "summary": "Check each harness's ahood setup, the MCP server, your login and the CLI version.",
+          "desc": "For Claude Code, Codex and opencode: whether it is installed, whether ahood's config is in place and current, and -- for each one set up -- whether the ahood MCP server answers. Also checks that you are logged in (`ahood whoami`) and whether a newer @ahood/cli is on npm. Exits 1 when a harness that is set up is broken (partial or unreadable config, or the MCP server unreachable); warnings exit 0.",
+          "flags": [
+            "--offline  Skip every network check (MCP probe, token check, npm latest).",
+            "--json     Emit the report as JSON."
+          ],
+          "examples": [
+            "ahood doctor",
+            "ahood doctor --offline"
+          ]
+        },
+        {
+          "usage": "ahood completion <bash|zsh|fish>",
+          "summary": "Print a shell completion script for the command names.",
+          "desc": "Print a shell completion script for the command names.",
+          "examples": [
+            "ahood completion bash >> ~/.bashrc"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "skill",
+      "commands": [
+        {
+          "usage": "ahood skill search <query> [--json] [--limit <n>]",
+          "summary": "Search published skills.",
+          "desc": "Search published skills.",
+          "flags": [
+            "--json        Emit the raw skill objects instead of formatted lines.",
+            "--limit <n>   Cap the number of results."
+          ],
+          "examples": [
+            "ahood skill search pdf-tools",
+            "ahood skill search pdf-tools --json"
+          ]
+        },
+        {
+          "usage": "ahood skill view <owner>/<skill> [--json] [--web]",
+          "summary": "Show a single skill's details -- tags, license, homepage, repository, dates, and more -- without installing it (alias: ahood skill show).",
+          "desc": "Show a single skill's details (tags, license, homepage, repository, dates, etc.) without installing it. Alias: ahood skill show.",
+          "flags": [
+            "--json   Emit the raw skill object instead of formatted lines.",
+            "--web    Open the skill's page in your browser instead of printing."
+          ],
+          "aliases": [
+            "show"
+          ]
+        },
+        {
+          "usage": "ahood skill read <owner>/<skill> [--json]",
+          "summary": "Print a skill's full SKILL.md content, without installing it.",
+          "desc": "Print a skill's full SKILL.md content (the prompt itself) without installing it via `ahood skill add`. Plain mode prints the raw content verbatim to stdout -- no formatting, no labels -- so it's safe to pipe into a file or another tool.",
+          "flags": [
+            "--json    Emit {version, content} as a single line instead of the raw content."
+          ],
+          "examples": [
+            "ahood skill read alice/pdf-tools",
+            "ahood skill read alice/pdf-tools --json"
+          ]
+        },
+        {
+          "usage": "ahood skill versions <owner>/<skill> [--json]",
+          "summary": "List a skill's published-version history -- version, changelog, size, and publish date.",
+          "desc": "List a skill's published-version history: version, changelog, size, and publish date. Most-recent first.",
+          "flags": [
+            "--json    Emit the raw version objects instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood skill diff <owner>/<skill> <versionA> <versionB> [--json]",
+          "summary": "Show what changed between two published versions -- a SKILL.md diff plus an added/removed/changed file summary.",
+          "desc": "Show what changed between two published versions of a skill: a unified diff of SKILL.md's content, plus a summary of which files were added or removed based on the two versions' manifests (a common file's content can only be confirmed changed for SKILL.md itself, since manifests don't carry per-file checksums). Both versions must be explicit semver -- \"latest\" isn't accepted, since it could silently mean two different things if a new version is published between resolving each side.",
+          "flags": [
+            "--json    Emit {skillmd_diff, manifest: {added, removed, changed}} instead of formatted text."
+          ],
+          "examples": [
+            "ahood skill diff alice/pdf-tools 1.0.0 1.1.0",
+            "ahood skill diff alice/pdf-tools 1.0.0 1.1.0 --json"
+          ]
+        },
+        {
+          "usage": "ahood skill list [--json]",
+          "summary": "List your own skills, public and private.",
+          "desc": "List your own skills, public and private.",
+          "flags": [
+            "--json    Emit the raw skill objects instead of formatted lines."
+          ]
+        },
+        {
+          "usage": "ahood skill add <owner>/<skill>[@version]",
+          "summary": "Install a skill into .claude/skills/, pinned in the lockfile.",
+          "desc": "Install a skill into .claude/skills/, pinned in the lockfile. An artifact published with --kind agent installs instead as a single file at .claude/agents/<owner>@<skill>.md (Claude Code's own subagent loader scans .claude/agents/*.md as flat files), not a .claude/skills/ directory. An artifact published with --kind mcp installs by merging an entry into .mcp.json instead, prompting for any secret environment variables its server.json declares that aren't already set in your shell. A doc or project guide is refused here; install it with `ahood doc add` or `ahood project add`.",
+          "examples": [
+            "ahood skill add alice/pdf-tools",
+            "ahood skill add alice/pdf-tools@1.2.0"
+          ]
+        },
+        {
+          "usage": "ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]",
+          "summary": "Deprecated; prefer `ahood sync`, which moves the same lockfile pin(s) forward across every project on this machine.",
+          "desc": "Deprecated (ahood#990): prefer `ahood sync`, which does the same thing across every project on this machine, with a diff and your consent. This still works, with no behavior change -- a one-line deprecation note goes to stderr, nothing else changes. Move the lockfile pin(s) forward to the latest version. With no argument, updates every installed skill; one failure doesn't stop the rest. An mcp-kind entry is updated in place (re-resolving any secret environment variables) as long as its .mcp.json entry still matches what ahood last installed there -- a hand-edited or unverifiable entry is refused rather than silently overwritten.",
+          "flags": [
+            "--dry-run   Preview current vs. latest version (and the changelog for anything behind) without installing anything.",
+            "--json      With --dry-run, emit structured preview objects instead of a formatted table."
+          ],
+          "examples": [
+            "ahood skill update --dry-run",
+            "ahood skill update alice/pdf-tools --dry-run --json"
+          ]
+        },
+        {
+          "usage": "ahood skill outdated [<owner>/<skill> ...] [--json]",
+          "summary": "Deprecated; prefer `ahood status`, which does the same read-only staleness check across every project on this machine.",
+          "desc": "Deprecated (ahood#990): prefer `ahood status`, which does the same read-only staleness check across every project on this machine (plus pins and evolution state on artifacts you own). This still works, with no behavior change -- a one-line deprecation note goes to stderr, nothing else changes. Read-only staleness check across installed skills -- current vs. latest version, plus the changelog for anything behind. With no argument, checks every installed skill; with one or more given, checks just those. Never moves a lockfile pin or installs anything; equivalent to `ahood skill update --dry-run`.",
+          "flags": [
+            "--json    Emit structured preview objects instead of a formatted table."
+          ],
+          "examples": [
+            "ahood skill outdated",
+            "ahood skill outdated alice/pdf-tools --json"
+          ]
+        },
+        {
+          "usage": "ahood skill remove <owner>/<skill> [--yes]",
+          "summary": "Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed).",
+          "desc": "Uninstall and unpin (local only). Prompts for confirmation unless --yes is passed. For an mcp-kind install, also deletes its .mcp.json entry as long as it still matches what ahood last installed there -- a hand-edited or unverifiable entry is left in place and warned about instead of being silently touched."
+        },
+        {
+          "usage": "ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "summary": "Update a skill you own, changing only the flags you pass.",
+          "desc": "Update a skill you own. Only the flags you pass are changed. Every flag also accepts the --flag=value form (e.g. --tagline=--fast and cheap), needed when a value itself starts with --.",
+          "flags": [
+            "--tagline <text>              Short one-line description.",
+            "--tags <comma,separated>      Replaces the skill's tag list.",
+            "--license <id>                An SPDX license identifier, e.g. MIT.",
+            "--visibility public|private   Who can see and install the skill.",
+            "--homepage <url>              The skill's homepage URL.",
+            "--repository <url>            The skill's source repository URL."
+          ],
+          "examples": [
+            "ahood skill edit alice/pdf-tools --tagline \"Merge and split PDFs\""
+          ]
+        },
+        {
+          "usage": "ahood skill unpublish <owner>/<skill>[@version] [--yes]",
+          "summary": "Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed).",
+          "desc": "Without @version: delete a skill from the registry for every consumer (not just your local install). With @version (e.g. alice/foo@1.2.3): yank that single version instead of deleting the whole skill -- it is marked yanked, not removed. Existing lockfile pins still resolve and verify against it, but new installs are warned off it. Prompts for a typed \"yes\" unless --yes is passed.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood skill star <owner>/<skill>",
+          "summary": "Star a skill.",
+          "desc": "Star a skill."
+        },
+        {
+          "usage": "ahood skill unstar <owner>/<skill>",
+          "summary": "Remove your star from a skill.",
+          "desc": "Remove your star from a skill."
+        },
+        {
+          "usage": "ahood skill share <owner>/<skill> --group <group>",
+          "summary": "Share a skill you own with a group, without changing its public/private visibility.",
+          "desc": "Share a skill you own with a group. Sharing is additive -- it doesn't change the skill's own public/private visibility, it just makes it visible to everyone in the group too. You must own the skill and already be a member of the target group.",
+          "flags": [
+            "--group <group>   The group's slug (from `ahood group list`)."
+          ],
+          "examples": [
+            "ahood skill share alice/pdf-tools --group design-team"
+          ]
+        },
+        {
+          "usage": "ahood skill unshare <owner>/<skill> --group <group>",
+          "summary": "Stop sharing a skill you own with a group.",
+          "desc": "Stop sharing a skill you own with a group. Does not affect the skill's own visibility.",
+          "flags": [
+            "--group <group>   The group's slug."
+          ],
+          "examples": [
+            "ahood skill unshare alice/pdf-tools --group design-team"
+          ]
+        },
+        {
+          "usage": "ahood skill init [name]",
+          "summary": "Scaffold a new skill folder with a minimal, valid SKILL.md.",
+          "desc": "Scaffold a new skill folder with a minimal, valid SKILL.md. Creates ./<name>/SKILL.md if a name is given, or ./SKILL.md in the current directory otherwise. Refuses to overwrite an existing SKILL.md at the target path.",
+          "examples": [
+            "ahood skill init pdf-tools",
+            "ahood skill init"
+          ]
+        },
+        {
+          "usage": "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project|loop|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "summary": "Publish a new version of a skill, agent, mcp server manifest, doc, project guide, loop, or prompt from a folder containing SKILL.md, AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md, creating the skill first if it doesn't already exist.",
+          "desc": "Publish a new version of a skill, agent, mcp server manifest, doc, project guide, loop, or prompt from a folder containing SKILL.md, AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md. If the artifact doesn't exist yet, this creates it first -- pass --name to set its display name, and --kind agent, --kind mcp, --kind doc, --kind project, --kind loop, or --kind prompt if publishing an AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md (auto-detected from the folder contents when only one of SKILL.md/AGENT.md/server.json/DOC.md/PROJECT.md/LOOP.md/PROMPT.md is present). A PROMPT.md is checked locally before anything is uploaded: an undeclared {{key}}, or a declared input the body never uses, is refused with an error naming the key. --name is required when creating; optionally also pass --tagline/--tags/--license/--homepage/--repository. Processing happens server-side after upload; this command polls and reports the final published/failed status. The legacy form `ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted. Every flag also accepts the --flag=value form, needed when a value itself starts with --.",
+          "flags": [
+            "--kind <kind>                 skill, agent, mcp, doc, project, loop, or prompt. Auto-detected from the folder's root doc when omitted.",
+            "--name <text>                 Required only when creating the artifact on this publish.",
+            "--tagline <text>              Short one-line description, used only when creating.",
+            "--tags <comma,separated>      Initial tags, used only when creating.",
+            "--license <id>                An SPDX license identifier, e.g. MIT, used only when creating.",
+            "--homepage <url>              The artifact's homepage URL, used only when creating.",
+            "--repository <url>            The artifact's source repository URL, used only when creating.",
+            "--changelog <text>            What changed in this version, shown by `ahood skill versions`.",
+            "--json                        Suppress human progress lines; print one {version,status,...} JSON object on completion (or {error} on failure)."
+          ],
+          "examples": [
+            "ahood skill publish alice/pdf-tools@1.1.0",
+            "ahood skill publish alice/pdf-tools@1.0.0 --name \"PDF Tools\" --tagline \"Merge and split PDFs\"",
+            "ahood skill publish alice/pdf-tools@1.1.0 --path ./pdf-tools"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "agent",
+      "commands": [
+        {
+          "usage": "ahood agent search <query> [--json] [--limit <n>]",
+          "summary": "Search published agents.",
+          "desc": "Search published agents only (the registry's ?kind=agent filter). Same output and --json shape as `ahood skill search`.",
+          "flags": [
+            "--json        Emit the raw result objects instead of formatted lines.",
+            "--limit <n>   Cap the number of results."
+          ],
+          "examples": [
+            "ahood agent search github"
+          ]
+        },
+        {
+          "usage": "ahood agent view <owner>/<agent> [--json] [--web]",
+          "summary": "Show a single agent's details without installing it (alias: ahood agent show).",
+          "desc": "Show a single agent's details without installing it. Alias: ahood agent show. Refused, before anything else happens, when the target is not an agent.",
+          "flags": [
+            "--json   Emit the raw object instead of formatted lines.",
+            "--web    Open its page in your browser instead of printing."
+          ],
+          "aliases": [
+            "show"
+          ]
+        },
+        {
+          "usage": "ahood agent read <owner>/<agent> [--json]",
+          "summary": "Print a published agent's AGENT.md, without installing it.",
+          "desc": "Print the AGENT.md of a published agent verbatim, without installing it -- read it before you add it. Refused, before anything else happens, when the target is not an agent.",
+          "flags": [
+            "--json    Emit {version, content} as a single line instead of the raw content."
+          ],
+          "examples": [
+            "ahood agent read alice/code-reviewer"
+          ]
+        },
+        {
+          "usage": "ahood agent versions <owner>/<agent> [--json]",
+          "summary": "List a agent's published-version history.",
+          "desc": "List a agent's published-version history: version, changelog, size, and publish date. Refused, before anything else happens, when the target is not an agent.",
+          "flags": [
+            "--json    Emit the raw version objects instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood agent diff <owner>/<agent> <versionA> <versionB> [--json]",
+          "summary": "Show what changed between two published versions of an agent.",
+          "desc": "Show what changed between two published versions, exactly like `ahood skill diff`. Both versions must be explicit semver. Refused, before anything else happens, when the target is not an agent.",
+          "flags": [
+            "--json    Emit {skillmd_diff, manifest: {added, removed, changed}} instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood agent list [--json]",
+          "summary": "List your own agents, public and private.",
+          "desc": "List your own agents, public and private. The registry returns every entry you own; this keeps only the agent ones (an entry with no kind in the response is left out, with a warning on stderr). --json keeps `ahood skill list --json`'s shape.",
+          "flags": [
+            "--json    Emit the raw objects instead of formatted lines."
+          ]
+        },
+        {
+          "usage": "ahood agent add <owner>/<agent>[@version]",
+          "summary": "Install an agent into .claude/agents/<owner>@<agent>.md, pinned in the lockfile.",
+          "desc": "Install an agent into .claude/agents/<owner>@<agent>.md, pinned in .claude/skills.lock.json. Refused before anything is downloaded or written when the target is not an agent.",
+          "examples": [
+            "ahood agent add alice/code-reviewer",
+            "ahood agent add alice/code-reviewer@1.2.0"
+          ]
+        },
+        {
+          "usage": "ahood agent update [<owner>/<agent> ...] [--dry-run] [--json]",
+          "summary": "Move agent pins forward to the latest version.",
+          "desc": "Move lockfile pins forward to the latest version. With no argument, considers only the installed agents in this project -- other kinds' pins are left alone. A named target that is not an agent is refused and counted as a failure.",
+          "flags": [
+            "--dry-run   Preview current vs. latest version (and the changelog) without installing anything.",
+            "--json      With --dry-run, emit structured preview objects instead of a formatted table."
+          ]
+        },
+        {
+          "usage": "ahood agent outdated [<owner>/<agent> ...] [--json]",
+          "summary": "Read-only staleness check for installed agents.",
+          "desc": "Read-only staleness check -- equivalent to `ahood agent update --dry-run`. With no argument, checks only the installed agents.",
+          "flags": [
+            "--json    Emit structured preview objects instead of a formatted table."
+          ]
+        },
+        {
+          "usage": "ahood agent remove <owner>/<agent> [--yes]",
+          "summary": "Uninstall and unpin an agent (local only, prompts unless --yes is passed).",
+          "desc": "Uninstall and unpin an agent from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood agent edit <owner>/<agent> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "summary": "Update an agent you own, changing only the flags you pass.",
+          "desc": "Update an agent you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not an agent.",
+          "flags": [
+            "--tagline <text>              Short one-line description.",
+            "--tags <comma,separated>      Replaces the tag list.",
+            "--license <id>                An SPDX license identifier, e.g. MIT.",
+            "--visibility public|private   Who can see and install it.",
+            "--homepage <url>              Homepage URL.",
+            "--repository <url>            Source repository URL."
+          ]
+        },
+        {
+          "usage": "ahood agent unpublish <owner>/<agent>[@version] [--yes]",
+          "summary": "Delete an agent from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
+          "desc": "Without @version: delete an agent from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not an agent.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood agent star <owner>/<agent>",
+          "summary": "Star an agent.",
+          "desc": "Star an agent. Refused, before anything else happens, when the target is not an agent."
+        },
+        {
+          "usage": "ahood agent unstar <owner>/<agent>",
+          "summary": "Remove your star from an agent.",
+          "desc": "Remove your star from an agent. Refused, before anything else happens, when the target is not an agent."
+        },
+        {
+          "usage": "ahood agent share <owner>/<agent> --group <group>",
+          "summary": "Share an agent you own with a group, without changing its visibility.",
+          "desc": "Share an agent you own with a group you belong to. Refused, before anything else happens, when the target is not an agent.",
+          "flags": [
+            "--group <group>   The group's slug (from `ahood group list`)."
+          ]
+        },
+        {
+          "usage": "ahood agent unshare <owner>/<agent> --group <group>",
+          "summary": "Stop sharing an agent you own with a group.",
+          "desc": "Stop sharing an agent you own with a group. Refused, before anything else happens, when the target is not an agent.",
+          "flags": [
+            "--group <group>   The group's slug."
+          ]
+        },
+        {
+          "usage": "ahood agent init [name]",
+          "summary": "Scaffold a new agent folder with a minimal, valid AGENT.md.",
+          "desc": "Scaffold a minimal AGENT.md that passes the registry's publish validation: ./<name>/AGENT.md with a name, or ./AGENT.md without. Refuses to overwrite an existing AGENT.md, or to add one to a folder that already holds another kind's root document. Names are slug-normalized and must stay inside the current directory.",
+          "examples": [
+            "ahood agent init code-reviewer",
+            "ahood agent init"
+          ]
+        },
+        {
+          "usage": "ahood agent publish <owner>/<agent>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "summary": "Publish a new version of an agent from a folder containing AGENT.md, creating it first if it doesn't exist yet.",
+          "desc": "Publish a new version from a folder containing AGENT.md; the kind is implied, and a contradictory --kind is refused. If the entry already exists as another kind, this stops before anything is packed or uploaded. If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`.",
+          "flags": [
+            "--path <dir>                  Folder to publish (default: the current directory).",
+            "--name <text>                 Required only when creating the entry on this publish.",
+            "--changelog <text>            What changed in this version.",
+            "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
+          ],
+          "examples": [
+            "ahood agent publish alice/code-reviewer@1.0.0 --name \"Code Reviewer\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mcp",
+      "commands": [
+        {
+          "usage": "ahood mcp search <query> [--json] [--limit <n>]",
+          "summary": "Search published MCP server manifests.",
+          "desc": "Search published MCP server manifests only (the registry's ?kind=mcp filter). Same output and --json shape as `ahood skill search`.",
+          "flags": [
+            "--json        Emit the raw result objects instead of formatted lines.",
+            "--limit <n>   Cap the number of results."
+          ],
+          "examples": [
+            "ahood mcp search github"
+          ]
+        },
+        {
+          "usage": "ahood mcp view <owner>/<server> [--json] [--web]",
+          "summary": "Show a single MCP server manifest's details without installing it (alias: ahood mcp show).",
+          "desc": "Show a single MCP server manifest's details without installing it. Alias: ahood mcp show. Refused, before anything else happens, when the target is not an MCP server manifest.",
+          "flags": [
+            "--json   Emit the raw object instead of formatted lines.",
+            "--web    Open its page in your browser instead of printing."
+          ],
+          "aliases": [
+            "show"
+          ]
+        },
+        {
+          "usage": "ahood mcp read <owner>/<server> [--json]",
+          "summary": "Print a published MCP server manifest's server.json, without installing it.",
+          "desc": "Print the server.json of a published MCP server manifest verbatim, without installing it -- read it before you add it. Refused, before anything else happens, when the target is not an MCP server manifest.",
+          "flags": [
+            "--json    Emit {version, content} as a single line instead of the raw content."
+          ],
+          "examples": [
+            "ahood mcp read alice/github-server"
+          ]
+        },
+        {
+          "usage": "ahood mcp versions <owner>/<server> [--json]",
+          "summary": "List a MCP server manifest's published-version history.",
+          "desc": "List a MCP server manifest's published-version history: version, changelog, size, and publish date. Refused, before anything else happens, when the target is not an MCP server manifest.",
+          "flags": [
+            "--json    Emit the raw version objects instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood mcp diff <owner>/<server> <versionA> <versionB> [--json]",
+          "summary": "Show what changed between two published versions of an MCP server manifest.",
+          "desc": "Show what changed between two published versions, exactly like `ahood skill diff`. Both versions must be explicit semver. Refused, before anything else happens, when the target is not an MCP server manifest.",
+          "flags": [
+            "--json    Emit {skillmd_diff, manifest: {added, removed, changed}} instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood mcp list [--json]",
+          "summary": "List your own MCP server manifests, public and private.",
+          "desc": "List your own MCP server manifests, public and private. The registry returns every entry you own; this keeps only the mcp ones (an entry with no kind in the response is left out, with a warning on stderr). --json keeps `ahood skill list --json`'s shape.",
+          "flags": [
+            "--json    Emit the raw objects instead of formatted lines."
+          ]
+        },
+        {
+          "usage": "ahood mcp add <owner>/<server>[@version]",
+          "summary": "Install an MCP server manifest into an entry in .mcp.json, pinned in the lockfile.",
+          "desc": "Install an MCP server manifest into an entry in .mcp.json, pinned in .claude/skills.lock.json. Prompts for any secret environment variables its server.json declares that aren't already set. Refused before anything is downloaded or written when the target is not an MCP server manifest.",
+          "examples": [
+            "ahood mcp add alice/github-server",
+            "ahood mcp add alice/github-server@1.2.0"
+          ]
+        },
+        {
+          "usage": "ahood mcp update [<owner>/<server> ...] [--dry-run] [--json]",
+          "summary": "Move MCP server manifest pins forward to the latest version.",
+          "desc": "Move lockfile pins forward to the latest version. With no argument, considers only the installed MCP server manifests in this project -- other kinds' pins are left alone. A named target that is not an MCP server manifest is refused and counted as a failure.",
+          "flags": [
+            "--dry-run   Preview current vs. latest version (and the changelog) without installing anything.",
+            "--json      With --dry-run, emit structured preview objects instead of a formatted table."
+          ]
+        },
+        {
+          "usage": "ahood mcp outdated [<owner>/<server> ...] [--json]",
+          "summary": "Read-only staleness check for installed MCP server manifests.",
+          "desc": "Read-only staleness check -- equivalent to `ahood mcp update --dry-run`. With no argument, checks only the installed MCP server manifests.",
+          "flags": [
+            "--json    Emit structured preview objects instead of a formatted table."
+          ]
+        },
+        {
+          "usage": "ahood mcp remove <owner>/<server> [--yes]",
+          "summary": "Uninstall and unpin an MCP server manifest (local only, prompts unless --yes is passed).",
+          "desc": "Uninstall and unpin an MCP server manifest from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood mcp edit <owner>/<server> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "summary": "Update an MCP server manifest you own, changing only the flags you pass.",
+          "desc": "Update an MCP server manifest you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not an MCP server manifest.",
+          "flags": [
+            "--tagline <text>              Short one-line description.",
+            "--tags <comma,separated>      Replaces the tag list.",
+            "--license <id>                An SPDX license identifier, e.g. MIT.",
+            "--visibility public|private   Who can see and install it.",
+            "--homepage <url>              Homepage URL.",
+            "--repository <url>            Source repository URL."
+          ]
+        },
+        {
+          "usage": "ahood mcp unpublish <owner>/<server>[@version] [--yes]",
+          "summary": "Delete an MCP server manifest from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
+          "desc": "Without @version: delete an MCP server manifest from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not an MCP server manifest.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood mcp star <owner>/<server>",
+          "summary": "Star an MCP server manifest.",
+          "desc": "Star an MCP server manifest. Refused, before anything else happens, when the target is not an MCP server manifest."
+        },
+        {
+          "usage": "ahood mcp unstar <owner>/<server>",
+          "summary": "Remove your star from an MCP server manifest.",
+          "desc": "Remove your star from an MCP server manifest. Refused, before anything else happens, when the target is not an MCP server manifest."
+        },
+        {
+          "usage": "ahood mcp share <owner>/<server> --group <group>",
+          "summary": "Share an MCP server manifest you own with a group, without changing its visibility.",
+          "desc": "Share an MCP server manifest you own with a group you belong to. Refused, before anything else happens, when the target is not an MCP server manifest.",
+          "flags": [
+            "--group <group>   The group's slug (from `ahood group list`)."
+          ]
+        },
+        {
+          "usage": "ahood mcp unshare <owner>/<server> --group <group>",
+          "summary": "Stop sharing an MCP server manifest you own with a group.",
+          "desc": "Stop sharing an MCP server manifest you own with a group. Refused, before anything else happens, when the target is not an MCP server manifest.",
+          "flags": [
+            "--group <group>   The group's slug."
+          ]
+        },
+        {
+          "usage": "ahood mcp init [name]",
+          "summary": "Scaffold a new MCP server manifest folder with a minimal, valid server.json.",
+          "desc": "Scaffold a minimal server.json that passes the registry's publish validation: ./<name>/server.json with a name, or ./server.json without. The starter points at a reserved example.com URL, so it can never install anyone's real server until you edit it. Refuses to overwrite an existing server.json, or to add one to a folder that already holds another kind's root document. Names are slug-normalized and must stay inside the current directory.",
+          "examples": [
+            "ahood mcp init github-server",
+            "ahood mcp init"
+          ]
+        },
+        {
+          "usage": "ahood mcp publish <owner>/<server>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "summary": "Publish a new version of an MCP server manifest from a folder containing server.json, creating it first if it doesn't exist yet.",
+          "desc": "Publish a new version from a folder containing server.json; the kind is implied, and a contradictory --kind is refused. If the entry already exists as another kind, this stops before anything is packed or uploaded. If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`.",
+          "flags": [
+            "--path <dir>                  Folder to publish (default: the current directory).",
+            "--name <text>                 Required only when creating the entry on this publish.",
+            "--changelog <text>            What changed in this version.",
+            "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
+          ],
+          "examples": [
+            "ahood mcp publish alice/github-server@1.0.0 --name \"GitHub Server\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "doc",
+      "commands": [
+        {
+          "usage": "ahood doc search <query> [--json] [--limit <n>]",
+          "summary": "Search published docs.",
+          "desc": "Search published docs only (the registry's ?kind=doc filter). Same output and --json shape as `ahood skill search`.",
+          "flags": [
+            "--json        Emit the raw result objects instead of formatted lines.",
+            "--limit <n>   Cap the number of results."
+          ],
+          "examples": [
+            "ahood doc search github"
+          ]
+        },
+        {
+          "usage": "ahood doc view <owner>/<doc> [--json] [--web]",
+          "summary": "Show a single doc's details without installing it (alias: ahood doc show).",
+          "desc": "Show a single doc's details without installing it. Alias: ahood doc show. Refused, before anything else happens, when the target is not a doc.",
+          "flags": [
+            "--json   Emit the raw object instead of formatted lines.",
+            "--web    Open its page in your browser instead of printing."
+          ],
+          "aliases": [
+            "show"
+          ]
+        },
+        {
+          "usage": "ahood doc read <owner>/<doc> [--json]",
+          "summary": "Print a published doc's DOC.md, without installing it.",
+          "desc": "Print the DOC.md of a published doc verbatim, without installing it -- read it before you add it. Refused, before anything else happens, when the target is not a doc.",
+          "flags": [
+            "--json    Emit {version, content} as a single line instead of the raw content."
+          ],
+          "examples": [
+            "ahood doc read alice/setup-guide"
+          ]
+        },
+        {
+          "usage": "ahood doc versions <owner>/<doc> [--json]",
+          "summary": "List a doc's published-version history.",
+          "desc": "List a doc's published-version history: version, changelog, size, and publish date. Refused, before anything else happens, when the target is not a doc.",
+          "flags": [
+            "--json    Emit the raw version objects instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood doc diff <owner>/<doc> <versionA> <versionB> [--json]",
+          "summary": "Show what changed between two published versions of a doc.",
+          "desc": "Show what changed between two published versions, exactly like `ahood skill diff`. Both versions must be explicit semver. Refused, before anything else happens, when the target is not a doc.",
+          "flags": [
+            "--json    Emit {skillmd_diff, manifest: {added, removed, changed}} instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood doc list [--json]",
+          "summary": "List your own docs, public and private.",
+          "desc": "List your own docs, public and private. The registry returns every entry you own; this keeps only the doc ones (an entry with no kind in the response is left out, with a warning on stderr). --json keeps `ahood skill list --json`'s shape.",
+          "flags": [
+            "--json    Emit the raw objects instead of formatted lines."
+          ]
+        },
+        {
+          "usage": "ahood doc add <owner>/<doc>[@version]",
+          "summary": "Install a doc into .claude/docs/<owner>@<doc>.md, pinned in the lockfile.",
+          "desc": "Install a doc into .claude/docs/<owner>@<doc>.md, pinned in .claude/skills.lock.json. Refused before anything is downloaded or written when the target is not a doc.",
+          "examples": [
+            "ahood doc add alice/setup-guide",
+            "ahood doc add alice/setup-guide@1.2.0"
+          ]
+        },
+        {
+          "usage": "ahood doc update [<owner>/<doc> ...] [--dry-run] [--json]",
+          "summary": "Move doc pins forward to the latest version.",
+          "desc": "Move lockfile pins forward to the latest version. With no argument, considers only the installed docs in this project -- other kinds' pins are left alone. A named target that is not a doc is refused and counted as a failure.",
+          "flags": [
+            "--dry-run   Preview current vs. latest version (and the changelog) without installing anything.",
+            "--json      With --dry-run, emit structured preview objects instead of a formatted table."
+          ]
+        },
+        {
+          "usage": "ahood doc outdated [<owner>/<doc> ...] [--json]",
+          "summary": "Read-only staleness check for installed docs.",
+          "desc": "Read-only staleness check -- equivalent to `ahood doc update --dry-run`. With no argument, checks only the installed docs.",
+          "flags": [
+            "--json    Emit structured preview objects instead of a formatted table."
+          ]
+        },
+        {
+          "usage": "ahood doc remove <owner>/<doc> [--yes]",
+          "summary": "Uninstall and unpin a doc (local only, prompts unless --yes is passed).",
+          "desc": "Uninstall and unpin a doc from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood doc edit <owner>/<doc> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "summary": "Update a doc you own, changing only the flags you pass.",
+          "desc": "Update a doc you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not a doc.",
+          "flags": [
+            "--tagline <text>              Short one-line description.",
+            "--tags <comma,separated>      Replaces the tag list.",
+            "--license <id>                An SPDX license identifier, e.g. MIT.",
+            "--visibility public|private   Who can see and install it.",
+            "--homepage <url>              Homepage URL.",
+            "--repository <url>            Source repository URL."
+          ]
+        },
+        {
+          "usage": "ahood doc unpublish <owner>/<doc>[@version] [--yes]",
+          "summary": "Delete a doc from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
+          "desc": "Without @version: delete a doc from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not a doc.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood doc star <owner>/<doc>",
+          "summary": "Star a doc.",
+          "desc": "Star a doc. Refused, before anything else happens, when the target is not a doc."
+        },
+        {
+          "usage": "ahood doc unstar <owner>/<doc>",
+          "summary": "Remove your star from a doc.",
+          "desc": "Remove your star from a doc. Refused, before anything else happens, when the target is not a doc."
+        },
+        {
+          "usage": "ahood doc share <owner>/<doc> --group <group>",
+          "summary": "Share a doc you own with a group, without changing its visibility.",
+          "desc": "Share a doc you own with a group you belong to. Refused, before anything else happens, when the target is not a doc.",
+          "flags": [
+            "--group <group>   The group's slug (from `ahood group list`)."
+          ]
+        },
+        {
+          "usage": "ahood doc unshare <owner>/<doc> --group <group>",
+          "summary": "Stop sharing a doc you own with a group.",
+          "desc": "Stop sharing a doc you own with a group. Refused, before anything else happens, when the target is not a doc.",
+          "flags": [
+            "--group <group>   The group's slug."
+          ]
+        },
+        {
+          "usage": "ahood doc init [name]",
+          "summary": "Scaffold a new doc folder with a minimal, valid DOC.md.",
+          "desc": "Scaffold a minimal DOC.md that passes the registry's publish validation: ./<name>/DOC.md with a name, or ./DOC.md without. Refuses to overwrite an existing DOC.md, or to add one to a folder that already holds another kind's root document. Names are slug-normalized and must stay inside the current directory.",
+          "examples": [
+            "ahood doc init setup-guide",
+            "ahood doc init"
+          ]
+        },
+        {
+          "usage": "ahood doc publish <owner>/<doc>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "summary": "Publish a new version of a doc from a folder containing DOC.md, creating it first if it doesn't exist yet.",
+          "desc": "Publish a new version from a folder containing DOC.md; the kind is implied, and a contradictory --kind is refused. If the entry already exists as another kind, this stops before anything is packed or uploaded. If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`.",
+          "flags": [
+            "--path <dir>                  Folder to publish (default: the current directory).",
+            "--name <text>                 Required only when creating the entry on this publish.",
+            "--changelog <text>            What changed in this version.",
+            "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
+          ],
+          "examples": [
+            "ahood doc publish alice/setup-guide@1.0.0 --name \"Setup Guide\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "project",
+      "commands": [
+        {
+          "usage": "ahood project [--remote <git-remote>] [--json]",
+          "summary": "List the project guides you can see for this repository's git remote.",
+          "desc": "List the project guides you can see that name this repository's git remote (`git remote get-url origin`, normalized to host/owner/repo -- any credentials in it are stripped and never sent), your own first. Read-only; needs `ahood login`. Asks the hosted get_project_guide tool.",
+          "flags": [
+            "--remote <git-remote>   Look up this remote instead of origin's.",
+            "--json                  Emit {project, guides} (each guide with its PROJECT.md content) instead of formatted lines."
+          ],
+          "examples": [
+            "ahood project",
+            "ahood project --remote github.com/alice/acme-api"
+          ]
+        },
+        {
+          "usage": "ahood project search <query> [--json] [--limit <n>]",
+          "summary": "Search published project guides.",
+          "desc": "Search published project guides only (the registry's ?kind=project filter). Same output and --json shape as `ahood skill search`.",
+          "flags": [
+            "--json        Emit the raw result objects instead of formatted lines.",
+            "--limit <n>   Cap the number of results."
+          ],
+          "examples": [
+            "ahood project search github"
+          ]
+        },
+        {
+          "usage": "ahood project view <owner>/<slug> [--json] [--web]",
+          "summary": "Show a single project guide's details without installing it (alias: ahood project show).",
+          "desc": "Show a single project guide's details without installing it. Alias: ahood project show. Refused, before anything else happens, when the target is not a project guide.",
+          "flags": [
+            "--json   Emit the raw object instead of formatted lines.",
+            "--web    Open its page in your browser instead of printing."
+          ],
+          "aliases": [
+            "show"
+          ]
+        },
+        {
+          "usage": "ahood project read <owner>/<slug> [--json]",
+          "summary": "Print a published project guide's PROJECT.md, without installing it.",
+          "desc": "Print the PROJECT.md of a published project guide verbatim, without installing it -- read it before you add it. Refused, before anything else happens, when the target is not a project guide.",
+          "flags": [
+            "--json    Emit {version, content} as a single line instead of the raw content."
+          ],
+          "examples": [
+            "ahood project read alice/acme-api"
+          ]
+        },
+        {
+          "usage": "ahood project versions <owner>/<slug> [--json]",
+          "summary": "List a project guide's published-version history.",
+          "desc": "List a project guide's published-version history: version, changelog, size, and publish date. Refused, before anything else happens, when the target is not a project guide.",
+          "flags": [
+            "--json    Emit the raw version objects instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood project diff <owner>/<slug> <versionA> <versionB> [--json]",
+          "summary": "Show what changed between two published versions of a project guide.",
+          "desc": "Show what changed between two published versions, exactly like `ahood skill diff`. Both versions must be explicit semver. Refused, before anything else happens, when the target is not a project guide.",
+          "flags": [
+            "--json    Emit {skillmd_diff, manifest: {added, removed, changed}} instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood project list [--json]",
+          "summary": "List your own project guides, public and private.",
+          "desc": "List your own project guides, public and private. The registry returns every entry you own; this keeps only the project ones (an entry with no kind in the response is left out, with a warning on stderr). --json keeps `ahood skill list --json`'s shape.",
+          "flags": [
+            "--json    Emit the raw objects instead of formatted lines."
+          ]
+        },
+        {
+          "usage": "ahood project add <owner>/<slug>[@version]",
+          "summary": "Install a project guide into .claude/project.md, pinned in the lockfile.",
+          "desc": "Install a project guide into .claude/project.md, pinned in .claude/skills.lock.json. Refused before anything is downloaded or written when the target is not a project guide.",
+          "examples": [
+            "ahood project add alice/acme-api",
+            "ahood project add alice/acme-api@1.2.0"
+          ]
+        },
+        {
+          "usage": "ahood project update [<owner>/<slug> ...] [--dry-run] [--json]",
+          "summary": "Move project guide pins forward to the latest version.",
+          "desc": "Move lockfile pins forward to the latest version. With no argument, considers only the installed project guides in this project -- other kinds' pins are left alone. A named target that is not a project guide is refused and counted as a failure.",
+          "flags": [
+            "--dry-run   Preview current vs. latest version (and the changelog) without installing anything.",
+            "--json      With --dry-run, emit structured preview objects instead of a formatted table."
+          ]
+        },
+        {
+          "usage": "ahood project outdated [<owner>/<slug> ...] [--json]",
+          "summary": "Read-only staleness check for installed project guides.",
+          "desc": "Read-only staleness check -- equivalent to `ahood project update --dry-run`. With no argument, checks only the installed project guides.",
+          "flags": [
+            "--json    Emit structured preview objects instead of a formatted table."
+          ]
+        },
+        {
+          "usage": "ahood project remove <owner>/<slug> [--yes]",
+          "summary": "Uninstall and unpin a project guide (local only, prompts unless --yes is passed).",
+          "desc": "Uninstall and unpin a project guide from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood project edit <owner>/<slug> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "summary": "Update a project guide you own, changing only the flags you pass.",
+          "desc": "Update a project guide you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not a project guide.",
+          "flags": [
+            "--tagline <text>              Short one-line description.",
+            "--tags <comma,separated>      Replaces the tag list.",
+            "--license <id>                An SPDX license identifier, e.g. MIT.",
+            "--visibility public|private   Who can see and install it.",
+            "--homepage <url>              Homepage URL.",
+            "--repository <url>            Source repository URL."
+          ]
+        },
+        {
+          "usage": "ahood project unpublish <owner>/<slug>[@version] [--yes]",
+          "summary": "Delete a project guide from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
+          "desc": "Without @version: delete a project guide from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not a project guide.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood project star <owner>/<slug>",
+          "summary": "Star a project guide.",
+          "desc": "Star a project guide. Refused, before anything else happens, when the target is not a project guide."
+        },
+        {
+          "usage": "ahood project unstar <owner>/<slug>",
+          "summary": "Remove your star from a project guide.",
+          "desc": "Remove your star from a project guide. Refused, before anything else happens, when the target is not a project guide."
+        },
+        {
+          "usage": "ahood project share <owner>/<slug> --group <group>",
+          "summary": "Share a project guide you own with a group, without changing its visibility.",
+          "desc": "Share a project guide you own with a group you belong to. Refused, before anything else happens, when the target is not a project guide.",
+          "flags": [
+            "--group <group>   The group's slug (from `ahood group list`)."
+          ]
+        },
+        {
+          "usage": "ahood project unshare <owner>/<slug> --group <group>",
+          "summary": "Stop sharing a project guide you own with a group.",
+          "desc": "Stop sharing a project guide you own with a group. Refused, before anything else happens, when the target is not a project guide.",
+          "flags": [
+            "--group <group>   The group's slug."
+          ]
+        },
+        {
+          "usage": "ahood project init [name] [--project <git-remote> | --no-project]",
+          "summary": "Scaffold a new project guide folder with a minimal, valid PROJECT.md.",
+          "desc": "Scaffold a minimal PROJECT.md that passes the registry's publish validation: ./<name>/PROJECT.md with a name, or ./PROJECT.md without. Refuses to overwrite an existing PROJECT.md, or to add one to a folder that already holds another kind's root document. Names are slug-normalized and must stay inside the current directory. The optional `project` field (the repository's git remote, which is how get_project_guide finds the guide) is filled from `git remote get-url origin`, normalized to host/owner/repo.",
+          "flags": [
+            "--project <git-remote>   Set the `project` field to this remote (normalized).",
+            "--no-project             Leave the `project` field out."
+          ],
+          "examples": [
+            "ahood project init acme-api",
+            "ahood project init"
+          ]
+        },
+        {
+          "usage": "ahood project publish <owner>/<slug>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "summary": "Publish a new version of a project guide from a folder containing PROJECT.md, creating it first if it doesn't exist yet.",
+          "desc": "Publish a new version from a folder containing PROJECT.md; the kind is implied, and a contradictory --kind is refused. If the entry already exists as another kind, this stops before anything is packed or uploaded. If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`.",
+          "flags": [
+            "--path <dir>                  Folder to publish (default: the current directory).",
+            "--name <text>                 Required only when creating the entry on this publish.",
+            "--changelog <text>            What changed in this version.",
+            "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
+          ],
+          "examples": [
+            "ahood project publish alice/acme-api@1.0.0 --name \"Acme API\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "loop",
+      "commands": [
+        {
+          "usage": "ahood loop search <query> [--json] [--limit <n>]",
+          "summary": "Search published loops.",
+          "desc": "Search published loops only (the registry's ?kind=loop filter). Same output and --json shape as `ahood skill search`.",
+          "flags": [
+            "--json        Emit the raw result objects instead of formatted lines.",
+            "--limit <n>   Cap the number of results."
+          ],
+          "examples": [
+            "ahood loop search github"
+          ]
+        },
+        {
+          "usage": "ahood loop view <owner>/<loop> [--json] [--web]",
+          "summary": "Show a single loop's details without installing it (alias: ahood loop show).",
+          "desc": "Show a single loop's details without installing it. Alias: ahood loop show. Refused, before anything else happens, when the target is not a loop.",
+          "flags": [
+            "--json   Emit the raw object instead of formatted lines.",
+            "--web    Open its page in your browser instead of printing."
+          ],
+          "aliases": [
+            "show"
+          ]
+        },
+        {
+          "usage": "ahood loop read <owner>/<loop> [--json]",
+          "summary": "Print a published loop's LOOP.md, without installing it.",
+          "desc": "Print the LOOP.md of a published loop verbatim, without installing it -- read it before you add it. Refused, before anything else happens, when the target is not a loop.",
+          "flags": [
+            "--json    Emit {version, content} as a single line instead of the raw content."
+          ],
+          "examples": [
+            "ahood loop read alice/code-review-pass"
+          ]
+        },
+        {
+          "usage": "ahood loop versions <owner>/<loop> [--json]",
+          "summary": "List a loop's published-version history.",
+          "desc": "List a loop's published-version history: version, changelog, size, and publish date. Refused, before anything else happens, when the target is not a loop.",
+          "flags": [
+            "--json    Emit the raw version objects instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood loop diff <owner>/<loop> <versionA> <versionB> [--json]",
+          "summary": "Show what changed between two published versions of a loop.",
+          "desc": "Show what changed between two published versions, exactly like `ahood skill diff`. Both versions must be explicit semver. Refused, before anything else happens, when the target is not a loop.",
+          "flags": [
+            "--json    Emit {skillmd_diff, manifest: {added, removed, changed}} instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood loop list [--json]",
+          "summary": "List your own loops, public and private.",
+          "desc": "List your own loops, public and private. The registry returns every entry you own; this keeps only the loop ones (an entry with no kind in the response is left out, with a warning on stderr). --json keeps `ahood skill list --json`'s shape.",
+          "flags": [
+            "--json    Emit the raw objects instead of formatted lines."
+          ]
+        },
+        {
+          "usage": "ahood loop add <owner>/<loop>[@version]",
+          "summary": "Install a loop into .claude/loops/<owner>@<loop>.md, pinned in the lockfile.",
+          "desc": "Install a loop into .claude/loops/<owner>@<loop>.md, pinned in .claude/skills.lock.json. Refused before anything is downloaded or written when the target is not a loop.",
+          "examples": [
+            "ahood loop add alice/code-review-pass",
+            "ahood loop add alice/code-review-pass@1.2.0"
+          ]
+        },
+        {
+          "usage": "ahood loop update [<owner>/<loop> ...] [--dry-run] [--json]",
+          "summary": "Move loop pins forward to the latest version.",
+          "desc": "Move lockfile pins forward to the latest version. With no argument, considers only the installed loops in this project -- other kinds' pins are left alone. A named target that is not a loop is refused and counted as a failure.",
+          "flags": [
+            "--dry-run   Preview current vs. latest version (and the changelog) without installing anything.",
+            "--json      With --dry-run, emit structured preview objects instead of a formatted table."
+          ]
+        },
+        {
+          "usage": "ahood loop outdated [<owner>/<loop> ...] [--json]",
+          "summary": "Read-only staleness check for installed loops.",
+          "desc": "Read-only staleness check -- equivalent to `ahood loop update --dry-run`. With no argument, checks only the installed loops.",
+          "flags": [
+            "--json    Emit structured preview objects instead of a formatted table."
+          ]
+        },
+        {
+          "usage": "ahood loop remove <owner>/<loop> [--yes]",
+          "summary": "Uninstall and unpin a loop (local only, prompts unless --yes is passed).",
+          "desc": "Uninstall and unpin a loop from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood loop edit <owner>/<loop> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "summary": "Update a loop you own, changing only the flags you pass.",
+          "desc": "Update a loop you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not a loop.",
+          "flags": [
+            "--tagline <text>              Short one-line description.",
+            "--tags <comma,separated>      Replaces the tag list.",
+            "--license <id>                An SPDX license identifier, e.g. MIT.",
+            "--visibility public|private   Who can see and install it.",
+            "--homepage <url>              Homepage URL.",
+            "--repository <url>            Source repository URL."
+          ]
+        },
+        {
+          "usage": "ahood loop unpublish <owner>/<loop>[@version] [--yes]",
+          "summary": "Delete a loop from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
+          "desc": "Without @version: delete a loop from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not a loop.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood loop star <owner>/<loop>",
+          "summary": "Star a loop.",
+          "desc": "Star a loop. Refused, before anything else happens, when the target is not a loop."
+        },
+        {
+          "usage": "ahood loop unstar <owner>/<loop>",
+          "summary": "Remove your star from a loop.",
+          "desc": "Remove your star from a loop. Refused, before anything else happens, when the target is not a loop."
+        },
+        {
+          "usage": "ahood loop share <owner>/<loop> --group <group>",
+          "summary": "Share a loop you own with a group, without changing its visibility.",
+          "desc": "Share a loop you own with a group you belong to. Refused, before anything else happens, when the target is not a loop.",
+          "flags": [
+            "--group <group>   The group's slug (from `ahood group list`)."
+          ]
+        },
+        {
+          "usage": "ahood loop unshare <owner>/<loop> --group <group>",
+          "summary": "Stop sharing a loop you own with a group.",
+          "desc": "Stop sharing a loop you own with a group. Refused, before anything else happens, when the target is not a loop.",
+          "flags": [
+            "--group <group>   The group's slug."
+          ]
+        },
+        {
+          "usage": "ahood loop init [name]",
+          "summary": "Scaffold a new loop folder with a minimal, valid LOOP.md.",
+          "desc": "Scaffold a minimal LOOP.md that passes the registry's publish validation: ./<name>/LOOP.md with a name, or ./LOOP.md without. Refuses to overwrite an existing LOOP.md, or to add one to a folder that already holds another kind's root document. Names are slug-normalized and must stay inside the current directory.",
+          "examples": [
+            "ahood loop init code-review-pass",
+            "ahood loop init"
+          ]
+        },
+        {
+          "usage": "ahood loop publish <owner>/<loop>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "summary": "Publish a new version of a loop from a folder containing LOOP.md, creating it first if it doesn't exist yet.",
+          "desc": "Publish a new version from a folder containing LOOP.md; the kind is implied, and a contradictory --kind is refused. If the entry already exists as another kind, this stops before anything is packed or uploaded. If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`.",
+          "flags": [
+            "--path <dir>                  Folder to publish (default: the current directory).",
+            "--name <text>                 Required only when creating the entry on this publish.",
+            "--changelog <text>            What changed in this version.",
+            "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
+          ],
+          "examples": [
+            "ahood loop publish alice/code-review-pass@1.0.0 --name \"Code Review Pass\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "commands": [
+        {
+          "usage": "ahood prompt get <owner>/<prompt>[@version] [--<key> <value> ...] [--copy] [--json]",
+          "summary": "Fill a prompt's inputs and print the text, ready to paste into an agent once.",
+          "desc": "Read a published prompt's PROMPT.md, fill each {{key}} placeholder, and print the filled text -- and nothing else -- to stdout, so `| pbcopy` and `> prompt.txt` both work. Set an input with --<key> <value> or --<key>=<value>; an empty or omitted one uses its default. A required input (one with no default) left unset, or a --<key> the prompt does not declare, is a usage error (exit 2) naming the key. Filling is one pass: a value that itself contains {{x}} is inserted verbatim. Refused, before anything else happens, when the target is not a prompt.",
+          "flags": [
+            "--<key> <value>   Set the input <key> (or --<key>=<value>, needed when the value starts with --).",
+            "--copy            Copy the filled text to the clipboard (pbcopy, clip, wl-copy or xclip) instead of printing it;",
+            "                  fails, printing nothing, when no clipboard tool works.",
+            "--json            Emit {owner, slug, name, intent, version, inputs, works_with, text} -- the hosted get_prompt",
+            "                  MCP tool's payload -- instead of the text."
+          ],
+          "examples": [
+            "ahood prompt get alice/brutalist-landing-page --product \"a CLI for agent skills\"",
+            "ahood prompt get alice/brutalist-landing-page@1.0.0 --product \"a CLI\" --audience designers --copy",
+            "ahood prompt get alice/brutalist-landing-page --product \"a CLI\" > prompt.txt"
+          ]
+        },
+        {
+          "usage": "ahood prompt search <query> [--json] [--limit <n>]",
+          "summary": "Search published prompts.",
+          "desc": "Search published prompts only (the registry's ?kind=prompt filter). Same output and --json shape as `ahood skill search`.",
+          "flags": [
+            "--json        Emit the raw result objects instead of formatted lines.",
+            "--limit <n>   Cap the number of results."
+          ],
+          "examples": [
+            "ahood prompt search github"
+          ]
+        },
+        {
+          "usage": "ahood prompt view <owner>/<prompt> [--json] [--web]",
+          "summary": "Show a single prompt's details without installing it (alias: ahood prompt show).",
+          "desc": "Show a single prompt's details without installing it. Alias: ahood prompt show. Refused, before anything else happens, when the target is not a prompt.",
+          "flags": [
+            "--json   Emit the raw object instead of formatted lines.",
+            "--web    Open its page in your browser instead of printing."
+          ],
+          "aliases": [
+            "show"
+          ]
+        },
+        {
+          "usage": "ahood prompt read <owner>/<prompt> [--json]",
+          "summary": "Print a published prompt's PROMPT.md, without installing it.",
+          "desc": "Print the PROMPT.md of a published prompt verbatim, unfilled -- its frontmatter declares the inputs `ahood prompt get` takes. Refused, before anything else happens, when the target is not a prompt.",
+          "flags": [
+            "--json    Emit {version, content} as a single line instead of the raw content."
+          ],
+          "examples": [
+            "ahood prompt read alice/brutalist-landing-page"
+          ]
+        },
+        {
+          "usage": "ahood prompt versions <owner>/<prompt> [--json]",
+          "summary": "List a prompt's published-version history.",
+          "desc": "List a prompt's published-version history: version, changelog, size, and publish date. Refused, before anything else happens, when the target is not a prompt.",
+          "flags": [
+            "--json    Emit the raw version objects instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood prompt diff <owner>/<prompt> <versionA> <versionB> [--json]",
+          "summary": "Show what changed between two published versions of a prompt.",
+          "desc": "Show what changed between two published versions, exactly like `ahood skill diff`. Both versions must be explicit semver. Refused, before anything else happens, when the target is not a prompt.",
+          "flags": [
+            "--json    Emit {skillmd_diff, manifest: {added, removed, changed}} instead of formatted text."
+          ]
+        },
+        {
+          "usage": "ahood prompt list [--json]",
+          "summary": "List your own prompts, public and private.",
+          "desc": "List your own prompts, public and private. The registry returns every entry you own; this keeps only the prompt ones (an entry with no kind in the response is left out, with a warning on stderr). --json keeps `ahood skill list --json`'s shape.",
+          "flags": [
+            "--json    Emit the raw objects instead of formatted lines."
+          ]
+        },
+        {
+          "usage": "ahood prompt edit <owner>/<prompt> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "summary": "Update a prompt you own, changing only the flags you pass.",
+          "desc": "Update a prompt you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not a prompt.",
+          "flags": [
+            "--tagline <text>              Short one-line description.",
+            "--tags <comma,separated>      Replaces the tag list.",
+            "--license <id>                An SPDX license identifier, e.g. MIT.",
+            "--visibility public|private   Who can see and install it.",
+            "--homepage <url>              Homepage URL.",
+            "--repository <url>            Source repository URL."
+          ]
+        },
+        {
+          "usage": "ahood prompt unpublish <owner>/<prompt>[@version] [--yes]",
+          "summary": "Delete a prompt from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
+          "desc": "Without @version: delete a prompt from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not a prompt.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood prompt star <owner>/<prompt>",
+          "summary": "Star a prompt.",
+          "desc": "Star a prompt. Refused, before anything else happens, when the target is not a prompt."
+        },
+        {
+          "usage": "ahood prompt unstar <owner>/<prompt>",
+          "summary": "Remove your star from a prompt.",
+          "desc": "Remove your star from a prompt. Refused, before anything else happens, when the target is not a prompt."
+        },
+        {
+          "usage": "ahood prompt share <owner>/<prompt> --group <group>",
+          "summary": "Share a prompt you own with a group, without changing its visibility.",
+          "desc": "Share a prompt you own with a group you belong to. Refused, before anything else happens, when the target is not a prompt.",
+          "flags": [
+            "--group <group>   The group's slug (from `ahood group list`)."
+          ]
+        },
+        {
+          "usage": "ahood prompt unshare <owner>/<prompt> --group <group>",
+          "summary": "Stop sharing a prompt you own with a group.",
+          "desc": "Stop sharing a prompt you own with a group. Refused, before anything else happens, when the target is not a prompt.",
+          "flags": [
+            "--group <group>   The group's slug."
+          ]
+        },
+        {
+          "usage": "ahood prompt init [name]",
+          "summary": "Scaffold a new prompt folder with a minimal, valid PROMPT.md.",
+          "desc": "Scaffold a minimal PROMPT.md that passes the registry's publish validation -- a name, an intent, one declared input, and a body that uses it: ./<name>/PROMPT.md with a name, or ./PROMPT.md without. Refuses to overwrite an existing PROMPT.md, or to add one to a folder that already holds another kind's root document. Names are slug-normalized and must stay inside the current directory.",
+          "examples": [
+            "ahood prompt init brutalist-landing-page",
+            "ahood prompt init"
+          ]
+        },
+        {
+          "usage": "ahood prompt publish <owner>/<prompt>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "summary": "Publish a new version of a prompt from a folder containing PROMPT.md, creating it first if it doesn't exist yet.",
+          "desc": "Publish a new version from a folder containing PROMPT.md; the kind is implied, and a contradictory --kind is refused. If the entry already exists as another kind, this stops before anything is packed or uploaded. If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`. PROMPT.md is checked locally first: an undeclared {{key}}, a declared input the body never uses, or a body over 32 KB is refused before anything is uploaded, with an error naming the key.",
+          "flags": [
+            "--path <dir>                  Folder to publish (default: the current directory).",
+            "--name <text>                 Required only when creating the entry on this publish.",
+            "--changelog <text>            What changed in this version.",
+            "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
+          ],
+          "examples": [
+            "ahood prompt publish alice/brutalist-landing-page@1.0.0 --name \"Brutalist Landing Page\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "group",
+      "commands": [
+        {
+          "usage": "ahood group create <name> [--description <text>]",
+          "summary": "Create a private group, becoming its owner.",
+          "desc": "Create a private group. You become its owner.",
+          "flags": [
+            "--description <text>   Optional short description."
+          ],
+          "examples": [
+            "ahood group create \"Design Team\" --description \"Shared skills for the design team\""
+          ]
+        },
+        {
+          "usage": "ahood group list [--json]",
+          "summary": "List groups you own or belong to.",
+          "desc": "List groups you own or belong to.",
+          "flags": [
+            "--json    Emit the raw group objects instead of formatted lines."
+          ]
+        },
+        {
+          "usage": "ahood group members <group> [--json]",
+          "summary": "List a group's members and their role (owner-only visible to members).",
+          "desc": "List a group's details and members. Member-only -- you must belong to the group. Returns not found (rather than a permission error) if you don't, so a group's existence isn't leaked to non-members.",
+          "flags": [
+            "--json    Emit the raw group/members objects instead of formatted lines."
+          ]
+        },
+        {
+          "usage": "ahood group invite-link <group> [--json]",
+          "summary": "Create (or regenerate) a shareable invite link for a group you own.",
+          "desc": "Create or regenerate a shareable invite link for a group you own. Regenerating invalidates any previously issued link. The raw token is shown only this once -- only its hash is stored server-side, so it cannot be retrieved again later; save it (or the link) somewhere safe.",
+          "flags": [
+            "--json    Emit {token, expiresAt, url} instead of formatted lines."
+          ]
+        },
+        {
+          "usage": "ahood group join <invite-url-or-token>",
+          "summary": "Join a group using an invite link or its raw token.",
+          "desc": "Join a group using an invite link (e.g. https://www.ahood.dev/groups/join?token=...) or its bare raw token -- either form works.",
+          "examples": [
+            "ahood group join https://www.ahood.dev/groups/join?token=abc123",
+            "ahood group join abc123"
+          ]
+        },
+        {
+          "usage": "ahood group remove-member <group> <username> [--yes]",
+          "summary": "Remove a member from a group you own (prompts for confirmation unless --yes is passed).",
+          "desc": "Remove a member from a group you own. The group's owner cannot be removed this way -- delete the group instead. Only the group's owner can remove someone other than themselves. Prompts for a typed \"yes\" unless --yes is passed.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood group leave <group> [--yes]",
+          "summary": "Leave a group you belong to (prompts for confirmation unless --yes is passed).",
+          "desc": "Leave a group you belong to. The group's owner cannot leave -- delete the group instead. Prompts for a typed \"yes\" unless --yes is passed.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood group delete <group> [--yes]",
+          "summary": "Permanently delete a group you own (prompts for confirmation unless --yes is passed).",
+          "desc": "Permanently delete a group you own, removing it for every member. Prompts for a typed \"yes\" unless --yes is passed.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "snap",
+      "commands": [
+        {
+          "usage": "ahood snap create <content> [--tags tag1,tag2] [--failed <t>] [--worked <t>] [--fix <t>] [--lesson <t>] [--artifact <owner/slug>] [--json]",
+          "summary": "Capture a new private snap, from an argument or piped stdin.",
+          "desc": "Capture a new private snap. Pass the content as an argument, or omit it and pipe content on stdin (e.g. `echo \"...\" | ahood snap create`, or a piped heredoc) -- useful for capturing a whole session's worth of freeform text at once. Prints the new snap's id on success. An unrecognized flag is refused rather than folded into the note; pass content that itself starts with `--` after a bare `--`. The optional structured header (--failed, --worked, --fix, --lesson, --artifact) records what went wrong, what worked, the fix, the general lesson and which artifact it is about, so your artifacts' self-evolution can read them; `ahood snap --lesson ... <content>` (no verb) is the same command. A snap is private to you until you share it.",
+          "flags": [
+            "--tags <comma,separated>   Attach tags to the new snap.",
+            "--failed <text>            What went wrong, or what the user corrected.",
+            "--worked <text>            What worked.",
+            "--fix <text>               The change made or needed.",
+            "--lesson <text>            The general takeaway (no names or private details).",
+            "--artifact <owner/slug>    The skill, agent or MCP server it is about (optionally @version).",
+            "--json                     Emit {id, created_at} instead of just the bare id.",
+            "--                         End of options: everything after it is content, verbatim."
+          ],
+          "examples": [
+            "ahood snap create \"Debugged the flaky CI step, root cause was a race in the cache key.\" --tags deploy,bugfix",
+            "echo \"...\" | ahood snap create",
+            "ahood snap create -- \"--json broke the parser\"",
+            "ahood snap --artifact alice/pdf-tools --failed \"split pages out of order\" --lesson \"sort by page index\" \"pdf split bug\""
+          ]
+        },
+        {
+          "usage": "ahood snap list [--json] [--limit <n>] [--tags tag1,tag2]",
+          "summary": "List your own snaps, most recent first.",
+          "desc": "List your own snaps: id, a truncated content preview, created_at, a (shared) marker if shared, and any tags in brackets. --tags narrows the list to snaps carrying every tag given (not any of them), matched case-insensitively.",
+          "flags": [
+            "--json               Emit the raw snap objects instead of formatted lines.",
+            "--limit <n>          Cap the number of results.",
+            "--tags tag1,tag2     Only snaps carrying ALL of these tags. Case-insensitive; at most 8."
+          ],
+          "examples": [
+            "ahood snap list --tags deploy",
+            "ahood snap list --tags deploy,bugfix --limit 5"
+          ]
+        },
+        {
+          "usage": "ahood snap search <query> [--json] [--limit <n>] [--tags tag1,tag2]",
+          "summary": "Search your own snaps by content.",
+          "desc": "Search your own snaps by content. Same output shape as `ahood snap list`. The query matches snap CONTENT only and never a tag -- use --tags to filter by tag, which narrows the text results further.",
+          "flags": [
+            "--json               Emit the raw snap objects instead of formatted lines.",
+            "--limit <n>          Cap the number of results.",
+            "--tags tag1,tag2     Only snaps carrying ALL of these tags. Case-insensitive; at most 8."
+          ],
+          "examples": [
+            "ahood snap search flaky-ci",
+            "ahood snap search deploy --tags ci"
+          ]
+        },
+        {
+          "usage": "ahood snap show <id> [--json]",
+          "summary": "Print a single snap's full content.",
+          "desc": "Print a single snap's full content. Plain mode prints the raw content verbatim to stdout -- no formatting, no labels -- so it's safe to pipe into a file or another tool.",
+          "flags": [
+            "--json    Emit the full snap object instead of the raw content."
+          ]
+        },
+        {
+          "usage": "ahood snap remove <id> [--yes]",
+          "summary": "Permanently delete a snap (prompts for confirmation unless --yes is passed).",
+          "desc": "Permanently delete a snap. Irreversible. Prompts for a typed \"yes\" unless --yes is passed.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood snap share <id> [--json]",
+          "summary": "Mint (or return the existing) shareable link for a snap.",
+          "desc": "Mint or return the existing shareable link for a snap. Idempotent -- safe to run more than once.",
+          "flags": [
+            "--json    Emit {share_url} instead of just the bare URL."
+          ]
+        },
+        {
+          "usage": "ahood snap unshare <id> [--yes]",
+          "summary": "Revoke a snap's share link (the snap itself is untouched; prompts for confirmation unless --yes is passed).",
+          "desc": "Revoke a snap's share link -- the snap itself is untouched, and re-running `ahood snap share` mints a new link. Prompts for a typed \"yes\" unless --yes is passed, since anyone using the old link loses access immediately.",
+          "flags": [
+            "--yes    Skip the interactive confirmation, for scripts/CI."
+          ]
+        },
+        {
+          "usage": "ahood snap tags <id> [tag ...] [--clear] [--json]",
+          "summary": "Print a snap's tags, or replace them with the tags given.",
+          "desc": "With no tag list, prints the snap's current tags and changes nothing. With a tag list, replaces the full set -- this is not a merge, so any existing tags not listed are dropped. Tags may be given as separate arguments, comma-separated, or both; quote a tag that contains a space. Clearing every tag is explicit: pass --clear or an empty string. Each tag prints quoted, so one multi-word tag never looks like two. No confirmation prompt: unlike remove/unshare this only touches metadata, never the snap's content or shareability, and the tags it replaces can be read back first.",
+          "flags": [
+            "--clear   Remove every tag from the snap.",
+            "--json    Emit {id, tags} instead of a plain-text summary."
+          ],
+          "examples": [
+            "ahood snap tags snap_123",
+            "ahood snap tags snap_123 deploy bugfix",
+            "ahood snap tags snap_123 deploy,bugfix",
+            "ahood snap tags snap_123 --clear"
+          ]
+        }
+      ]
+    }
+  ]
+}
