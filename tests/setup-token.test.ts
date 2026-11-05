@@ -1,5 +1,5 @@
-// ahood#990: one token name (AHOOD_TOKEN, AHOOD_API_TOKEN as a deprecated
-// fallback) and `ahood setup` storing the token in each harness's own config,
+// ahood#990: one token name (AHOOD_TOKEN; the old AHOOD_API_TOKEN fallback
+// was removed in ahood#995) and `ahood setup` storing the token in each harness's own config,
 // only with consent, user-only where setup creates the file, removed by
 // --remove -- and the token itself never in stdout or stderr.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,13 +18,7 @@ vi.mock("../src/commands/login.js", () => ({ login: vi.fn(async () => {}) }));
 
 import { askLine, confirmYesNo, isInteractive } from "../src/confirm.js";
 import { login } from "../src/commands/login.js";
-import {
-  LEGACY_TOKEN_NOTE,
-  resetLegacyTokenNoteForTests,
-  resolveToken,
-  resolveTokenWithSource,
-  writeCredentials,
-} from "../src/credentials.js";
+import { resolveToken, resolveTokenWithSource, writeCredentials } from "../src/credentials.js";
 import { setup } from "../src/setup/setup-command.js";
 import { doctor } from "../src/setup/doctor-command.js";
 import { REDACTED_TOKEN } from "../src/setup/file-changes.js";
@@ -53,7 +47,6 @@ beforeEach(() => {
   env = setupHomeEnv();
   io = captureConsole();
   runner = fakeRunner({ opencode: fakeOpencode() });
-  resetLegacyTokenNoteForTests();
   vi.mocked(isInteractive).mockReturnValue(false);
   vi.mocked(confirmYesNo).mockResolvedValue(true);
   vi.mocked(askLine).mockResolvedValue("");
@@ -70,35 +63,25 @@ afterEach(() => {
 });
 
 describe("token resolution order (ahood#990, decision A)", () => {
-  it("AHOOD_TOKEN, then AHOOD_API_TOKEN, then the stored login", () => {
+  it("AHOOD_TOKEN, then the stored login", () => {
     writeCredentials({ token: "stored" });
     expect(resolveTokenWithSource()).toEqual({ token: "stored", source: "credentials" });
-    process.env.AHOOD_API_TOKEN = "legacy";
-    expect(resolveTokenWithSource()).toEqual({ token: "legacy", source: "AHOOD_API_TOKEN" });
     process.env.AHOOD_TOKEN = "current";
     expect(resolveTokenWithSource()).toEqual({ token: "current", source: "AHOOD_TOKEN" });
   });
 
   it("an empty variable falls through to the next source", () => {
+    writeCredentials({ token: "stored" });
     process.env.AHOOD_TOKEN = "";
-    process.env.AHOOD_API_TOKEN = "legacy";
-    expect(resolveTokenWithSource()?.source).toBe("AHOOD_API_TOKEN");
+    expect(resolveTokenWithSource()?.source).toBe("credentials");
   });
 
-  it("only AHOOD_API_TOKEN set: works, with a one-time deprecation note on stderr (never stdout, never the value)", () => {
+  it("the removed AHOOD_API_TOKEN is not read at all (ahood#995), and nothing is printed about it", () => {
     process.env.AHOOD_API_TOKEN = TOKEN;
-    expect(resolveToken()).toBe(TOKEN);
-    expect(resolveToken()).toBe(TOKEN);
-    expect(io.err).toEqual([LEGACY_TOKEN_NOTE]);
-    expect(LEGACY_TOKEN_NOTE).toContain("AHOOD_TOKEN");
-    expect(io.out).toEqual([]);
-  });
-
-  it("no note when AHOOD_TOKEN is set, even with the old name also set", () => {
-    process.env.AHOOD_TOKEN = TOKEN;
-    process.env.AHOOD_API_TOKEN = OTHER;
-    expect(resolveToken()).toBe(TOKEN);
+    expect(resolveTokenWithSource()).toBeNull();
+    expect(resolveToken()).toBeNull();
     expect(io.err).toEqual([]);
+    expect(io.out).toEqual([]);
   });
 });
 
@@ -317,12 +300,12 @@ describe("Claude Code: env.AHOOD_TOKEN in ~/.claude/settings.json", () => {
     expect(settings().env?.AHOOD_TOKEN).toBe(OTHER);
   });
 
-  it("without consent: nothing written, and the note says to export AHOOD_TOKEN (and rename the old name)", async () => {
+  it("without consent: nothing written, and the note says to export AHOOD_TOKEN (the removed old name is never mentioned)", async () => {
     process.env.AHOOD_API_TOKEN = TOKEN;
     await setup(["claude", "--yes"]);
     expect(existsSync(claudeSettings())).toBe(false);
     expect(io.stdout()).toContain("export AHOOD_TOKEN=<your token>");
-    expect(io.stdout()).toContain("reads AHOOD_TOKEN, not AHOOD_API_TOKEN");
+    expect(io.stdout()).not.toContain("AHOOD_API_TOKEN");
   });
 });
 
@@ -332,7 +315,8 @@ describe("ahood doctor names the token source, never the token", () => {
 
   it.each([
     ["AHOOD_TOKEN", "ok", "$AHOOD_TOKEN"],
-    ["AHOOD_API_TOKEN", "warn", "only $AHOOD_API_TOKEN is set"],
+    // The removed old name (ahood#995) counts as no token at all.
+    ["AHOOD_API_TOKEN", "warn", "none -- run `ahood login`"],
   ])("%s set", async (name, status, detail) => {
     process.env[name] = TOKEN;
     await doctor(["--offline", "--json"]);
@@ -345,11 +329,11 @@ describe("ahood doctor names the token source, never the token", () => {
     expect(source()).toMatchObject({ status: "ok", detail: expect.stringContaining("stored login") });
   });
 
-  it("an AHOOD_API_TOKEN-only shell is flagged on a set-up harness too", async () => {
+  it("an AHOOD_API_TOKEN-only shell is no token on a set-up harness either (ahood#995)", async () => {
     await setup(["codex", "--yes"]);
     process.env.AHOOD_API_TOKEN = TOKEN;
     await doctor(["--offline"]);
-    expect(io.stdout()).toMatch(/\[warn\] token source: only \$AHOOD_API_TOKEN is set/);
-    expect(io.stdout()).toMatch(/\[warn\] MCP token: only AHOOD_API_TOKEN is set/);
+    expect(io.stdout()).toMatch(/\[warn\] token source: none/);
+    expect(io.stdout()).toMatch(/\[warn\] MCP token: AHOOD_TOKEN is not set/);
   });
 });

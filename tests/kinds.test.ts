@@ -351,13 +351,6 @@ describe("kind-scoped registry verbs", () => {
       expect(JSON.parse(log.mock.calls[0][0] as string).map((p: { skill: string }) => p.skill)).toEqual(["alice/legacy"]);
     });
 
-    it("legacy no-arg `skill outdated` still covers every pin", async () => {
-      await project();
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      await dispatchSkill(["outdated", "--json"]);
-      expect(JSON.parse(log.mock.calls[0][0] as string)).toHaveLength(3);
-    });
-
     it("an explicit wrong-kind target is refused as a failure, nothing downloaded", async () => {
       quiet();
       const calls = await project();
@@ -584,16 +577,6 @@ describe("ahood doc (ahood-cli#182)", () => {
       expect(lock["alice/guide"]).toMatchObject({ version: "2.0.0", kind: "doc" });
       expect(lock["alice/rev"]?.version).toBe("1.0.0");
       expect(calls.some((c) => c.url.includes("alice/rev"))).toBe(false);
-    });
-
-    it("legacy no-arg skill update moves a doc pin forward too, through the doc install path", async () => {
-      quiet();
-      fakeRegistry({ "alice/guide": await entry("doc") });
-      await dispatchDoc(["add", "alice/guide"]);
-      fakeRegistry({ "alice/guide": await entry("doc", "2.0.0") });
-      await dispatchSkill(["update"]);
-      expect(readLockfile(LOCKFILE_PATH)["alice/guide"]).toMatchObject({ version: "2.0.0", kind: "doc" });
-      expect(existsSync(join(".claude", "skills"))).toBe(false);
     });
 
     it("doc remove deletes the file and the pin, offline", async () => {
@@ -937,16 +920,6 @@ describe("ahood loop (ahood-cli, ahood#858)", () => {
       expect(lock["alice/sweep"]).toMatchObject({ version: "2.0.0", kind: "loop" });
       expect(lock["alice/rev"]?.version).toBe("1.0.0");
       expect(calls.some((c) => c.url.includes("alice/rev"))).toBe(false);
-    });
-
-    it("legacy no-arg skill update moves a loop pin forward too, through the loop install path", async () => {
-      quiet();
-      fakeRegistry({ "alice/sweep": await entry("loop") });
-      await dispatchLoop(["add", "alice/sweep"]);
-      fakeRegistry({ "alice/sweep": await entry("loop", "2.0.0") });
-      await dispatchSkill(["update"]);
-      expect(readLockfile(LOCKFILE_PATH)["alice/sweep"]).toMatchObject({ version: "2.0.0", kind: "loop" });
-      expect(existsSync(join(".claude", "skills"))).toBe(false);
     });
 
     it("loop remove deletes the file and the pin, offline", async () => {

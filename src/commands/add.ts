@@ -889,7 +889,7 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
     const freshServers = fresh.mcpServers as Record<string, unknown>;
     const freshExisting = Object.prototype.hasOwnProperty.call(freshServers, skill) ? freshServers[skill] : undefined;
     if (freshExisting !== undefined && (recordedHash === undefined || !matchesMcpConfigHash(freshExisting, recordedHash))) {
-      throw new Error(`${key}'s .mcp.json entry changed while updating -- refusing to overwrite it. Re-run \`ahood skill update ${key}\` if this was unexpected.`);
+      throw new Error(`${key}'s .mcp.json entry changed while updating -- refusing to overwrite it. Re-run \`ahood mcp update ${key}\` if this was unexpected.`);
     }
     previousOnDisk = freshExisting;
     freshServers[skill] = serverConfig;

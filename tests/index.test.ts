@@ -13,7 +13,7 @@ vi.mock("../src/commands/add.js", async (importOriginal) => {
   return { ...actual, add: vi.fn(async () => {}) };
 });
 
-// Mocked so the "outdated forces --dry-run" test below can assert on call
+// Mocked so the "agent outdated forces --dry-run" test below can assert on call
 // args without hitting the network or touching a lockfile.
 vi.mock("../src/commands/update.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/commands/update.js")>();
@@ -228,81 +228,100 @@ describe("dispatchSkill (in-process)", () => {
     expect(add).toHaveBeenCalledWith(["alice/pdf-tools", "--json"]);
   });
 
-  it("`ahood skill outdated ...` reaches update()'s existing dry-run path by forcing --dry-run onto whatever args were given", async () => {
+  it("`ahood agent outdated ...` reaches update()'s existing dry-run path by forcing --dry-run onto whatever args were given", async () => {
     const { update } = await import("../src/commands/update.js");
-    const { dispatchSkill } = await import("../src/index.js");
+    const { dispatchAgent } = await import("../src/index.js");
 
-    await dispatchSkill(["outdated", "alice/pdf-tools", "--json"]);
+    await dispatchAgent(["outdated", "alice/reviewer", "--json"]);
 
-    expect(update).toHaveBeenCalledWith(["alice/pdf-tools", "--json", "--dry-run"]);
+    expect(update).toHaveBeenCalledWith(["alice/reviewer", "--json", "--dry-run"], { noun: "agent", kind: "agent" });
   });
 
-  it("`ahood skill outdated` with no args still forces --dry-run", async () => {
+  it("`ahood agent outdated` with no args still forces --dry-run", async () => {
     const { update } = await import("../src/commands/update.js");
-    const { dispatchSkill } = await import("../src/index.js");
+    const { dispatchAgent } = await import("../src/index.js");
 
-    await dispatchSkill(["outdated"]);
+    await dispatchAgent(["outdated"]);
 
-    expect(update).toHaveBeenCalledWith(["--dry-run"]);
+    expect(update).toHaveBeenCalledWith(["--dry-run"], { noun: "agent", kind: "agent" });
   });
 
-  // ahood#990: the legacy, cross-kind `ahood skill update`/`ahood skill
-  // outdated` print a one-line stderr deprecation note pointing at the
-  // top-level `ahood sync`/`ahood status`, which both still do exactly what
-  // they did before (update()/update(["--dry-run"]) above still get called).
-  it("`ahood skill update` prints a deprecation note pointing at `ahood sync`, to stderr only", async () => {
-    const { dispatchSkill } = await import("../src/index.js");
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  // ahood#995: the legacy, cross-kind `ahood skill update`/`ahood skill
+  // outdated` (deprecated in ahood#990) are removed: an unknown skill command,
+  // exit 2, naming the top-level replacement -- and nothing runs.
+  for (const [verb, replacement] of [
+    ["update", "ahood sync"],
+    ["outdated", "ahood status"],
+  ]) {
+    for (const extra of [[], ["--help"], ["alice/pdf-tools", "--dry-run"]]) {
+      it(`\`ahood skill ${[verb, ...extra].join(" ")}\` is removed and points at \`${replacement}\``, async () => {
+        const { update } = await import("../src/commands/update.js");
+        vi.mocked(update).mockClear();
+        const { dispatchSkill } = await import("../src/index.js");
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+          throw new Error(`exit ${code}`);
+        }) as never);
 
-    await dispatchSkill(["update"]);
+        await expect(dispatchSkill([verb, ...extra])).rejects.toThrow("exit 2");
 
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Deprecated.*ahood skill update.*ahood sync/));
-    errorSpy.mockRestore();
-  });
+        const err = errorSpy.mock.calls.map((c) => String(c[0])).join("\n");
+        expect(err).toContain(`Unknown skill command: ${verb}`);
+        expect(err).toContain(`use \`${replacement}\``);
+        expect(err).not.toContain("Did you mean");
+        expect(update).not.toHaveBeenCalled();
+        expect(logSpy).not.toHaveBeenCalled();
+        errorSpy.mockRestore();
+        logSpy.mockRestore();
+        exitSpy.mockRestore();
+      });
+    }
+  }
 
-  it("`ahood skill outdated` prints a deprecation note pointing at `ahood status`, to stderr only", async () => {
-    const { dispatchSkill } = await import("../src/index.js");
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    await dispatchSkill(["outdated"]);
-
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Deprecated.*ahood skill outdated.*ahood status/));
-    errorSpy.mockRestore();
-  });
-
-  it("`ahood agent update` (kind-scoped, not legacy) prints no deprecation note", async () => {
+  it("`ahood agent update` (kind-scoped, not legacy) still runs update() and prints nothing on stderr", async () => {
+    const { update } = await import("../src/commands/update.js");
     const { dispatchAgent } = await import("../src/index.js");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await dispatchAgent(["update"]);
 
-    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringMatching(/Deprecated/));
+    expect(update).toHaveBeenCalledWith([], { noun: "agent", kind: "agent" });
+    expect(errorSpy).not.toHaveBeenCalled();
     errorSpy.mockRestore();
   });
 });
 
 describe("dispatchMcp (in-process)", () => {
-  // ahood#1018 step 2: the local stdio server is gone; bare `ahood mcp` and
-  // `ahood mcp serve` print the one-line removal notice and exit 2.
-  for (const args of [[], ["serve"], ["serve", "--help"]]) {
-    it(`\`ahood mcp ${args.join(" ")}\` prints REMOVED_NOTICE once and exits 2`, async () => {
-      const { dispatchMcp, REMOVED_NOTICE } = await import("../src/index.js");
-      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-        throw new Error(`exit ${code}`);
-      }) as never);
+  // ahood#995 / #1018: the one-release REMOVED_NOTICE for the old local stdio
+  // server is gone too. Bare `ahood mcp` is the mcp group's help, like every
+  // other noun; `ahood mcp serve` is an unknown mcp command.
+  it("bare `ahood mcp` prints the mcp-kind help", async () => {
+    const { dispatchMcp } = await import("../src/index.js");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-      await expect(dispatchMcp(args)).rejects.toThrow("exit 2");
+    await dispatchMcp([]);
 
-      expect(REMOVED_NOTICE).toBe("removed in 0.17.0 -- ahood is a plugin now: npx @ahood/cli setup");
-      expect(errorSpy.mock.calls).toEqual([[REMOVED_NOTICE]]);
-      expect(logSpy).not.toHaveBeenCalled();
-      errorSpy.mockRestore();
-      logSpy.mockRestore();
-      exitSpy.mockRestore();
-    });
-  }
+    expect(String(logSpy.mock.calls[0]?.[0])).toContain("ahood mcp add <owner>/<server>");
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  it("`ahood mcp serve` is an unknown mcp command, exit 2", async () => {
+    const { dispatchMcp } = await import("../src/index.js");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit ${code}`);
+    }) as never);
+
+    await expect(dispatchMcp(["serve"])).rejects.toThrow("exit 2");
+
+    expect(errorSpy).toHaveBeenCalledWith("Unknown mcp command: serve");
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
 
 describe("dispatchGroup (in-process)", () => {

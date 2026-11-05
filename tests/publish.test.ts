@@ -120,11 +120,9 @@ describe("publish", () => {
     await expect(publish([`alice/demo@1.0.0`, "--path", dir])).rejects.toThrow(/No SKILL\.md, AGENT\.md, server\.json, DOC\.md, PROJECT\.md, LOOP\.md, or PROMPT\.md found/);
   });
 
-  it("rejects an invalid --version", async () => {
+  it("rejects an invalid version", async () => {
     writeFileSync(join(dir, "SKILL.md"), "# demo");
-    await expect(publish([dir, "--owner", "alice", "--slug", "demo", "--version", "not-semver"])).rejects.toThrow(
-      /must be a semver/,
-    );
+    await expect(publish(["alice/demo@not-semver", "--path", dir])).rejects.toThrow(/must be a semver/);
   });
 
   it("publishes via the primary <owner>/<skill>@<version> form", async () => {
@@ -138,28 +136,27 @@ describe("publish", () => {
     expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
   });
 
-  it("still supports the legacy <path> --owner --slug --version form", async () => {
+  // ahood#995: the `<path> --owner --slug --version` form (deprecated in
+  // ahood#990) is removed. Its flags are refused by name, before any request,
+  // with the replacement in the message -- never silently ignored.
+  for (const args of [
+    (d: string) => [d, "--owner", "alice", "--slug", "demo", "--version", "1.0.0"],
+    (d: string) => ["alice/demo@1.0.0", "--path", d, "--owner", "bob"],
+    (d: string) => ["alice/demo@1.0.0", "--path", d, "--version=2.0.0"],
+    () => ["--owner", "alice", "--slug", "demo", "--version", "1.0.0"],
+  ]) {
+    it(`refuses the removed legacy publish form: ${args("<dir>").join(" ")}`, async () => {
+      writeFileSync(join(dir, "SKILL.md"), "# demo");
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(publish(args(dir))).rejects.toThrow(/publish form was removed\. Use `ahood skill publish <owner>\/<skill>@<version>/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  }
+
+  it("a bare path with no <owner>/<skill>@<version> spec is a usage error", async () => {
     writeFileSync(join(dir, "SKILL.md"), "# demo");
-    const capture: { body?: Uint8Array } = {};
-    stubApi(capture);
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
-    await publish([dir, "--owner", "alice", "--slug", "demo", "--version", "1.0.0"]);
-
-    expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
-  });
-
-  it("errors instead of treating a flag as the legacy path when the path is omitted", async () => {
-    await expect(
-      publish(["--owner", "alice", "--slug", "demo", "--version", "1.0.0"]),
-    ).rejects.toThrow(/No SKILL\.md, AGENT\.md, server\.json, DOC\.md, PROJECT\.md, LOOP\.md, or PROMPT\.md found/);
-  });
-
-  it("errors instead of swallowing the next flag as this one's value", async () => {
-    writeFileSync(join(dir, "SKILL.md"), "# demo");
-    await expect(
-      publish([dir, "--owner", "--slug", "demo", "--version", "1.0.0"]),
-    ).rejects.toThrow(/--owner requires a value/);
+    await expect(publish([dir])).rejects.toThrow(/^Usage: ahood skill publish <owner>\/<skill>@<version>/);
   });
 
   it("excludes .git, node_modules, .env, .envrc, and credential files by name", async () => {
@@ -914,14 +911,14 @@ describe("publish", () => {
       expect(parsed.error).toMatch(/Publish failed: Archive could not be extracted/);
     });
 
-    it("emits a single {error} JSON object for a client-side validation failure (bad --version), before any network call", async () => {
+    it("emits a single {error} JSON object for a client-side validation failure (bad version), before any network call", async () => {
       writeFileSync(join(dir, "SKILL.md"), "# demo");
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
       await expect(
-        publish([dir, "--owner", "alice", "--slug", "demo", "--version", "not-semver", "--json"]),
+        publish(["alice/demo@not-semver", "--path", dir, "--json"]),
       ).rejects.toThrow(/must be a semver/);
 
       expect(fetchMock).not.toHaveBeenCalled();

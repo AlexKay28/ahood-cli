@@ -95,6 +95,22 @@ const SKILL_COMMANDS: Record<string, RegistryHandler> = {
   publish,
 };
 
+// ahood#995: the legacy, cross-kind `ahood skill update` and `ahood skill
+// outdated` (deprecated in ahood#990) are gone -- the top-level commands that
+// replaced them cover every project on this machine. The handlers stay in
+// SKILL_COMMANDS for the kind-scoped verbs (`ahood agent update`, `ahood mcp
+// outdated`, ...), which are not deprecated; only the `skill` noun refuses
+// them, naming the replacement.
+const REMOVED_SKILL_VERBS = new Map<string, string>([
+  ["update", "ahood sync"],
+  ["outdated", "ahood status"],
+]);
+
+function removedSkillVerbHint(verb: string): string | undefined {
+  const replacement = REMOVED_SKILL_VERBS.get(verb);
+  return replacement && `\`ahood skill ${verb}\` was removed -- use \`${replacement}\`, which covers every project on this machine.`;
+}
+
 // Verbs only one kind has, on top of SKILL_COMMANDS: `ahood prompt get`
 // (ahood-cli#206), which fills a prompt and prints it -- the verb that
 // replaces add/update/outdated/remove for a kind that is never installed.
@@ -227,7 +243,10 @@ function pluralKindAlias(word: string): CliKind | undefined {
 }
 
 function closestSkillCommand(input: string): string | undefined {
-  return closestOf(input, Object.keys(SKILL_COMMANDS));
+  return closestOf(
+    input,
+    Object.keys(SKILL_COMMANDS).filter((verb) => !REMOVED_SKILL_VERBS.has(verb)),
+  );
 }
 
 function closestGroupVerb(input: string): string | undefined {
@@ -259,12 +278,19 @@ async function dispatchRegistry(noun: CliKind, args: string[]): Promise<void> {
   }
 
   const kindVerbs = KIND_VERBS[noun] ?? {};
-  const handler = kindVerbs[sub] ?? SKILL_COMMANDS[sub];
+  const removedHint = noun === "skill" ? removedSkillVerbHint(sub) : undefined;
+  const handler = removedHint ? undefined : (kindVerbs[sub] ?? SKILL_COMMANDS[sub]);
   if (!handler) {
     console.error(`Unknown ${noun} command: ${sub}`);
-    const known = [...Object.keys(kindVerbs), ...Object.keys(SKILL_COMMANDS)];
-    const suggestion = closestOf(sub, known);
-    if (suggestion) console.error(`Did you mean '${suggestion}'?`);
+    if (removedHint) {
+      console.error(removedHint);
+    } else {
+      const known = [...Object.keys(kindVerbs), ...Object.keys(SKILL_COMMANDS)].filter(
+        (verb) => noun !== "skill" || !REMOVED_SKILL_VERBS.has(verb),
+      );
+      const suggestion = closestOf(sub, known);
+      if (suggestion) console.error(`Did you mean '${suggestion}'?`);
+    }
     console.error(`Run \`ahood ${noun} --help\` for a list of commands.`);
     process.exit(2);
   }
@@ -273,19 +299,6 @@ async function dispatchRegistry(noun: CliKind, args: string[]): Promise<void> {
     const entry = findCommandHelp(noun, sub);
     console.log(entry ? formatCommandHelp(entry) : formatKindHelp(noun));
     return;
-  }
-
-  // ahood#990: nudge the legacy, cross-kind `ahood skill update`/`ahood skill
-  // outdated` toward the top-level `ahood sync`/`ahood status`, which cover
-  // every project on the machine instead of just this one's lockfile. Both
-  // commands still work unchanged -- stderr only, so --json/table stdout is
-  // untouched (kind-scoped `ahood agent update`/`ahood mcp outdated` etc.
-  // are not legacy and print nothing here).
-  if (noun === "skill" && (sub === "update" || sub === "outdated")) {
-    const replacement = sub === "update" ? "ahood sync" : "ahood status";
-    console.error(
-      `Deprecated: \`ahood skill ${sub}\` is being phased out in favor of \`${replacement}\` (ahood#990), which covers every project on this machine. \`ahood skill ${sub}\` still works for now.`,
-    );
   }
 
   if (noun === "skill" && sub === "publish") {
@@ -369,23 +382,11 @@ async function dispatchProject(args: string[]): Promise<void> {
   await dispatchRegistry("project", args);
 }
 
-// ahood#1018 step 2: the one line every removed legacy form prints (on
-// stderr, exit 2) for one release -- `ahood mcp`, `ahood mcp serve`,
-// `ahood help useme`. Drop it, and the callers below, in 0.18.0.
-export const REMOVED_NOTICE = "removed in 0.17.0 -- ahood is a plugin now: npx @ahood/cli setup";
-
-function removedForm(): never {
-  console.error(REMOVED_NOTICE);
-  process.exit(2);
-}
-
-// ahood#1018 step 2: the local stdio MCP server (`ahood mcp` with no
-// arguments, `ahood mcp serve`) was removed in 0.17.0 -- the plugin brings the
-// hosted MCP server now. For one release those spellings print REMOVED_NOTICE
-// and exit 2 instead of "Unknown mcp command"; every other first word is still
-// a registry verb for mcp-kind entries (server.json manifests).
+// `ahood mcp` (ahood#1018): the shared registry dispatch for mcp-kind entries
+// (server.json manifests), help included. The local stdio MCP server that
+// bare `ahood mcp` / `ahood mcp serve` used to start was removed in 0.17.0
+// (the plugin brings the hosted one), and its one-release notice in 0.18.0.
 async function dispatchMcp(args: string[]): Promise<void> {
-  if (args.length === 0 || args[0] === "serve") removedForm();
   await dispatchRegistry("mcp", args);
 }
 
@@ -471,8 +472,6 @@ async function main() {
 
   if (command === "help") {
     const sub = args[0];
-    // ahood#1018 step 2: the bundled raw skill was removed in 0.17.0.
-    if (sub === "useme") removedForm();
     if (isCliKind(sub)) {
       const verb = args[1];
       const entry = verb ? findCommandHelp(sub, verb) : undefined;
@@ -517,7 +516,10 @@ async function main() {
     // in this release -- if the typo looks like one of those, point at the
     // new form specifically rather than just the generic top-level list.
     const skillSuggestion = closestSkillCommand(command);
-    if (skillSuggestion) {
+    const replacement = REMOVED_SKILL_VERBS.get(command);
+    if (replacement) {
+      console.error(`Did you mean '${replacement}'?`);
+    } else if (skillSuggestion) {
       console.error(`Did you mean 'ahood skill ${skillSuggestion}'?`);
     } else {
       const suggestion = closestCommand(command);

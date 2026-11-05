@@ -34,21 +34,29 @@ function run(args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; cli?
   return { stdout: result.stdout, stderr: result.stderr.toString(), status: result.status, signal: result.signal };
 }
 
-// ahood#1018 step 2: the removed legacy forms each print exactly one line on
-// stderr and exit 2, for one release, and run nothing else.
-const REMOVED_NOTICE = "removed in 0.17.0 -- ahood is a plugin now: npx @ahood/cli setup\n";
-
-describe("removed legacy forms (ahood#1018): one line, exit 2, nothing else", () => {
-  for (const args of [["mcp", "serve"], ["mcp"], ["mcp", "serve", "--help"], ["mcp", "serve", "extra"], ["help", "useme"]]) {
-    it(`\`ahood ${args.join(" ")}\` prints the removal notice and exits 2, offline, writing nothing`, () => {
+// ahood#1018 step 2 removed these forms in 0.17.0 with a one-release notice;
+// ahood#995 drops the notice too. Each now behaves like any other unknown or
+// bare spelling -- and still runs nothing and writes nothing, offline.
+describe("removed legacy forms (ahood#1018, #995): no notice, nothing run", () => {
+  const cases: Array<{ args: string[]; status: number; stdout?: string; stderr?: string }> = [
+    { args: ["mcp"], status: 0, stdout: "ahood mcp add <owner>/<server>" },
+    { args: ["mcp", "serve"], status: 2, stderr: "Unknown mcp command: serve" },
+    { args: ["mcp", "serve", "--help"], status: 2, stderr: "Unknown mcp command: serve" },
+    { args: ["help", "useme"], status: 0, stdout: "Use ahood with an AI agent:" },
+    { args: ["skill", "update"], status: 2, stderr: "use `ahood sync`" },
+    { args: ["skill", "outdated"], status: 2, stderr: "use `ahood status`" },
+  ];
+  for (const { args, status: expected, stdout: out, stderr: err } of cases) {
+    it(`\`ahood ${args.join(" ")}\` exits ${expected}, offline, writing nothing`, () => {
       const home = mkdtempSync(path.join(tmpdir(), "ahood-removed-home-"));
       const cwd = mkdtempSync(path.join(tmpdir(), "ahood-removed-cwd-"));
       try {
         const { stdout, stderr, status, signal } = run(args, { cwd, env: offlineEnv(home) });
         expect(signal).toBeNull();
-        expect(status).toBe(2);
-        expect(stdout.toString()).toBe("");
-        expect(stderr).toBe(REMOVED_NOTICE);
+        expect(status).toBe(expected);
+        if (out) expect(stdout.toString()).toContain(out);
+        if (err) expect(stderr).toContain(err);
+        expect(stderr).not.toContain("removed in 0.17.0");
         expect(readdirSync(cwd)).toEqual([]);
         expect(readdirSync(home)).toEqual([]);
       } finally {
@@ -58,7 +66,7 @@ describe("removed legacy forms (ahood#1018): one line, exit 2, nothing else", ()
     });
   }
 
-  it("the mcp-kind registry verbs still work: an unknown one fails with usage, not the notice", () => {
+  it("the mcp-kind registry verbs still work: an unknown one fails with usage", () => {
     const { stderr, status } = run(["mcp", "srve"]);
     expect(status).toBe(2);
     expect(stderr).toContain("Unknown mcp command: srve");
@@ -341,9 +349,9 @@ describe("npm tarball", () => {
       const cwd = path.join(work, "cwd");
       execFileSync("mkdir", ["-p", home, cwd]);
       expect(run(["--version"], { cli: installedCli }).stdout.toString().trim()).toBe(`@ahood/cli ${packed.version}`);
-      const removed = run(["help", "useme"], { cli: installedCli, cwd, env: offlineEnv(home) });
+      const removed = run(["skill", "outdated"], { cli: installedCli, cwd, env: offlineEnv(home) });
       expect(removed.status).toBe(2);
-      expect(removed.stderr).toBe(REMOVED_NOTICE);
+      expect(removed.stderr).toContain("use `ahood status`");
       expect(existsSync(path.join(cwd, ".claude"))).toBe(false);
       // ahood-cli#182: the tarball carries the doc group's help.
       const docHelp = run(["doc", "--help"], { cli: installedCli, cwd, env: offlineEnv(home) });

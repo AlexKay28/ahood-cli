@@ -10,7 +10,7 @@ export const AHOOD_MCP_URL = "https://www.ahood.dev/api/mcp";
 // config names this env var -- the same one the CLI and the Claude Code
 // plugin's .mcp.json read (ahood#990, decision A) -- unless the user lets
 // `ahood setup` store the token itself in that harness's config (decision B).
-export { TOKEN_ENV as AHOOD_MCP_TOKEN_ENV, LEGACY_TOKEN_ENV as AHOOD_MCP_LEGACY_TOKEN_ENV } from "../../credentials.js";
+export { TOKEN_ENV as AHOOD_MCP_TOKEN_ENV } from "../../credentials.js";
 
 // The opt-in snap hook's enable switch: the Claude Code Stop hook (plugins/ahood/hooks/snap-prompt.mjs,
 // `ENABLE_ENV`) and the opencode plugin (packages/opencode-plugin) both read it. That script must stay

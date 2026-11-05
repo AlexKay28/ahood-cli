@@ -1,23 +1,18 @@
 // Codex (ahood#980, ahood#1009): the ahood Codex plugin, named in a marked
 // block in $CODEX_HOME/config.toml and installed by the codex CLI's own
 // `plugin` subcommands when it has them (detected from `codex plugin --help`,
-// never assumed). What setup wrote before ahood#1009 -- an
-// `[mcp_servers.ahood]` block, $CODEX_HOME/skills/ahood/SKILL.md and an
-// AGENTS.md snippet -- is taken out in the same run. Formats and what was
-// verified: templates/codex.ts.
+// never assumed). Formats and what was verified: templates/codex.ts.
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { SetupRefusedError } from "../errors.js";
-import { OWNED_MARKER, planOwnedFileRemoval, readIfExists, type FileChange } from "../file-changes.js";
+import { readIfExists, type FileChange } from "../file-changes.js";
 import { hasBlock, readBlock, removeBlock, upsertBlock } from "../marked-block.js";
 import { codexHome, displayPath } from "../paths.js";
 import { helpLists, runner } from "../runner.js";
 import { AHOOD_MCP_URL } from "../templates/ahood-commands.js";
 import { releaseBranchMissing } from "../release-channel.js";
 import {
-  agentsSnippetFile,
-  CODEX_AGENTS_MARKERS,
   CODEX_INSTALL_ARGS,
   CODEX_MARKETPLACE_NAME,
   CODEX_MARKETPLACE_REF,
@@ -28,7 +23,6 @@ import {
   CODEX_REMOVE_ARGS,
   CODEX_TOML_MARKERS,
   codexPluginBlock,
-  codexSkill,
   codexStoredToken,
 } from "../templates/codex.js";
 import {
@@ -43,10 +37,6 @@ import {
 } from "./types.js";
 
 const configPath = () => join(codexHome(), "config.toml");
-// Written by setup before ahood#1009; now only ever removed.
-const legacySkillPath = () => join(codexHome(), "skills", "ahood", "SKILL.md");
-const legacySnippetPath = () => join(codexHome(), "ahood-agents-snippet.md");
-const agentsPath = () => join(codexHome(), "AGENTS.md");
 /** Where `codex plugin add` copies the plugin, one folder per version (codex-cli 0.165.0). */
 const pluginCacheDir = () => join(codexHome(), "plugins", "cache", CODEX_MARKETPLACE_NAME, CODEX_PLUGIN_NAME);
 
@@ -227,32 +217,12 @@ function planConfig(remove: boolean, token: string | null = null): FileChange | 
   if (!works) {
     throw new SetupRefusedError(`Adding the ahood block to ${displayPath(path)} would not yield a working entry; nothing was changed.`);
   }
-  const legacy = block !== null && block.includes(`[mcp_servers.${CODEX_MCP_SERVER_NAME}]`) && token === null;
   const previousRef = blockRef(before, path);
   const what =
     `plugin ${CODEX_PLUGIN_ID} from the "${CODEX_MARKETPLACE_NAME}" marketplace (${CODEX_MARKETPLACE_SOURCE} at ${CODEX_MARKETPLACE_REF})` +
     (previousRef !== undefined && previousRef !== CODEX_MARKETPLACE_REF ? `; marketplace re-pinned from ${describeRef(previousRef)}` : "") +
-    (token ? `, with your ahood token in an [mcp_servers.${CODEX_MCP_SERVER_NAME}] entry that replaces the plugin's` : "") +
-    (legacy ? `; the old [mcp_servers.${CODEX_MCP_SERVER_NAME}] entry goes (the plugin brings the MCP server)` : "");
+    (token ? `, with your ahood token in an [mcp_servers.${CODEX_MCP_SERVER_NAME}] entry that replaces the plugin's` : "");
   return { path, before, after, what, secrets };
-}
-
-/** Takes setup's old snippet out of $CODEX_HOME/AGENTS.md; the rest of the file is the user's. */
-function planAgentsRemoval(): FileChange | null {
-  const path = agentsPath();
-  const before = readIfExists(path);
-  if (before === null || !hasBlock(before, CODEX_AGENTS_MARKERS, displayPath(path))) return null;
-  const after = removeBlock(before, CODEX_AGENTS_MARKERS, displayPath(path));
-  return { path, before, after: after.trim() === "" ? null : after, what: "old ahood snippet removed (the plugin's using-ahood skill replaces it)" };
-}
-
-/** Everything setup wrote before ahood#1009 besides the TOML block (which planConfig rewrites in place). */
-function legacyRemovals(notes: string[]): FileChange[] {
-  return [
-    planOwnedFileRemoval(legacySkillPath(), codexSkill(), "old `ahood` skill removed (the plugin ships it now)", notes),
-    planOwnedFileRemoval(legacySnippetPath(), agentsSnippetFile(), "old AGENTS.md snippet file removed", notes),
-    planAgentsRemoval(),
-  ].filter((c): c is FileChange => c !== null);
 }
 
 const commandLine = (args: readonly string[]) => `codex ${args.join(" ")}`;
@@ -262,8 +232,6 @@ function planSetup(opts: SetupOptions): SetupPlan {
   const plan = emptyPlan();
   const previousRef = blockRef(readIfExists(configPath()), configPath());
   plan.files.push(planConfig(false, opts.token)!);
-  // A same-named skill or snippet of the user's own is simply not ours to remove; no note at setup time.
-  plan.files.push(...legacyRemovals([]));
   const { binary } = detect();
   if (!binary || !supportsPluginCli(binary)) {
     plan.notes.push(
@@ -302,7 +270,6 @@ function planRemove(): SetupPlan {
   const plan = emptyPlan();
   const config = planConfig(true);
   if (config) plan.files.push(config);
-  plan.files.push(...legacyRemovals(plan.notes));
   const { binary } = detect();
   if (!binary || !supportsPluginCli(binary)) {
     if (existsSync(pluginCacheDir())) {
@@ -366,7 +333,7 @@ function inspect(): ConfigState {
       };
     }
     if (block !== null) {
-      // A pre-ahood#1009 block (just [mcp_servers.ahood]) is stale: re-running setup migrates it.
+      // Any block but the one setup writes now is stale: re-running setup rewrites it.
       config = block === `${CODEX_TOML_MARKERS.begin}\n${codexPluginBlock(storedToken())}\n${CODEX_TOML_MARKERS.end}` ? "ok" : "stale";
       const ref = blockRef(text, path);
       if (ref !== undefined) {
@@ -395,14 +362,10 @@ function inspect(): ConfigState {
   const ref = blockRef(text, path);
   const channel = channelFeature(ref);
   if (channel && ref !== undefined) features.push(channel, autoUpdateFeature(ref));
-  const leftovers = [legacySkillPath(), legacySnippetPath()].filter((p) => (readIfExists(p) ?? "").includes(OWNED_MARKER));
-  if (leftovers.length > 0) {
-    features.push({ name: "old setup files", state: "stale", detail: `${leftovers.map(displayPath).join(", ")} -- re-run \`ahood setup codex\` to remove` });
-  }
   const details = [`plugin entries in ${configDetail}: ${config}`, pluginDetail];
   const tokenStored = storedToken() !== null;
   const states = features.map((f) => f.state);
-  if (config === "absent" && pluginState === "absent" && leftovers.length === 0) return { state: "absent", details, features };
+  if (config === "absent" && pluginState === "absent") return { state: "absent", details, features };
   if (config === "absent" || pluginState === "absent") return { state: "partial", details, features, tokenStored };
   if (states.includes("stale")) return { state: "stale", details, features, tokenStored };
   return { state: "ok", details, features, tokenStored };

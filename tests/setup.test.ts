@@ -20,17 +20,7 @@ import { UsageError } from "../src/usage-error.js";
 import { writeBackup } from "../src/setup/file-changes.js";
 import { upsertBlock } from "../src/setup/marked-block.js";
 import { setReleaseProbeForTests } from "../src/setup/release-channel.js";
-import {
-  agentsSnippetBody,
-  agentsSnippetFile,
-  CODEX_AGENTS_MARKERS,
-  CODEX_MARKETPLACE_REF,
-  CODEX_TOML_MARKERS,
-  codexMcpBlock,
-  codexPluginBlock,
-  codexSkill,
-} from "../src/setup/templates/codex.js";
-import { opencodeCommandFiles } from "../src/setup/templates/opencode.js";
+import { CODEX_MARKETPLACE_REF, CODEX_TOML_MARKERS, codexMcpBlock, codexPluginBlock } from "../src/setup/templates/codex.js";
 import { CLI_VERSION } from "../src/version.js";
 import { captureConsole } from "./helpers/me-env.js";
 import { fakeClaude, fakeCodex, fakeOpencode, fakeRunner, listFiles, setupHomeEnv } from "./helpers/harness-env.js";
@@ -224,53 +214,35 @@ describe("ahood setup codex (ahood#980, ahood#1009: the Codex plugin)", () => {
     });
   });
 
-  describe("migration from the pre-plugin setup (ahood#1009)", () => {
-    /** What `ahood setup codex --yes` left on disk before ahood#1009. */
-    function writeOldSetup() {
-      mkdirSync(join(codex(), "skills", "ahood"), { recursive: true });
-      writeFileSync(config(), upsertBlock(USER_TOML, codexMcpBlock(), CODEX_TOML_MARKERS, config()));
-      writeFileSync(join(codex(), "skills", "ahood", "SKILL.md"), codexSkill());
-      writeFileSync(join(codex(), "ahood-agents-snippet.md"), agentsSnippetFile());
-      writeFileSync(join(codex(), "AGENTS.md"), upsertBlock("# mine\n", agentsSnippetBody(), CODEX_AGENTS_MARKERS, "AGENTS.md"));
-    }
+  // ahood#995 / #1018 step 6: the one-release migration of what setup wrote
+  // before ahood#1009 is gone. An old MCP-only block inside ahood's markers is
+  // still rewritten -- that is ordinary block upkeep -- but the old skill and
+  // AGENTS.md snippet are no longer setup's to touch, even with its marker.
+  describe("leftovers of the pre-plugin setup (ahood#1009) after the migration was dropped (ahood#995)", () => {
+    const OLD_MARKER_FILE = "<!-- managed by `ahood setup`; remove with `ahood setup --remove codex` -->\nold\n";
+    const AGENTS = "# mine\n<!-- >>> ahood (managed by `ahood setup codex`) >>> -->\nold snippet\n<!-- <<< ahood <<< -->\n";
 
-    it("one run swaps the old MCP block for the plugin block and removes the skill, snippet file and AGENTS.md snippet", async () => {
-      writeOldSetup();
-      const oldConfig = readFileSync(config(), "utf-8");
+    it("an MCP-only block in ahood's markers is rewritten to the plugin block like any stale block, with no migration note", async () => {
+      mkdirSync(codex(), { recursive: true });
+      writeFileSync(config(), upsertBlock(USER_TOML, codexMcpBlock(), CODEX_TOML_MARKERS, config()));
       await setup(["codex", "--yes"]);
       expect(parseToml(readFileSync(config(), "utf-8"))).toEqual({ ...(parseToml(USER_TOML) as object), ...PLUGIN_TOML });
       expect(readFileSync(config(), "utf-8")).not.toContain("[mcp_servers.ahood]");
-      expect(existsSync(join(codex(), "skills", "ahood"))).toBe(false);
-      expect(existsSync(join(codex(), "ahood-agents-snippet.md"))).toBe(false);
-      expect(readFileSync(join(codex(), "AGENTS.md"), "utf-8")).toBe("# mine\n");
-      // The usual backups: the edited config.toml and AGENTS.md (the skill and snippet are regenerable, so none).
-      const made = backups(listFiles(codex()));
-      expect(made.filter((f) => f.startsWith("config.toml.")).map((f) => readFileSync(join(codex(), f), "utf-8"))).toEqual([oldConfig]);
-      expect(made.some((f) => f.startsWith("AGENTS.md."))).toBe(true);
-      expect(io.stdout()).toContain("the old [mcp_servers.ahood] entry goes");
-      expect(codexRuns()).toEqual(["plugin marketplace upgrade ahood", "plugin add ahood@ahood"]);
-    });
-
-    it("then --remove leaves config.toml as it was before ahood was ever set up", async () => {
-      writeOldSetup();
-      await setup(["codex", "--yes"]);
+      expect(io.stdout()).not.toContain("old [mcp_servers.ahood] entry");
       await setup(["--remove", "codex", "--yes"]);
       expect(readFileSync(config(), "utf-8")).toBe(USER_TOML);
     });
 
-    it("--remove straight from the old setup takes everything out too", async () => {
-      writeOldSetup();
-      await setup(["--remove", "codex", "--yes"]);
-      expect(readFileSync(config(), "utf-8")).toBe(USER_TOML);
-      expect(listFiles(codex()).filter((f) => !f.includes(".ahood-backup-"))).toEqual(["AGENTS.md", "config.toml"]);
-    });
-
-    it("a SKILL.md of the user's own at the old path is left alone, and no longer blocks setup", async () => {
+    it("the old skill, snippet file and AGENTS.md snippet are left byte-identical by setup and by --remove", async () => {
       mkdirSync(join(codex(), "skills", "ahood"), { recursive: true });
-      writeFileSync(join(codex(), "skills", "ahood", "SKILL.md"), "my own skill\n");
+      writeFileSync(join(codex(), "skills", "ahood", "SKILL.md"), OLD_MARKER_FILE);
+      writeFileSync(join(codex(), "ahood-agents-snippet.md"), OLD_MARKER_FILE);
+      writeFileSync(join(codex(), "AGENTS.md"), AGENTS);
       await setup(["codex", "--yes"]);
-      expect(readFileSync(join(codex(), "skills", "ahood", "SKILL.md"), "utf-8")).toBe("my own skill\n");
-      expect(parseToml(readFileSync(config(), "utf-8"))).toEqual(PLUGIN_TOML);
+      await setup(["--remove", "codex", "--yes"]);
+      expect(readFileSync(join(codex(), "skills", "ahood", "SKILL.md"), "utf-8")).toBe(OLD_MARKER_FILE);
+      expect(readFileSync(join(codex(), "ahood-agents-snippet.md"), "utf-8")).toBe(OLD_MARKER_FILE);
+      expect(readFileSync(join(codex(), "AGENTS.md"), "utf-8")).toBe(AGENTS);
     });
   });
 
@@ -375,12 +347,6 @@ describe("ahood setup opencode (ahood#980, ahood#1009: the opencode plugin)", ()
   const entryOf = (text: string) => (parseJsonc(text) as { mcp?: { servers?: Record<string, unknown> } }).mcp?.servers?.ahood;
   const pluginsOf = (text: string) => (parseJsonc(text) as { plugins?: unknown[] }).plugins;
   const PLUGIN = "@ahood/opencode-plugin";
-  /** What setup wrote before ahood#1009: the MCP entry plus one command file per /ahood command. */
-  const writeLegacySetup = (configText: string) => {
-    mkdirSync(commandsDir(), { recursive: true });
-    writeFileSync(join(dir(), "opencode.json"), configText);
-    for (const { file, content } of opencodeCommandFiles()) writeFileSync(join(commandsDir(), file), content);
-  };
   const JSONC = '{\n  // my comment\n  "$schema": "https://opencode.ai/config.json",\n  "theme": "dark",\n}\n';
 
   beforeEach(() => {
@@ -416,27 +382,18 @@ describe("ahood setup opencode (ahood#980, ahood#1009: the opencode plugin)", ()
     expect(readFileSync(join(dir(), "opencode.json"), "utf-8")).toBe(mine);
   });
 
-  it("migrates a setup from before ahood#1009: adds the plugin, deletes the unedited command files without backups", async () => {
-    writeLegacySetup(JSON.stringify({ mcp: { servers: { ahood: { type: "remote", url: MCP_URL, headers: { Authorization: "Bearer {env:AHOOD_TOKEN}" } } } } }));
+  // ahood#995 / #1018 step 6: the command files setup wrote before ahood#1009
+  // are no longer migrated away; setup and --remove leave commands/ alone.
+  it("an old setup's command files are left untouched (the migration was dropped in ahood#995); the plugin is added", async () => {
+    const old = "---\ndescription: old\n---\nold\n<!-- managed by `ahood setup`; remove with `ahood setup --remove opencode` -->\n";
+    mkdirSync(commandsDir(), { recursive: true });
+    writeFileSync(join(dir(), "opencode.json"), "{}\n");
+    writeFileSync(join(commandsDir(), "ahood.md"), old);
     await setup(["opencode", "--yes"]);
     expect(pluginsOf(readFileSync(join(dir(), "opencode.json"), "utf-8"))).toEqual([PLUGIN]);
-    expect(existsSync(commandsDir())).toBe(false);
-    expect(listFiles(dir()).filter((f) => f.startsWith("commands"))).toEqual([]);
-  });
-
-  it("migration: an edited command file is backed up before it goes; a user's own same-named file is left with a note", async () => {
-    writeLegacySetup("{}\n");
-    const [first, second] = opencodeCommandFiles();
-    writeFileSync(join(commandsDir(), first.file), first.content + "my edit\n");
-    writeFileSync(join(commandsDir(), second.file), "---\ndescription: mine\n---\nmine\n");
-    await setup(["opencode", "--yes"]);
-    const left = listFiles(commandsDir());
-    expect(left).toContain(second.file);
-    const [backup] = backups(left);
-    expect(backup.startsWith(`${first.file}.ahood-backup-`)).toBe(true);
-    expect(readFileSync(join(commandsDir(), backup), "utf-8")).toBe(first.content + "my edit\n");
-    expect(left.sort()).toEqual([backup, second.file].sort());
-    expect(io.stdout()).toMatch(/not written by `ahood setup`/);
+    await setup(["--remove", "opencode", "--yes"]);
+    expect(listFiles(commandsDir())).toEqual(["ahood.md"]);
+    expect(readFileSync(join(commandsDir(), "ahood.md"), "utf-8")).toBe(old);
   });
 
   it("--remove leaves opencode.jsonc byte-identical to before setup", async () => {

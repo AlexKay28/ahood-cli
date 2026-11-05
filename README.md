@@ -150,9 +150,9 @@ plugins only, never `main`) and `[plugins."ahood@ahood"] enabled = true` in its 
 `$CODEX_HOME/config.toml`, then runs `codex plugin marketplace upgrade ahood` and
 `codex plugin add ahood@ahood`. Codex re-checks a configured git marketplace's ref when it starts,
 so each release arrives on its own. Re-running setup moves a block pinned to a tag (`v<version>`,
-what setup wrote before) or unpinned over to `release`; `ahood doctor` shows the ref. It also takes out what earlier versions of setup wrote: the
-`[mcp_servers.ahood]` block, `$CODEX_HOME/skills/ahood/SKILL.md` and the AGENTS.md snippet, with
-the usual backups. `ahood setup --remove codex` deletes the block and runs `codex plugin remove` /
+what setup wrote before) or unpinned over to `release`; `ahood doctor` shows the ref. Setup no longer cleans up what it wrote outside its block before
+the plugin (`$CODEX_HOME/skills/ahood/SKILL.md`, the AGENTS.md snippet, opencode's
+`commands/ahood*.md`); delete those by hand if you still have them. `ahood setup --remove codex` deletes the block and runs `codex plugin remove` /
 `codex plugin marketplace remove`. By hand:
 
 ```
@@ -191,7 +191,7 @@ checks `@ahood/opencode-plugin@<CLI version>` is published and warns if it is no
 ## Why ahood
 
 - **One command to publish, one to install.** `ahood skill publish owner/skill@1.0.0 --path ./my-skill` uploads a folder containing a `SKILL.md`; `ahood skill add owner/skill` installs it into `.claude/skills/`. No registry account setup beyond `ahood login`.
-- **Real versioning, not just a snapshot.** Every publish is a semver version with its own changelog (`ahood skill versions`), and installs are pinned by checksum in a lockfile (`.claude/skills.lock.json`) so `ahood skill update` only ever moves forward on purpose.
+- **Real versioning, not just a snapshot.** Every publish is a semver version with its own changelog (`ahood skill versions`), and installs are pinned by checksum in a lockfile (`.claude/skills.lock.json`) so `ahood sync` only ever moves forward on purpose, and only with your yes.
 - **Mistakes are recoverable.** Published the wrong version? `ahood skill unpublish owner/skill@1.2.3` yanks just that one — existing installs keep working, new ones are warned off it — without deleting the skill's whole history.
 - **Public or private, your call.** `ahood skill edit owner/skill --visibility private` scopes a skill to just you; `ahood skill list` shows both.
 - **Scriptable by design.** Every read command and most write commands support `--json`; `ahood skill publish --json` emits a single structured result object instead of progress text, and exit codes (below) are stable enough to branch on in a script.
@@ -202,14 +202,13 @@ checks `@ahood/opencode-plugin@<CLI version>` is published and warns if it is no
 | Variable | Purpose |
 | --- | --- |
 | `AHOOD_TOKEN` | A personal API token (create one with `ahood token create <name>` after logging in once). When set, every command uses it instead of the stored browser-login credentials — the standard way to authenticate in CI or any non-interactive environment. The same name is what every harness's ahood MCP config reads. |
-| `AHOOD_API_TOKEN` | **Deprecated** old name of `AHOOD_TOKEN`. The CLI still reads it, after `AHOOD_TOKEN`, for one release cycle and prints a one-line note to stderr when it is the only one set. Harness configs no longer read it. |
 | `AHOOD_API_URL` | Overrides the registry endpoint (default: `https://www.ahood.dev`). Must be `https://`, except for `localhost`/`127.0.0.1` or a `.test`/`.invalid`/`.example`/`.localhost` host, which may use plain `http://` for local development. |
 | `AHOOD_INSTALLED_FILE` | Overrides where the user-level install record lives (default: `~/.ahood/installed.json`). |
 | `XDG_CONFIG_HOME` | If set, browser-login credentials are stored under `$XDG_CONFIG_HOME/ahood/credentials.json` instead of the default `~/.config/ahood/credentials.json`. |
 
 ### Token
 
-The CLI looks for a token in this order: `$AHOOD_TOKEN`, then the deprecated `$AHOOD_API_TOKEN`, then the credentials `ahood login` stored (`~/.config/ahood/credentials.json`, mode 0600). `ahood doctor` says which one is in use, by name only.
+The CLI looks for a token in this order: `$AHOOD_TOKEN`, then the credentials `ahood login` stored (`~/.config/ahood/credentials.json`, mode 0600). `ahood doctor` says which one is in use, by name only.
 
 The agent harnesses read it through their MCP config, and `ahood setup` asks, per harness, whether to store the token there for you:
 
@@ -221,7 +220,7 @@ The agent harnesses read it through their MCP config, and `ahood setup` asks, pe
 
 `--store-token` answers yes up front and `--no-store-token` no; `--yes` alone never stores a secret. A file setup creates for the token is mode 0600. An existing file other users can read is tightened to 0600 only on a separate yes; without it the token is not stored there. The token is never printed, backups setup makes have it redacted, and `ahood setup --remove <harness>` takes it out together with the rest of ahood's entries.
 
-**Migrating from `AHOOD_API_TOKEN`:** rename the variable to `AHOOD_TOKEN` where you export it, or run `ahood setup` and let it store the token. The Claude Code plugin cannot fall back between the two names: Claude Code's `${VAR:-default}` does not nest, so `${AHOOD_TOKEN:-${AHOOD_API_TOKEN}}` would send a broken header.
+**`AHOOD_API_TOKEN` is no longer read** (removed after its one-release deprecation, ahood#995): rename it to `AHOOD_TOKEN` where you export it, or run `ahood setup` and let it store the token.
 
 Paths `ahood` reads and writes in your project. The lockfile is meant to be committed, same as `package-lock.json`:
 
@@ -283,13 +282,9 @@ Published alice/my-skill@1.0.0 (published)
 <summary><strong>Preview and apply updates safely</strong></summary>
 
 ```
-$ ahood skill update --dry-run
-SKILL                 CURRENT  LATEST  STATUS
-alice/pdf-tools        1.4.0    1.5.0   update available
-bob/pdf-form-filler     2.0.0    2.0.0   up to date
-
-$ ahood skill update
-Updated alice/pdf-tools to 1.5.0.
+$ ahood status          # every install on this machine: installed vs latest
+$ ahood sync --dry-run  # the unified diff for each update; nothing is changed
+$ ahood sync            # asks y/N for each update before applying it
 ```
 </details>
 
@@ -372,9 +367,9 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 
 **Migration plan for a strict `ahood skill`.** A future major version will make `ahood skill <verb>` skills-only by default, matching `agent` and `mcp`. Until then: (1) this release adds the strict groups and `--kind`, and labels `ahood skill` as legacy in `--help`; (2) a following minor release prints a stderr deprecation note when an `ahood skill` command actually touches a non-skill entry (stdout and `--json` unchanged); (3) the major release flips the default, keeping `ahood skill <verb> --kind all` as the explicit cross-kind escape hatch. Scripts that want today's behavior forever can pass `--kind all` now.
 
-**`ahood skill update`/`ahood skill outdated` are deprecated (ahood#990)** in favor of the top-level `ahood sync`/`ahood status`, which cover every project on the machine instead of just the current one's lockfile -- both keep working exactly as before, with a one-line stderr note.
+**`ahood skill update`/`ahood skill outdated` were removed (ahood#995)** after their deprecation in ahood#990: use the top-level `ahood sync`/`ahood status`, which cover every project on the machine instead of just the current one's lockfile. The kind-scoped `ahood agent|mcp|doc|project|loop update`/`outdated` stay.
 
-**`ahood mcp <verb>` manages MCP server manifests** (`server.json`) in the registry. The local stdio MCP server that bare `ahood mcp` / `ahood mcp serve` used to start was removed in 0.17.0: both now print one line pointing at `npx @ahood/cli setup` and exit `2`. The ahood registry's own MCP server (the hosted `https://www.ahood.dev/api/mcp`) comes with the ahood plugin.
+**`ahood mcp <verb>` manages MCP server manifests** (`server.json`) in the registry. The local stdio MCP server that bare `ahood mcp` / `ahood mcp serve` used to start was removed in 0.17.0; bare `ahood mcp` now prints the mcp command list, like every other noun. The ahood registry's own MCP server (the hosted `https://www.ahood.dev/api/mcp`) comes with the ahood plugin.
 
 ## Keeping installs current: status, sync, pin, review
 
@@ -422,8 +417,6 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood skill diff <owner>/<skill> <versionA> <versionB> [--json]` | Show what changed between two published versions -- a SKILL.md diff plus an added/removed/changed file summary. |
 | `ahood skill list [--json]` | List your own skills, public and private. |
 | `ahood skill add <owner>/<skill>[@version]` | Install a skill into .claude/skills/, pinned in the lockfile. |
-| `ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]` | Deprecated; prefer `ahood sync`, which moves the same lockfile pin(s) forward across every project on this machine. |
-| `ahood skill outdated [<owner>/<skill> ...] [--json]` | Deprecated; prefer `ahood status`, which does the same read-only staleness check across every project on this machine. |
 | `ahood skill remove <owner>/<skill> [--yes]` | Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed). |
 | `ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a skill you own, changing only the flags you pass. |
 | `ahood skill unpublish <owner>/<skill>[@version] [--yes]` | Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed). |
