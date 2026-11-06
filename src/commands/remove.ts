@@ -1,7 +1,11 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, rmdirSync, rmSync } from "node:fs";
+import { dirname } from "node:path";
 import { confirm } from "../confirm.js";
 import { readLockfile, removeLockfileEntry, withLock, writeJsonFileAtomic, type LockEntry } from "../lockfile.js";
-import { LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, docPath, pinnedFilePath, MCP_CONFIG_PATH } from "../spec.js";
+import {
+  LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, docPath, pinnedFilePath, MCP_CONFIG_PATH,
+  SKILLS_ROOT, AGENTS_ROOT, DOCS_ROOT, LOOPS_ROOT,
+} from "../spec.js";
 import { readMcpConfig, matchesMcpConfigHash } from "./add.js";
 import { UsageError } from "../usage-error.js";
 import { forgetInstallOrWarn } from "../installed.js";
@@ -43,6 +47,18 @@ async function assertInstalledKind(scope: KindScope, owner: string, skill: strin
 }
 
 const USAGE = "Usage: ahood skill remove <owner>/<skill> [--yes]";
+
+// Only a kind's own root (.claude/skills, agents, docs, loops) -- never
+// .claude itself -- and rmdirSync refuses a non-empty directory anyway.
+const KIND_ROOTS = new Set([SKILLS_ROOT, AGENTS_ROOT, DOCS_ROOT, LOOPS_ROOT]);
+function removeIfEmptyKindRoot(path: string): void {
+  if (!KIND_ROOTS.has(path)) return;
+  try {
+    rmdirSync(path);
+  } catch {
+    // not empty, already gone, or not ours to remove -- leave it
+  }
+}
 
 export async function remove(args: string[], scope?: KindScope): Promise<void> {
   const spec = args[0];
@@ -114,6 +130,9 @@ export async function remove(args: string[], scope?: KindScope): Promise<void> {
   if (dirExisted) rmSync(dir, { recursive: true, force: true });
   if (agentExisted) rmSync(agentFile, { force: true });
   if (pinnedFileExisted) rmSync(pinnedFile, { force: true });
+  if (dirExisted) removeIfEmptyKindRoot(dirname(dir));
+  if (agentExisted) removeIfEmptyKindRoot(dirname(agentFile));
+  if (pinnedFileExisted) removeIfEmptyKindRoot(dirname(pinnedFile));
 
   // An mcp-kind install has no directory or agent file on disk -- its only
   // footprint is the lockfile entry (cleared below, once this block has run)
