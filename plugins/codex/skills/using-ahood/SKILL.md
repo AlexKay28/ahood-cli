@@ -13,10 +13,10 @@ with versioning, private session notes ("snaps") and owner-approved self-evoluti
 
 **One front door.** `npx @ahood/cli@latest setup` logs you in, detects the harness (Claude Code,
 Codex, opencode), and -- with your consent -- wires up the plugin or MCP server, this skill,
-and the token -- after that, the user just types `/ahood`. Everything below is also reachable
+and the token -- after that, the user just says `ahood`. Everything below is also reachable
 directly: the **ahood MCP tools** (the hosted registry endpoint, needs `AHOOD_TOKEN` in the
 environment; `AHOOD_API_TOKEN` is a deprecated fallback for one release) and the **`ahood`
-CLI** (`npm i -g @ahood/cli`, or `npx -y @ahood/cli`), which `/ahood` and its sibling commands
+CLI** (`npm i -g @ahood/cli`, or `npx -y @ahood/cli`), which `ahood` and its sibling commands
 call.
 
 ## Find and install
@@ -61,9 +61,9 @@ snap goes.
 - `ahood status --json` shows installed versus latest versions, pins, and pending evolution
   proposals on artifacts the user owns.
 - **Never sync on your own.** Updating an installed skill changes how the agent behaves, so it
-  is the user's call: suggest `/ahood sync`, which shows each diff and asks first. Do not run
+  is the user's call: suggest `ahood sync`, which shows each diff and asks first. Do not run
   `ahood sync --yes` unless the user approved that exact update in this conversation.
-- Evolution proposals are approved or rejected only by the user: suggest `/ahood review`.
+- Evolution proposals are approved or rejected only by the user: suggest `ahood review`.
   `ahood review --json` lists them, each with its diff; `ahood review show <id>` prints one
   proposal and its unified diff.
 - `ahood stats --json` shows the user's own artifacts' downloads and stars, totals and recent
@@ -71,10 +71,10 @@ snap goes.
 
 ## What you can do
 
-The user types `/ahood` for a hub of their installs plus every command. Point them at the one that fits:
-`/ahood-find` or `/ahood-trending` to discover, `/ahood-try` to use once without installing, `/ahood-install`,
-`/ahood-prompt` and `/ahood-loop` to use a prompt or loop, `/ahood-project` for this repo's guide, `/ahood-star`,
-`/ahood-publish`, `/ahood-stats`, and `/ahood-sync`, `/ahood-review`, `/ahood-snap` (each asks before it changes anything).
+The user says `ahood` for a hub of their installs plus every command. Point them at the one that fits:
+`ahood find` or `ahood trending` to discover, `ahood try` to use once without installing, `ahood install`,
+`ahood prompt` and `ahood loop` to use a prompt or loop, `ahood project` for this repo's guide, `ahood star`,
+`ahood publish`, `ahood stats`, and `ahood sync`, `ahood review`, `ahood snap` (each asks before it changes anything).
 
 If a command reports that the user is not logged in, tell them to run `ahood login` in a
 terminal (it opens a browser), or to set `AHOOD_TOKEN` for headless use, and stop.

@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AHOOD_COMMANDS } from "../src/setup/templates/ahood-commands.js";
-import { CODEX_MARKETPLACE_NAME, CODEX_PLUGIN_ID } from "../src/setup/templates/codex.js";
+import { CODEX_MARKETPLACE_NAME, CODEX_PLUGIN_ID, codexInvocations } from "../src/setup/templates/codex.js";
 import { CODEX_MARKETPLACE_FILE, CODEX_PLUGIN_DIR, codexPluginFiles } from "../src/setup/templates/codex-plugin.js";
 import { CLI_VERSION } from "../src/version.js";
 
@@ -84,9 +84,34 @@ describe("the plugin's skills", () => {
 
   it("the `ahood` skill carries every shared command body verbatim, and no setup-ownership marker", () => {
     const skill = readFileSync(join(skillsDir, "ahood", "SKILL.md"), "utf-8");
-    for (const c of AHOOD_COMMANDS) expect(skill).toContain(c.body);
+    for (const c of AHOOD_COMMANDS) expect(skill).toContain(codexInvocations(c.body));
     // The plugin is Codex's to install and remove, not `ahood setup`'s.
     expect(skill).not.toContain("ahood setup --remove codex");
+  });
+
+  it("neither Codex skill tells the user to type a slash command (Codex has none), while the Claude plugin's still does", () => {
+    const slashAhood = /(^|[\s`(])\/ahood\b/m;
+    for (const name of ["ahood", "using-ahood"]) {
+      expect(readFileSync(join(skillsDir, name, "SKILL.md"), "utf-8"), name).not.toMatch(slashAhood);
+    }
+    const claudeCopy = readFileSync(join(ROOT, "plugins", "ahood", "skills", "using-ahood", "SKILL.md"), "utf-8");
+    expect(claudeCopy).toMatch(slashAhood);
+  });
+});
+
+describe("codexInvocations()", () => {
+  it("rewrites slash-command references to Codex phrasing", () => {
+    expect(codexInvocations("run `/ahood-find <query>` then `/ahood`")).toBe("run `ahood find <query>` then `ahood`");
+    expect(codexInvocations("suggest `/ahood sync`; every /ahood command (/ahood-snap)")).toBe(
+      "suggest `ahood sync`; every ahood command (ahood snap)",
+    );
+    expect(codexInvocations("/ahood-try at line start")).toBe("ahood try at line start");
+    expect(codexInvocations("the user just types `/ahood`")).toBe("the user just says `ahood`");
+  });
+
+  it("leaves URLs and paths alone", () => {
+    const text = "github.com/AlexKay28/ahood-cli and https://www.ahood.dev/api/mcp and ./ahood";
+    expect(codexInvocations(text)).toBe(text);
   });
 });
 

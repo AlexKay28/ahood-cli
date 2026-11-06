@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AHOOD_COMMANDS, AHOOD_SNAP_HOOK_ENV, AHOOD_SNAP_PROMPT, type AhoodCommand } from "../src/setup/templates/ahood-commands.js";
-import { codexPluginSkill, codexSkill } from "../src/setup/templates/codex.js";
+import { codexInvocations, codexPluginSkill, codexSkill } from "../src/setup/templates/codex.js";
 import { opencodeCommandFiles } from "../src/setup/templates/opencode.js";
 import { claudePluginCommandFiles, CLAUDE_PLUGIN_DIR } from "../src/setup/templates/claude-plugin.js";
 import { COMMANDS as OPENCODE_PLUGIN_COMMANDS } from "../packages/opencode-plugin/src/generated.js";
@@ -46,9 +46,11 @@ describe("AHOOD_COMMANDS is the single source for every harness's /ahood wording
 
   for (const c of AHOOD_COMMANDS) {
     describe(c.name, () => {
-      it("the Codex skill (setup's file and the plugin's) contains this command's body verbatim", () => {
-        expect(codex).toContain(c.body);
-        expect(codexPlugin).toContain(c.body);
+      it("the Codex skill (setup's file and the plugin's) contains this command's body verbatim, in Codex phrasing", () => {
+        // Codex has no slash commands: the body is reused verbatim, only its
+        // `/ahood-<verb>` references are rewritten to `ahood <verb>`.
+        expect(codex).toContain(codexInvocations(c.body));
+        expect(codexPlugin).toContain(codexInvocations(c.body));
       });
 
       it("the opencode command file contains this command's body verbatim", () => {
@@ -110,10 +112,19 @@ describe("every rendering runs the CLI the plugin was built with (ahood#1018)", 
     ),
   };
 
+  // Codex has no slash commands, so its skill names a sibling section the way
+  // the user says it (`ahood sync`, codexInvocations()) -- an invocation, not
+  // a CLI call. Those are masked before the bare-call check; the bodies they
+  // come from are checked untransformed below.
+  const codexVerbs = AHOOD_COMMANDS.filter((c) => c.name !== "ahood").map((c) => c.name.replace("ahood-", ""));
+  const invocation = new RegExp(`\`ahood (${codexVerbs.join("|")})\\b`, "g");
+  const maskInvocations = (file: string, text: string) =>
+    file.startsWith("plugins/codex/") ? text.replace(invocation, "`<invocation>") : text;
+
   for (const [file, text] of Object.entries(onDisk)) {
     it(`${file} references @ahood/cli@${CLI_VERSION} and never a bare \`ahood <verb>\``, () => {
       expect(text).toContain(pinned);
-      expect(text).not.toMatch(bareCall);
+      expect(maskInvocations(file, text)).not.toMatch(bareCall);
     });
   }
 
