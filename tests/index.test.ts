@@ -328,3 +328,21 @@ describe("dispatchSnap (in-process)", () => {
     spy.mockRestore();
   });
 });
+
+describe("authHint (main()'s follow-up line on an auth failure)", () => {
+  it("drops the AHOOD_TOKEN suggestion for the token group, which refuses API tokens by design", async () => {
+    const { authHint } = await import("../src/index.js");
+    const { ApiError } = await import("../src/http.js");
+    expect(authHint("token", new ApiError(401, "Unauthorized"))).toBe("Run `ahood login` first.");
+    expect(authHint("token", new ApiError(403, "requires a logged-in browser session"))).toBe("Run `ahood login` first.");
+  });
+
+  it("keeps the AHOOD_TOKEN suggestion elsewhere, the scope hint for scope 403s, and nothing for non-auth errors", async () => {
+    const { authHint } = await import("../src/index.js");
+    const { ApiError } = await import("../src/http.js");
+    expect(authHint("whoami", new ApiError(401, "Unauthorized"))).toBe("Run `ahood login` first (or set AHOOD_TOKEN).");
+    expect(authHint("status", new ApiError(403, "This token's scopes do not include 'read'"))).toMatch(/missing a scope/);
+    expect(authHint("token", new ApiError(404, "Not found"))).toBeNull();
+    expect(authHint("token", new Error("boom"))).toBeNull();
+  });
+});
