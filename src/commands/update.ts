@@ -146,7 +146,8 @@ export async function update(args: string[], scope?: KindScope): Promise<void> {
   }
   const noneMessage = kind ? `No installed ${KINDS[kind].plural} to update.` : "No installed skills to update.";
   if (skillKeys.length === 0) {
-    console.log(noneMessage);
+    // --json promises a machine-readable array; an empty set is still one.
+    console.log(jsonOutput ? JSON.stringify([]) : noneMessage);
     return;
   }
 

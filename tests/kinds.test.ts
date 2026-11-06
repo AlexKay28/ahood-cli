@@ -351,6 +351,13 @@ describe("kind-scoped registry verbs", () => {
       expect(JSON.parse(log.mock.calls[0][0] as string).map((p: { skill: string }) => p.skill)).toEqual(["alice/legacy"]);
     });
 
+    it("`agent outdated --json` with an empty lockfile prints an empty JSON array, not prose", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await dispatchAgent(["outdated", "--json"]);
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(log.mock.calls[0][0] as string)).toEqual([]);
+    });
+
     it("legacy no-arg `skill outdated` still covers every pin", async () => {
       await project();
       const log = vi.spyOn(console, "log").mockImplementation(() => {});
