@@ -26,13 +26,12 @@ By hand:
 
 1. Mint a personal access token at [ahood.dev/settings/tokens](https://www.ahood.dev/settings/tokens).
 2. Set it as `AHOOD_TOKEN` in your environment (e.g. in your shell profile, or `env` in
-   `~/.claude/settings.json`). **Renamed in 2.0.1:** earlier versions read `AHOOD_API_TOKEN`;
-   rename it -- Claude Code has no fallback between two variable names.
+   `~/.claude/settings.json`).
 3. Install this plugin. Claude Code will connect to `https://www.ahood.dev/api/mcp` using
    that token.
-4. For the `/ahood` commands, install the CLI (`npm i -g @ahood/cli`) and run `ahood login`
-   once (or set `AHOOD_TOKEN` for headless use). Without a global install the commands fall
-   back to `npx -y @ahood/cli`.
+4. The `/ahood` commands run the CLI as `npx -y @ahood/cli@<version>`, pinned to this plugin's
+   CLI release, so no global install is needed. The CLI uses `AHOOD_TOKEN` when it is set;
+   otherwise run `npx @ahood/cli login` once.
 
 A token is required for every tool, including read-only ones (`search_skills`, `get_skill`,
 etc.) -- a request to `https://www.ahood.dev/api/mcp` with no token is rejected outright. A
