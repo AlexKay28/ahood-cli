@@ -3,6 +3,7 @@ import { apiJson } from "../http.js";
 import { getApiUrl } from "../config.js";
 import { parseOwnerSkill } from "../spec.js";
 import { UsageError } from "../usage-error.js";
+import { unrecognizedArgs } from "../flags.js";
 import { assertKind, ensureRemoteKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill view <owner>/<skill> [--json] [--web]";
@@ -60,7 +61,11 @@ export async function viewSkill(owner: string, skill: string): Promise<SkillDeta
 export async function view(args: string[], scope?: KindScope): Promise<void> {
   const jsonOutput = args.includes("--json");
   const web = args.includes("--web");
-  const spec = args.find((a) => !a.startsWith("--"));
+  const leftovers = unrecognizedArgs(args, ["--json", "--web"], []);
+  const unknownFlag = leftovers.find((a) => a.startsWith("-"));
+  if (unknownFlag) throw new UsageError(`Unknown argument: ${unknownFlag}\n${USAGE}`);
+  if (leftovers.length > 1) throw new UsageError(`Unexpected extra argument: ${leftovers[1]}\n${USAGE}`);
+  const spec = leftovers[0];
   if (!spec) throw new UsageError(USAGE);
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
 
