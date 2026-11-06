@@ -8,7 +8,8 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { canonicalBody, renderPluginSkill, targets, CANONICAL_PATH } from "../scripts/sync-skill.mjs";
+import { canonicalBody, renderCodexSelfSkill, renderPluginSkill, targets, CANONICAL_PATH } from "../scripts/sync-skill.mjs";
+import { codexInvocations } from "../src/setup/templates/codex.js";
 
 const ROOT = join(import.meta.dirname, "..");
 
@@ -29,6 +30,13 @@ describe("the self-skill's generated files match scripts/sync-skill.mjs (run `np
 
   it("so is the Codex plugin's copy, plugins/codex/skills/using-ahood/SKILL.md (ahood#1009)", () => {
     expect(targets().map((t) => t.path)).toContain("plugins/codex/skills/using-ahood/SKILL.md");
+  });
+
+  it("the Claude copy renders as-is and the Codex copy through Codex phrasing (no slash commands there)", () => {
+    const byPath = new Map(targets().map((t) => [t.path, t.render]));
+    expect(byPath.get("plugins/ahood/skills/using-ahood/SKILL.md")).toBe(renderPluginSkill);
+    expect(byPath.get("plugins/codex/skills/using-ahood/SKILL.md")).toBe(renderCodexSelfSkill);
+    expect(renderCodexSelfSkill()).toBe(codexInvocations(renderPluginSkill()));
   });
 });
 

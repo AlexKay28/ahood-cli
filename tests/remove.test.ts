@@ -116,6 +116,20 @@ describe("remove", () => {
     expect(existsSync(join(dir, skillDir("alice", "other")))).toBe(true);
   });
 
+  it("removes a kind's root directory once its last install is gone, but never .claude itself", async () => {
+    mkdirSync(join(dir, skillDir("alice", "demo")), { recursive: true });
+    mkdirSync(join(dir, ".claude", "agents"), { recursive: true });
+    writeFileSync(join(dir, agentPath("alice", "reviewer")), "# reviewer\n");
+
+    await remove(["alice/demo", "--yes"]);
+    expect(existsSync(join(dir, ".claude", "skills"))).toBe(false);
+    expect(existsSync(join(dir, ".claude", "agents"))).toBe(true);
+
+    await remove(["alice/reviewer", "--yes"]);
+    expect(existsSync(join(dir, ".claude", "agents"))).toBe(false);
+    expect(existsSync(join(dir, ".claude"))).toBe(true);
+  });
+
   it("reports failure instead of a false 'Removed' when nothing was installed, without prompting", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     // No stdio stub -- if remove() prompted here, reading from the real

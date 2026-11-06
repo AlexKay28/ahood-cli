@@ -50,6 +50,11 @@ describe("the committed opencode plugin files", () => {
     expect(manifest.dependencies).toBeUndefined();
   });
 
+  it("the hand-written README's command table lists every command the plugin ships", () => {
+    const readme = readFileSync(join(PLUGIN, "README.md"), "utf-8");
+    for (const c of AHOOD_COMMANDS) expect(readme, c.name).toMatch(new RegExp(`\\| \`/${c.name}[\` ]`));
+  });
+
   it("the build emitted dist/server.js (npm run build builds the plugin too)", () => {
     expect(existsSync(join(PLUGIN, "dist", "server.js"))).toBe(true);
   });

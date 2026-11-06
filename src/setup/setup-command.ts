@@ -92,8 +92,9 @@ type TokenDecision = { token: string | null; mode?: number };
  * mode. Consent is explicit: --store-token, or a yes to the question; --yes
  * alone does not store a secret. With neither, a token setup stored earlier
  * is kept (refreshed to the current one) rather than silently taken out.
- * A file we create is 0600; an existing file readable by others is tightened
- * only on a separate yes, and the token is not stored in it otherwise.
+ * A file we create is 0600. An existing file readable by others is tightened
+ * to 0600 when --store-token was passed (the flag is the consent), or on a
+ * separate yes; otherwise the token is not stored in it.
  */
 async function decideToken(harness: Harness, parsed: Parsed): Promise<TokenDecision> {
   const store = harness.tokenStore;
@@ -123,6 +124,10 @@ async function decideToken(harness: Harness, parsed: Parsed): Promise<TokenDecis
   const mode = fileMode(file);
   if (mode === null) return { token, mode: 0o600 };
   if (!loose(mode)) return { token };
+  if (parsed.storeToken === true) {
+    console.log(`${harness.label}: ${displayPath(file)} was readable by other users (mode ${octal(mode)}); --store-token makes it user-only (chmod 600) to store the token.`);
+    return { token, mode: 0o600 };
+  }
   const why = `${displayPath(file)} is readable by other users (mode ${octal(mode)})`;
   if (canAsk && (await confirmYesNo(`${why}. Make it user-only (chmod 600) so the token stays private? [y/N] `))) {
     return { token, mode: 0o600 };

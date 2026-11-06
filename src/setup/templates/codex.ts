@@ -121,10 +121,28 @@ export function codexPluginSkill(): string {
   );
 }
 
+/**
+ * Codex has no slash commands (only Claude Code and opencode do): there the
+ * user just says "ahood <verb>". Rewrites the slash-command references the
+ * shared command bodies and self-skill carry into that phrasing --
+ * `/ahood-find <q>` -> `ahood find <q>`, `/ahood` -> `ahood`, "types `/ahood`"
+ * -> "says `ahood`". Only a `/ahood` at line start or after whitespace, a
+ * backtick or `(` counts, so URLs and paths (`AlexKay28/ahood-cli`,
+ * `ahood.dev/...`) stay as they are. The one transform both Codex SKILL.md
+ * copies go through (scripts/sync-skill.mjs imports it from dist/).
+ */
+export function codexInvocations(text: string): string {
+  return text
+    .replace(/\btypes (`?)\/ahood\b/g, "says $1/ahood")
+    .replace(/(^|[\s`(])\/ahood(?:-([a-z]+))?\b/gm, (_m, pre: string, verb: string | undefined) =>
+      verb ? `${pre}ahood ${verb}` : `${pre}ahood`,
+    );
+}
+
 function renderCodexSkill(note: string): string {
   const sections = AHOOD_COMMANDS.map((c) => {
     const heading = c.name === "ahood" ? "`ahood` (no argument): hub" : `\`${c.name.replace("ahood-", "ahood ")}\``;
-    return `## ${heading}\n\n${c.body}`;
+    return `## ${heading}\n\n${codexInvocations(c.body)}`;
   });
   return [
     "---",

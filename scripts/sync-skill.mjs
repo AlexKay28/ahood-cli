@@ -18,11 +18,27 @@
 // Usage:
 //   node scripts/sync-skill.mjs          # rewrite the generated files in place
 //   node scripts/sync-skill.mjs --check  # exit 1 if any is stale (no write)
+//
+// The Codex copy goes through codexInvocations() (Codex has no slash
+// commands), imported from the compiled dist/ the way sync-plugin.mjs imports
+// its templates; run as a script, this builds first so dist/ is never stale.
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const isMain = import.meta.url === `file://${process.argv[1]}`;
+
+if (isMain) {
+  const tscBin = path.join(rootDir, "node_modules", ".bin", "tsc");
+  execFileSync(existsSync(tscBin) ? tscBin : "npx", existsSync(tscBin) ? ["-p", "tsconfig.json"] : ["tsc", "-p", "tsconfig.json"], {
+    cwd: rootDir,
+    stdio: "inherit",
+  });
+}
+
+const { codexInvocations } = await import(path.join(rootDir, "dist", "setup", "templates", "codex.js"));
 
 export const CANONICAL_PATH = "src/skill/using-ahood.md";
 
@@ -48,12 +64,17 @@ export function renderPluginSkill() {
   return `${frontMatter("using-ahood", PLUGIN_SKILL_DESCRIPTION)}\n\n${GENERATED_NOTE}\n\n${canonicalBody()}`;
 }
 
+/** The Codex plugin's copy: the same skill, with Codex phrasing (`ahood find`, not `/ahood-find`). */
+export function renderCodexSelfSkill() {
+  return codexInvocations(renderPluginSkill());
+}
+
 // A target whose directory is missing (a trimmed checkout) is skipped rather
 // than created from nothing.
 export function targets() {
   const all = [
     { path: "plugins/ahood/skills/using-ahood/SKILL.md", render: renderPluginSkill },
-    { path: "plugins/codex/skills/using-ahood/SKILL.md", render: renderPluginSkill },
+    { path: "plugins/codex/skills/using-ahood/SKILL.md", render: renderCodexSelfSkill },
   ];
   return all.filter((t) => existsSync(path.join(rootDir, path.dirname(t.path))));
 }
@@ -80,4 +101,4 @@ function main() {
   console.log(stale.length === 0 ? "Self-skill files already up to date." : `Updated: ${stale.join(", ")}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (isMain) main();

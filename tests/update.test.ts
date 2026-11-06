@@ -61,6 +61,13 @@ describe("update", () => {
     expect(logSpy).toHaveBeenCalledWith("No installed skills to update.");
   });
 
+  it("prints an empty JSON array (and nothing else) for --dry-run --json when the lockfile is empty", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await update(["--dry-run", "--json"]);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(logSpy.mock.calls[0][0]))).toEqual([]);
+  });
+
   it("continues updating remaining skills after one fails, and exits non-zero", async () => {
     const goodArchive = await tarGz({ "SKILL.md": "# good\n" });
     const goodChecksum = sha256(goodArchive);

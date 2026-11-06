@@ -461,6 +461,20 @@ async function dispatchSnap(args: string[]): Promise<void> {
   await handler(rest);
 }
 
+// The follow-up line main() prints under an auth failure, or null for none.
+export function authHint(command: string, error: unknown): string | null {
+  if (!(error instanceof ApiError) || (error.status !== 401 && error.status !== 403)) return null;
+  if (error.status === 403 && /scopes do not include/.test(error.message)) {
+    // ahood#978: a narrowed personal token. Logging in again mints a
+    // full-scope CLI token; a CI token needs re-minting with that scope.
+    return "Your token is missing a scope this command needs -- run `ahood login` again, or create a token with that scope (ahood token create).";
+  }
+  // The token endpoints require a logged-in browser session and refuse API
+  // tokens on purpose, so AHOOD_TOKEN is no way in for them.
+  if (command === "token") return "Run `ahood login` first.";
+  return "Run `ahood login` first (or set AHOOD_TOKEN).";
+}
+
 async function main() {
   const [command, ...args] = process.argv.slice(2);
 
@@ -542,13 +556,8 @@ async function main() {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);
-    if (error instanceof ApiError && error.status === 403 && /scopes do not include/.test(message)) {
-      // ahood#978: a narrowed personal token. Logging in again mints a
-      // full-scope CLI token; a CI token needs re-minting with that scope.
-      console.error("Your token is missing a scope this command needs -- run `ahood login` again, or create a token with that scope (ahood token create).");
-    } else if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-      console.error("Run `ahood login` first (or set AHOOD_TOKEN).");
-    }
+    const hint = authHint(resolvedCommand, error);
+    if (hint) console.error(hint);
     process.exit(exitCodeFor(error));
   }
 }

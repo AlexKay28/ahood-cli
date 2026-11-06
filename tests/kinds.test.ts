@@ -351,6 +351,13 @@ describe("kind-scoped registry verbs", () => {
       expect(JSON.parse(log.mock.calls[0][0] as string).map((p: { skill: string }) => p.skill)).toEqual(["alice/legacy"]);
     });
 
+    it("`agent outdated --json` with an empty lockfile prints an empty JSON array, not prose", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await dispatchAgent(["outdated", "--json"]);
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(log.mock.calls[0][0] as string)).toEqual([]);
+    });
+
     it("legacy no-arg `skill outdated` still covers every pin", async () => {
       await project();
       const log = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -376,6 +383,23 @@ describe("kind-scoped registry verbs", () => {
       fakeRegistry({});
       await dispatchAgent(["update"]);
       expect(log).toHaveBeenCalledWith("No installed agents to update.");
+    });
+
+    it("`agent outdated` says 'to check', not 'to update', when the project has none", async () => {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      fakeRegistry({});
+      await dispatchAgent(["outdated"]);
+      expect(log).toHaveBeenCalledWith("No installed agents to check.");
+    });
+
+    it("`agent outdated` heads its table with the kind's label; legacy `skill outdated` keeps SKILL", async () => {
+      await project();
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await dispatchAgent(["outdated"]);
+      expect(String(log.mock.calls[0][0])).toMatch(/^AGENT\s+CURRENT\s+LATEST\s+STATUS/);
+      log.mockClear();
+      await dispatchSkill(["outdated"]);
+      expect(String(log.mock.calls[0][0])).toMatch(/^SKILL\s+CURRENT\s+LATEST\s+STATUS/);
     });
   });
 

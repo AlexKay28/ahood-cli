@@ -180,14 +180,23 @@ describe("Codex: the token in config.toml (ahood#990, decision B)", () => {
     expect(filesHolding(join(env.home, ".codex"), TOKEN)).toEqual([]);
   });
 
-  it("an existing world-readable config: non-interactive never chmods it and does not store the token there", async () => {
+  it("an existing world-readable config: --store-token tightens it to 0600 and stores the token (the flag is the consent)", async () => {
     mkdirSync(join(env.home, ".codex"), { recursive: true });
     writeFileSync(codexConfig(), 'model = "o3"\n');
     chmodSync(codexConfig(), 0o644);
     await setup(["codex", "--yes", "--store-token"]);
+    expect(mode(codexConfig())).toBe(0o600);
+    expect(tomlEntry()?.http_headers).toEqual({ Authorization: `Bearer ${TOKEN}` });
+    expect(io.stdout()).toContain("was readable by other users (mode 0644); --store-token makes it user-only (chmod 600)");
+  });
+
+  it("an existing world-readable config with a stored token: non-interactive, without the flag, never chmods it and does not store the token there", async () => {
+    await setup(["codex", "--yes", "--store-token"]);
+    chmodSync(codexConfig(), 0o644);
+    await setup(["codex", "--yes"]);
     expect(mode(codexConfig())).toBe(0o644);
-    expect(filesHolding(join(env.home, ".codex"), TOKEN)).toEqual([]);
-    expect(io.stderr()).toContain("readable by other users (mode 0644)");
+    expect(tomlEntry()).toBeUndefined();
+    expect(io.stderr()).toContain("readable by other users (mode 0644); not storing the token there");
   });
 
   it("an existing world-readable config: interactive, tightened to 0600 only on a separate yes", async () => {
@@ -273,6 +282,28 @@ describe("opencode: the token in opencode.json", () => {
     expect(mode(opencodeConfig())).toBe(0o600);
     await setup(["--remove", "opencode", "--yes"]);
     expect(filesHolding(join(env.home, ".config", "opencode"), TOKEN)).toEqual([]);
+  });
+
+  it("--store-token on the 0664 file a plain setup leaves: tightened to 0600, token stored, notice printed; --dry-run changes nothing", async () => {
+    await setup(["opencode", "--yes"]);
+    chmodSync(opencodeConfig(), 0o664);
+    await setup(["opencode", "--store-token", "--dry-run"]);
+    expect(mode(opencodeConfig())).toBe(0o664);
+    expect(filesHolding(join(env.home, ".config", "opencode"), TOKEN)).toEqual([]);
+    await setup(["opencode", "--yes", "--store-token"]);
+    expect(mode(opencodeConfig())).toBe(0o600);
+    expect(entry()).toEqual({ type: "remote", url: "https://www.ahood.dev/api/mcp", headers: { Authorization: `Bearer ${TOKEN}` } });
+    expect(io.stdout()).toContain("was readable by other users (mode 0664); --store-token makes it user-only (chmod 600) to store the token.");
+    expect(io.stderr()).not.toContain("not storing the token there");
+  });
+
+  it("a stored token in a 0664 file, re-run without --store-token: still refused, mode kept, warning printed", async () => {
+    await setup(["opencode", "--yes", "--store-token"]);
+    chmodSync(opencodeConfig(), 0o664);
+    await setup(["opencode", "--yes"]);
+    expect(mode(opencodeConfig())).toBe(0o664);
+    expect(filesHolding(join(env.home, ".config", "opencode"), TOKEN)).toEqual([]);
+    expect(io.stderr()).toContain("readable by other users (mode 0664); not storing the token there");
   });
 
   it("without consent the header names {env:AHOOD_TOKEN}", async () => {

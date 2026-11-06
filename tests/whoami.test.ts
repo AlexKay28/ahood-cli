@@ -67,6 +67,14 @@ describe("whoami", () => {
     process.exitCode = 0;
   });
 
+  it("rejects an unknown flag or stray argument with a usage error before any request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(whoami(["--jsn"])).rejects.toThrow(/Unknown argument: --jsn[\s\S]*Usage: ahood whoami/);
+    await expect(whoami(["extra"])).rejects.toThrow(/Unknown argument: extra/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("exits with the auth-required code when no token is configured at all", async () => {
     delete process.env.AHOOD_TOKEN;
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

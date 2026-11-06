@@ -20,6 +20,14 @@ describe("view", () => {
     await expect(view([])).rejects.toThrow(/Usage: ahood skill view/);
   });
 
+  it("rejects an unknown flag or an extra positional with a usage error before any request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(view(["alice/pdf", "--jsn"])).rejects.toThrow(/Unknown argument: --jsn[\s\S]*Usage: ahood skill view/);
+    await expect(view(["alice/pdf", "bob/other"])).rejects.toThrow(/Unexpected extra argument: bob\/other/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects a malformed spec via the shared validator", async () => {
     await expect(view(["alice/.."])).rejects.toThrow(/Invalid skill/);
   });

@@ -147,12 +147,15 @@ export async function status(args: string[]): Promise<void> {
   for (const t of table) console.log(pad(t, widths));
 
   const updates = rows.filter((r) => r.sync_target !== null && !r.missing);
+  const missing = rows.filter((r) => r.missing && r.status === "ok");
+  // A row the table flags (files gone, not in the registry) is not "up to date".
+  const flagged = rows.some((r) => r.missing || r.status === "not_found");
   console.log("");
-  console.log(
-    updates.length === 0
-      ? "Everything is up to date."
-      : `${updates.length} update(s) available -- run \`ahood sync\` to review and apply them.`,
-  );
+  if (updates.length > 0) console.log(`${updates.length} update(s) available -- run \`ahood sync\` to review and apply them.`);
+  else if (!flagged) console.log("Everything is up to date.");
+  for (const r of missing) {
+    console.log(`${itemKey(r)}: files missing from ${r.installed_path} -- reinstall with \`ahood ${r.kind ?? "skill"} add ${itemKey(r)}\`.`);
+  }
 
   const own = new Map<string, StatusRow>();
   for (const r of rows) if (r.is_owner && r.evolution && !own.has(itemKey(r))) own.set(itemKey(r), r);
