@@ -80,6 +80,9 @@ describe("ahood status (ahood#979)", () => {
     stubMeApi(() => json(fixture("me-status.json")));
     await status([]);
     expect(io.stdout()).toContain("files missing");
+    expect(io.stdout()).not.toContain("Everything is up to date.");
+    expect(io.stdout()).toContain("alice/pdf-tools: files missing from");
+    expect(io.stdout()).toContain("reinstall with `ahood skill add alice/pdf-tools`");
   });
 
   it("prints a table, the update count, and own-artifact evolution with a review pointer", async () => {
