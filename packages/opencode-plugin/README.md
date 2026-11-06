@@ -26,14 +26,25 @@ versions.
   `$AHOOD_TOKEN` from the environment opencode runs in; the plugin never writes the token
   anywhere. If your opencode config already has an `mcp.servers.ahood` entry (for example one
   holding the token itself), the plugin leaves that entry in charge.
-- **`/ahood` commands**, which call the ahood CLI (`npm i -g @ahood/cli`; they fall back to
-  `npx -y @ahood/cli`), so they also need `ahood login` (or `AHOOD_TOKEN`) once:
+- **`/ahood` commands**, which run the ahood CLI as `npx -y @ahood/cli@<version>`, pinned to this
+  plugin's CLI release (no global install needed). The CLI uses `AHOOD_TOKEN` when it is set;
+  otherwise run `npx @ahood/cli login` once:
 
 | Type | Does |
 | --- | --- |
-| `/ahood` | Dashboard from `ahood status --json`: installed vs latest versions, pins, pending evolution proposals |
+| `/ahood` | Hub: `ahood status --json` as a table (installed vs latest, pins, pending proposals, evolution on/off), a menu of every command below, and one suggested next action |
+| `/ahood-find <need> [--kind <kind>]` | Finds a skill, agent, MCP server, doc, project guide, loop or prompt (`ahood find --json`): the top matches and why each fits; offers try or install |
+| `/ahood-trending [--kind <kind>]` | The most installed artifacts, optionally of one kind (`ahood find --sort downloads`) |
+| `/ahood-try <owner/slug>` | Reads an artifact into this session without installing it (`ahood try`) |
+| `/ahood-install <owner/slug>` | Previews an artifact (version, contents, risks, where it writes), then installs it only after your yes |
+| `/ahood-prompt <owner/slug>` | Asks for each of a prompt's inputs, fills it with `ahood prompt get`, shows it, and uses it once |
+| `/ahood-loop <owner/slug>` | Loads a loop's rules (`ahood try`) and, after your yes, follows them for this session |
+| `/ahood-project` | Loads this repository's project guide from ahood (`ahood project --json`), or offers to write and publish one |
+| `/ahood-star <owner/slug>` | Stars an artifact you used, after your yes |
+| `/ahood-publish` | Publishes the artifact in this directory, after a diff against the published version and your yes |
+| `/ahood-stats` | Your artifacts' downloads and stars, totals, recent activity and evolution counts (`ahood stats --json`) |
 | `/ahood-sync` | `ahood sync --dry-run`, a diff per update, then `ahood sync <owner>/<slug> --yes` only for the updates you approve in chat |
-| `/ahood-review` | `ahood review`, each proposal with its evidence, then `ahood review approve\|reject <id>` only on your decision |
+| `/ahood-review` | `ahood review --json`, each proposal with its diff and evidence, then `ahood review approve\|reject <id>` only on your decision |
 | `/ahood-snap` | Drafts a structured, private snap of the session, shows it, and runs `ahood snap create ...` only if you say yes |
 
 ## Optional: snap prompt at the end of a task
