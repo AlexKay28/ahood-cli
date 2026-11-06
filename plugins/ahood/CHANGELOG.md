@@ -11,10 +11,11 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 
 ## 0.17.0
 
-- Updates come from the `release` branch: every host now reads the plugin from
+- Updates come from the `release` branch: Claude Code and Codex now read the plugin from
   `AlexKay28/ahood-cli#release`, which each published release fast-forwards, so unreleased
-  commits never reach you and every release does. Re-run `npx @ahood/cli@latest setup` once to
-  move an existing install onto it.
+  commits never reach you and every release does (opencode gets its plugin from npm,
+  `@ahood/opencode-plugin`, which only a release publishes). Re-run
+  `npx @ahood/cli@latest setup` once to move an existing install onto it.
 - Claude Code: `ahood setup claude` asks once whether to keep ahood up to date automatically
   (default yes; `--no-auto-update` to skip). `ahood doctor` shows the channel and auto-update
   state for each host.
