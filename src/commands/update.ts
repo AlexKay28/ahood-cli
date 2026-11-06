@@ -76,8 +76,8 @@ function padRow(cells: string[], widths: number[]): string {
 // -- for only the skills that actually have an update available -- the
 // changelog for the version they'd move to. Nothing here touches disk or the
 // network beyond the read-only resolution already done by the caller before toPreview().
-function printDryRunTable(previews: UpdatePreview[]): void {
-  const header = ["SKILL", "CURRENT", "LATEST", "STATUS"];
+function printDryRunTable(previews: UpdatePreview[], firstColumn: string): void {
+  const header = [firstColumn, "CURRENT", "LATEST", "STATUS"];
   const rows = previews.map((p) => [
     p.skill,
     p.current_version ?? "(not installed)",
@@ -144,7 +144,8 @@ export async function update(args: string[], scope?: KindScope): Promise<void> {
       return local === undefined || local === kind;
     });
   }
-  const noneMessage = kind ? `No installed ${KINDS[kind].plural} to update.` : "No installed skills to update.";
+  const verb = dryRun ? "check" : "update";
+  const noneMessage = `No installed ${kind ? KINDS[kind].plural : "skills"} to ${verb}.`;
   if (skillKeys.length === 0) {
     // --json promises a machine-readable array; an empty set is still one.
     console.log(jsonOutput ? JSON.stringify([]) : noneMessage);
@@ -173,7 +174,7 @@ export async function update(args: string[], scope?: KindScope): Promise<void> {
     if (jsonOutput) {
       console.log(JSON.stringify(previews));
     } else if (previews.length > 0) {
-      printDryRunTable(previews);
+      printDryRunTable(previews, kind ? KINDS[kind].label.toUpperCase() : "SKILL");
     }
 
     if (failures.length > 0) {
