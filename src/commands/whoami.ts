@@ -1,5 +1,7 @@
 import { ApiError, apiJson } from "../http.js";
 import { resolveToken } from "../credentials.js";
+import { unrecognizedArgs } from "../flags.js";
+import { UsageError } from "../usage-error.js";
 
 // Mirrors GET /api/v1/profile's response shape. All fields besides
 // `username` are nullable in the backend (a profile can be created before
@@ -91,7 +93,12 @@ export async function checkAuth(): Promise<WhoamiResult> {
   }
 }
 
+const USAGE = "Usage: ahood whoami [--json]";
+
 export async function whoami(args: string[] = []): Promise<void> {
+  // A typo'd flag must not pass silently as a successful auth check.
+  const leftovers = unrecognizedArgs(args, ["--json"], []);
+  if (leftovers.length > 0) throw new UsageError(`Unknown argument: ${leftovers[0]}\n${USAGE}`);
   const wantsJson = args.includes("--json");
   const result = await checkAuth();
 
