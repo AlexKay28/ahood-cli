@@ -20,7 +20,7 @@ const USAGE = "Usage: ahood stats [--json]";
 
 /** Where the yield numbers the CLI cannot read live (the analytics route is session-only). */
 export const EVOLUTION_DASHBOARD_NOTE =
-  "Evolution yield (tasks, no-change share, published versions) is on the web dashboard only: https://www.ahood.dev/my-evolution";
+  "Evolution yield (tasks, no-change share, published versions) is on the web dashboard only: https://www.ahood.dev/workspace/my-evolution";
 
 // ahood lib/profile/activity.ts ActivityLogEntry.
 export type ActivityEntry = { id: number; createdAt: string; text: string; href: string; category: string };

@@ -139,7 +139,7 @@ Show the user how their published ahood artifacts are doing.
 
 1. Run `npx -y @ahood/cli@0.16.0 stats --json`.
 2. Show the totals (artifacts, downloads, stars), a table of their artifacts by downloads (owner/slug, kind, visibility, downloads, stars), the last few activity lines, and the evolution counts (artifacts evolving, proposals waiting; offer `ahood review` when any wait).
-3. Install trends and evolution yield are not available from the CLI: point at https://www.ahood.dev/my-evolution.
+3. Install trends and evolution yield are not available from the CLI: point at https://www.ahood.dev/workspace/my-evolution.
 
 Run each command exactly as written, through `npx -y @ahood/cli@0.16.0` (the CLI release this plugin was built with), not a global `ahood` on PATH, which may be an older release. If a command says you are not logged in, tell the user to run `npx -y @ahood/cli@0.16.0 login` in a terminal (it opens a browser) and stop.
 

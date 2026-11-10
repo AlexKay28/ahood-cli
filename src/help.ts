@@ -42,7 +42,7 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     summary: "Manage personal API tokens.",
     desc:
       "Manage personal API tokens. All three subcommands require an existing browser-backed session -- a CLI " +
-      "session authenticated with a bearer token can't manage tokens end-to-end; use /settings/tokens in the " +
+      "session authenticated with a bearer token can't manage tokens end-to-end; use /workspace/settings/tokens in the " +
       "browser instead.",
     flags: ["--yes    (revoke only) Skip the confirmation prompt and revoke immediately."],
     examples: ["ahood token create ci-runner", "ahood token list --json", "ahood token revoke <id>", "ahood token revoke <id> --yes"],
@@ -147,7 +147,7 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
       "Lists every artifact you have published (public and private) with downloads and stars, sums them, prints your " +
       "recent activity (GET /api/v1/users/<you>/activity) and how many of your artifacts are evolving and how " +
       "many proposals wait for review (GET /api/v1/enhancements/summary). The evolution dashboard's yield " +
-      "numbers need a browser session, so they are not shown here: see https://www.ahood.dev/my-evolution. " +
+      "numbers need a browser session, so they are not shown here: see https://www.ahood.dev/workspace/my-evolution. " +
       "Needs a login.",
     flags: ["--json    Emit {owner, totals, artifacts, activity, evolution}."],
     examples: ["ahood stats", "ahood stats --json"],
@@ -382,18 +382,20 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "doesn't exist yet, this creates it first -- pass --name to set its display name, and --kind agent, --kind mcp, --kind doc, --kind project, --kind loop, or --kind prompt if " +
       "publishing an AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md (auto-detected from the folder contents when only one of SKILL.md/AGENT.md/server.json/DOC.md/PROJECT.md/LOOP.md/PROMPT.md is present). " +
       "A PROMPT.md is checked locally before anything is uploaded: an undeclared {{key}}, or a declared input the body never uses, is refused with an error naming the key. " +
-      "--name is required when creating; optionally also pass --tagline/--tags/--license/--homepage/--repository. " +
+      "--name is required when creating (it has no update path -- use a new publish with the right --name once, or " +
+      "rename isn't supported); --tagline/--tags/--license/--homepage/--repository apply whether this creates the " +
+      "artifact or publishes a new version of one that already exists. " +
       "Processing happens server-side after upload; this command polls and reports the final published/failed status. " +
       "The legacy form `ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted. " +
       "Every flag also accepts the --flag=value form, needed when a value itself starts with --.",
     flags: [
       "--kind <kind>                 skill, agent, mcp, doc, project, loop, or prompt. Auto-detected from the folder's root doc when omitted.",
       "--name <text>                 Required only when creating the artifact on this publish.",
-      "--tagline <text>              Short one-line description, used only when creating.",
-      "--tags <comma,separated>      Initial tags, used only when creating.",
-      "--license <id>                An SPDX license identifier, e.g. MIT, used only when creating.",
-      "--homepage <url>              The artifact's homepage URL, used only when creating.",
-      "--repository <url>            The artifact's source repository URL, used only when creating.",
+      "--tagline <text>              Short one-line description. Updated even on a re-publish of an existing artifact.",
+      "--tags <comma,separated>      Replaces the tag list. Updated even on a re-publish of an existing artifact.",
+      "--license <id>                An SPDX license identifier, e.g. MIT. Updated even on a re-publish of an existing artifact.",
+      "--homepage <url>              The artifact's homepage URL. Updated even on a re-publish of an existing artifact.",
+      "--repository <url>            The artifact's source repository URL. Updated even on a re-publish of an existing artifact.",
       "--changelog <text>            What changed in this version, shown by `ahood skill versions`.",
       "--json                        Suppress human progress lines; print one {version,status,...} JSON object on completion (or {error} on failure).",
     ],
@@ -707,10 +709,10 @@ export const GROUP_COMMANDS_HELP: CommandHelp[] = [
     usage: "ahood group join <invite-url-or-token>",
     summary: "Join a group using an invite link or its raw token.",
     desc:
-      "Join a group using an invite link (e.g. https://www.ahood.dev/groups/join?token=...) or its bare " +
+      "Join a group using an invite link (e.g. https://www.ahood.dev/workspace/groups/join?token=...) or its bare " +
       "raw token -- either form works.",
     examples: [
-      "ahood group join https://www.ahood.dev/groups/join?token=abc123",
+      "ahood group join https://www.ahood.dev/workspace/groups/join?token=abc123",
       "ahood group join abc123",
     ],
   },

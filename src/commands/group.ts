@@ -111,7 +111,11 @@ export async function inviteLink(args: string[]): Promise<void> {
     `/api/v1/groups/${encodeURIComponent(slug)}/invites`,
     { method: "POST" },
   );
-  const url = `${getApiUrl()}/groups/join?token=${encodeURIComponent(token)}`;
+  // ahood#1271: every workspace page (including /groups) moved under
+  // /workspace/... -- the old bare /groups/join path still 308-redirects
+  // (next.config.ts), but a freshly generated link should point straight at
+  // the current one.
+  const url = `${getApiUrl()}/workspace/groups/join?token=${encodeURIComponent(token)}`;
 
   if (jsonOutput) {
     console.log(JSON.stringify({ token, expiresAt, url }));
@@ -122,11 +126,14 @@ export async function inviteLink(args: string[]): Promise<void> {
   console.log("This link (and its token) is shown only this once -- save it now, it cannot be retrieved again.");
 }
 
-// Accepts either a full join URL (https://www.ahood.dev/groups/join?token=...)
-// or a bare raw token, for convenience -- whatever a user pastes from
-// `ahood group invite-link` or forwards from someone else. Anything that
-// doesn't parse as a URL, or parses but has no `token` query param, is
-// treated as a raw token verbatim.
+// Accepts either a full join URL (https://www.ahood.dev/workspace/groups/join?token=...,
+// or the pre-#1271 bare https://www.ahood.dev/groups/join?token=... -- the
+// old path still 308-redirects and this only ever reads the `token` query
+// param, never the path, so both keep working) or a bare raw token, for
+// convenience -- whatever a user pastes from `ahood group invite-link` or
+// forwards from someone else. Anything that doesn't parse as a URL, or
+// parses but has no `token` query param, is treated as a raw token
+// verbatim.
 function extractToken(input: string): string {
   try {
     const url = new URL(input);
