@@ -418,6 +418,45 @@ function orList(items: string[]): string {
   return items.length <= 2 ? items.join(" or ") : `${items.slice(0, -1).join(", ")}, or ${items.at(-1)}`;
 }
 
+type UpdateResponse = { slug: string; tagline: string | null; tags_warning?: string };
+
+// ahood-cli#(tagline-on-republish): --tagline/--tags/--license/--homepage/
+// --repository used to reach the server ONLY via createSkillForPublish's
+// create-skill body, which only ever runs on a brand-new artifact (the 404
+// branch of initVersion above). On a re-publish of an artifact that already
+// exists, initVersion's own request body carries just {version,
+// package_size_bytes, changelog_md} (mirrors PATCH /api/v1/skills/{owner}/
+// {skill}'s allow-list -- lib/artifacts/mutations/update.ts's
+// UpdateSkillInput on the server) -- these metadata flags were parsed off
+// argv and then silently dropped on the floor before any request was ever
+// made, never sent and never rejected. This applies them the same way
+// `ahood skill edit` does: a PATCH with only the fields the caller actually
+// passed, so an omitted flag can never clobber an existing value. --name has
+// no update path (the PATCH route doesn't accept it -- only create does), so
+// it stays create-only; that part of the "used only when creating" docs was
+// accurate and remains so.
+async function updateExistingSkillMetadata(
+  owner: string,
+  skill: string,
+  opts: { tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string },
+  jsonOutput: boolean,
+): Promise<void> {
+  const body: Record<string, unknown> = {};
+  if (opts.tagline !== undefined) body.tagline = opts.tagline;
+  if (opts.tags !== undefined) body.tags = opts.tags.split(",").map((t) => t.trim()).filter(Boolean);
+  if (opts.license !== undefined) body.license = opts.license;
+  if (opts.homepage !== undefined) body.homepage = opts.homepage;
+  if (opts.repository !== undefined) body.repository = opts.repository;
+  if (Object.keys(body).length === 0) return;
+
+  const updated = await apiJson<UpdateResponse>(
+    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`,
+    { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+  if (!jsonOutput) console.log(`Updated ${owner}/${updated.slug} metadata.`);
+  if (updated.tags_warning) console.warn(`WARNING: ${updated.tags_warning}`);
+}
+
 // Which kind a publish folder is, from the root docs it holds (KINDS[k].
 // rootDoc), so a new kind needs no branch here. An explicit kind must have
 // its root doc. With none, exactly one root doc must be present; SKILL.md
@@ -502,6 +541,15 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
       { name, tagline, tags, license, homepage, repository, kind: resolvedKind },
       jsonOutput,
     );
+
+    // `created` is only set when this call just created the artifact, in
+    // which case createSkillForPublish's create-skill body above already
+    // applied these fields. Otherwise this is a re-publish of something that
+    // already existed, and the metadata flags still need to reach the server
+    // -- see updateExistingSkillMetadata's comment.
+    if (!created) {
+      await updateExistingSkillMetadata(owner, skill, { tagline, tags, license, homepage, repository }, jsonOutput);
+    }
 
     // TS's lib.dom BodyInit (in scope here since tsconfig has no explicit
     // "lib" override, so DOM is included alongside the Node types) type-checks

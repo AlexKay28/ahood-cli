@@ -300,6 +300,80 @@ describe("publish", () => {
     expect(calls.some(([u]) => String(u).endsWith("/api/v1/skills"))).toBe(false);
   });
 
+  // Regression test for the bug where --tagline (and --tags/--license/
+  // --homepage/--repository) were applied on first publish (via the
+  // create-skill body) but silently dropped on a re-publish of an artifact
+  // that already exists -- initVersion's own request body never carried
+  // them, so they never even reached the network. Fixed by PATCHing
+  // /api/v1/skills/{owner}/{skill} (the same endpoint `ahood skill edit`
+  // uses) whenever versions/init succeeds without needing to create the
+  // skill first.
+  it("updates the tagline (and tags/license/homepage/repository) via a PATCH when re-publishing an existing artifact", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const patchBodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        const url = String(input);
+        if (url.endsWith("/versions/init")) {
+          return new Response(
+            JSON.stringify({ upload_url: "http://upload.test/put", storage_path: "x", version_id: "v1" }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.endsWith("/api/v1/skills/alice/demo") && init.method === "PATCH") {
+          patchBodies.push(init.body ? JSON.parse(init.body as string) : undefined);
+          return new Response(
+            JSON.stringify({ slug: "demo", tagline: "Now merges PDFs too", license: null, visibility: "public", tags: [] }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === "http://upload.test/put") return new Response(null, { status: 200 });
+        if (url.endsWith("/versions/complete")) {
+          return new Response(JSON.stringify({ version_id: "v1", version: "1.0.1", status: "processing" }), { status: 202 });
+        }
+        if (/\/versions\/[^/]+$/.test(url) && !url.endsWith("/versions/init") && !url.endsWith("/versions/complete")) {
+          return new Response(JSON.stringify({ version: "1.0.1", status: "published" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+      }),
+    );
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish([
+      "alice/demo@1.0.1",
+      "--path", dir,
+      "--tagline", "Now merges PDFs too",
+      "--tags", "pdf, cli",
+      "--license", "MIT",
+      "--homepage", "https://example.com",
+      "--repository", "https://github.com/alice/demo",
+    ]);
+
+    expect(patchBodies).toEqual([
+      {
+        tagline: "Now merges PDFs too",
+        tags: ["pdf", "cli"],
+        license: "MIT",
+        homepage: "https://example.com",
+        repository: "https://github.com/alice/demo",
+      },
+    ]);
+    expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.1 (published)");
+  });
+
+  it("does not PATCH skill metadata on a re-publish when no metadata flag was passed", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo");
+    const capture: { body?: Uint8Array } = {};
+    stubApi(capture);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish(["alice/demo@1.0.0", "--path", dir]);
+
+    const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.some(([u, i]) => String(u).endsWith("/api/v1/skills/alice/demo") && (i as RequestInit | undefined)?.method === "PATCH")).toBe(false);
+  });
+
   it("errors clearly when --name is missing and the skill doesn't exist yet, without attempting the upload", async () => {
     writeFileSync(join(dir, "SKILL.md"), "# demo");
     const uploadCalled = vi.fn();

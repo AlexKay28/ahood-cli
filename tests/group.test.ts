@@ -180,7 +180,7 @@ describe("group commands", () => {
 
       expect(calls[0].url).toBe(`${API_URL}/api/v1/groups/${SLUG}/invites`);
       expect(calls[0].init.method).toBe("POST");
-      expect(logSpy).toHaveBeenCalledWith(`${API_URL}/groups/join?token=abc123`);
+      expect(logSpy).toHaveBeenCalledWith(`${API_URL}/workspace/groups/join?token=abc123`);
       expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/shown only this once/));
     });
 
@@ -191,7 +191,7 @@ describe("group commands", () => {
       await inviteLink([SLUG, "--json"]);
 
       expect(logSpy).toHaveBeenCalledWith(
-        JSON.stringify({ token: "abc123", expiresAt: "2026-09-14T00:00:00.000Z", url: `${API_URL}/groups/join?token=abc123` }),
+        JSON.stringify({ token: "abc123", expiresAt: "2026-09-14T00:00:00.000Z", url: `${API_URL}/workspace/groups/join?token=abc123` }),
       );
     });
   });
@@ -214,6 +214,17 @@ describe("group commands", () => {
       const calls = stubApi(200, { groupSlug: SLUG, groupName: "Design Team" });
 
       await joinGroup(["https://ahood.vercel.app/groups/join?token=abc123"]);
+
+      expect(calls[0].url).toBe(`${API_URL}/api/v1/groups/invites/abc123/accept`);
+    });
+
+    // ahood#1271: /groups moved to /workspace/groups -- the token is read
+    // from the query string regardless of path, so a link using the current
+    // path works exactly like the pre-#1271 bare path above.
+    it("extracts the token from a full invite URL using the current /workspace/groups/join path", async () => {
+      const calls = stubApi(200, { groupSlug: SLUG, groupName: "Design Team" });
+
+      await joinGroup(["https://www.ahood.dev/workspace/groups/join?token=abc123"]);
 
       expect(calls[0].url).toBe(`${API_URL}/api/v1/groups/invites/abc123/accept`);
     });
