@@ -9,8 +9,13 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 `preversion` hook (and the release workflow) refuse a version without one
 (`scripts/check-changelog.mjs`).
 
-## 0.17.0
+## 0.17.0 (2026-11-10)
 
+- `ahood publish` on an artifact that already exists now applies `--tagline`, `--tags`,
+  `--license`, `--homepage` and `--repository` (they used to be applied only on the first
+  publish). `--name` still only applies when creating.
+- Account links point at the web app's new `/workspace/...` pages (tokens, evolution
+  dashboard, group invite links). Old links keep working through the site's redirects.
 - Updates come from the `release` branch: Claude Code and Codex now read the plugin from
   `AlexKay28/ahood-cli#release`, which each published release fast-forwards, so unreleased
   commits never reach you and every release does (opencode gets its plugin from npm,
