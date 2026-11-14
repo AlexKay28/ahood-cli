@@ -9,6 +9,13 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 `preversion` hook (and the release workflow) refuse a version without one
 (`scripts/check-changelog.mjs`).
 
+## Unreleased
+
+- `ahood snap create` prints what the registry says about whether the snap feeds an artifact's
+  self-evolution right after saving (which artifact, or why not, and which of your artifacts
+  are enrolled when it doesn't). `--artifact` now also accepts a bare slug of your own artifact,
+  not just `owner/slug` -- the server resolves it.
+
 ## 0.18.0 (2026-11-14)
 
 - `ahood login` stops at the first real error from the server (for example "too many active

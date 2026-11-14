@@ -751,7 +751,7 @@ export const GROUP_COMMANDS_HELP: CommandHelp[] = [
 export const SNAP_COMMANDS_HELP: CommandHelp[] = [
   {
     usage:
-      "ahood snap create <content> [--tags tag1,tag2] [--failed <t>] [--worked <t>] [--fix <t>] [--lesson <t>] [--artifact <owner/slug>] [--json]",
+      "ahood snap create <content> [--tags tag1,tag2] [--failed <t>] [--worked <t>] [--fix <t>] [--lesson <t>] [--artifact <owner/slug or slug>] [--json]",
     summary: "Capture a new private snap, from an argument or piped stdin.",
     desc:
       "Capture a new private snap. Pass the content as an argument, or omit it and pipe content on stdin " +
@@ -761,14 +761,16 @@ export const SNAP_COMMANDS_HELP: CommandHelp[] = [
       "The optional structured header (--failed, --worked, --fix, --lesson, --artifact) records what went wrong, " +
       "what worked, the fix, the general lesson and which artifact it is about, so your artifacts' " +
       "self-evolution can read them; `ahood snap --lesson ... <content>` (no verb) is the same command. " +
-      "A snap is private to you until you share it.",
+      "On success the server also says whether this snap feeds that artifact's evolution -- printed on its own " +
+      "line -- and, if not, which of your artifacts are enrolled. A snap is private to you until you share it.",
     flags: [
       "--tags <comma,separated>   Attach tags to the new snap.",
       "--failed <text>            What went wrong, or what the user corrected.",
       "--worked <text>            What worked.",
       "--fix <text>               The change made or needed.",
       "--lesson <text>            The general takeaway (no names or private details).",
-      "--artifact <owner/slug>    The skill, agent or MCP server it is about (optionally @version).",
+      "--artifact <owner/slug or slug>  The skill, agent or MCP server it is about (optionally @version). A bare " +
+        "slug of your own artifact also works.",
       "--json                     Emit {id, created_at} instead of just the bare id.",
       "--                         End of options: everything after it is content, verbatim.",
     ],
