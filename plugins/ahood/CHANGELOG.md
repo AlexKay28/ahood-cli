@@ -9,6 +9,20 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 `preversion` hook (and the release workflow) refuse a version without one
 (`scripts/check-changelog.mjs`).
 
+## 0.18.0 (2026-11-14)
+
+- `ahood login` stops at the first real error from the server (for example "too many active
+  tokens", or a server error) and prints it. Before, it waited about 10 minutes and then said
+  "Login timed out".
+- CLI logins now expire after 90 days. An expired or revoked login gets a clear message:
+  "Your ahood login has expired or was revoked. Run `ahood login` again." If the rejected token
+  came from `AHOOD_TOKEN`, the message says so instead.
+- `ahood login` sends the server's one-time device code on every poll, in a header (never in
+  the URL), so only the terminal that started a login can complete it.
+- Lockfile entries record the skill's id. `ahood status` and `ahood sync` refuse an entry
+  whose `owner/slug` now points at a different skill, and follow an owner rename to the new
+  name.
+
 ## 0.17.0 (2026-11-10)
 
 - `ahood publish` on an artifact that already exists now applies `--tagline`, `--tags`,
