@@ -2,7 +2,12 @@ import { ApiError, apiJson, parseRetryAfterMs, sanitizeErrorMessage } from "../h
 import { getApiUrl } from "../config.js";
 import { writeCredentials } from "../credentials.js";
 
-type DeviceCodeResponse = { code: string; verification_url: string; expires_in: number };
+// device_code (ahood-cli#1320 contract §1/§3): a one-shot secret the START
+// response carries ONLY to let this CLI re-identify itself on every poll via
+// the X-Ahood-Device-Code header -- never the code's own user/verification
+// story. Optional because an older server hasn't been taught to send it yet
+// (contract §2: the server still accepts a header-less poll in that case).
+type DeviceCodeResponse = { code: string; verification_url: string; expires_in: number; device_code?: string };
 type PollResponse = { status: "pending" | "approved"; token?: string };
 
 // A terminal, non-retryable poll response that carries a JSON `error`
@@ -27,9 +32,14 @@ function sleep(ms: number): Promise<void> {
 }
 
 export async function login(): Promise<void> {
-  const { code, verification_url, expires_in } = await apiJson<DeviceCodeResponse>("/api/v1/auth/cli/device", {
-    method: "POST",
-  });
+  // device_code is destructured here and ONLY ever passed to
+  // apiFetchWithTimeout below, which turns it into a poll header -- per
+  // contract §1 it must never be printed or persisted, unlike `code`, which
+  // is deliberately echoed to the terminal a few lines down.
+  const { code, verification_url, expires_in, device_code } = await apiJson<DeviceCodeResponse>(
+    "/api/v1/auth/cli/device",
+    { method: "POST" },
+  );
 
   // Printed VERBATIM, deliberately not through sanitizeForTerminal the way
   // `add` treats server-supplied text: this line exists so the user can
@@ -87,7 +97,7 @@ export async function login(): Promise<void> {
       // unreserved, so encodeURIComponent left it alone. Pinned by
       // tests/login-device-code-verbatim.test.ts; contract in ahood's
       // docs/adr/backend/0005-device-code-cross-repo-contract.md (ahood#357).
-      res = await apiFetchWithTimeout(`/api/v1/auth/cli/device/${encodeURIComponent(code)}`);
+      res = await apiFetchWithTimeout(`/api/v1/auth/cli/device/${encodeURIComponent(code)}`, device_code);
     } catch (error) {
       // A THROWN fetch (DNS blip, dropped socket) is transient by nature, and
       // this loop runs for up to ten minutes while a human walks to their
@@ -167,6 +177,14 @@ export async function login(): Promise<void> {
 // is expected and must not throw -- the status code is inspected by the
 // caller instead. Still routed through the same trusted host + a bounded
 // timeout, unlike the raw, unbounded `fetch` this replaced.
-async function apiFetchWithTimeout(path: string): Promise<Response> {
-  return fetch(`${getApiUrl()}${path}`, { signal: AbortSignal.timeout(POLL_TIMEOUT_MS) });
+//
+// deviceCode (ahood-cli#1320 contract §2/§3) goes out as the
+// X-Ahood-Device-Code header -- a header, never a query param, so it can't
+// end up in a URL or a log line the way a query string would. Omitted
+// (undefined) against an older server that never sent one in the START
+// response, which the server treats exactly as it does today (contract
+// §2's "if header absent -> current behaviour").
+async function apiFetchWithTimeout(path: string, deviceCode?: string): Promise<Response> {
+  const headers = deviceCode ? { "X-Ahood-Device-Code": deviceCode } : undefined;
+  return fetch(`${getApiUrl()}${path}`, { signal: AbortSignal.timeout(POLL_TIMEOUT_MS), headers });
 }

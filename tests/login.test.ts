@@ -206,6 +206,75 @@ describe("login", () => {
     });
   });
 
+  // ahood-cli#1320 contract §1/§3: the START response's device_code goes out
+  // as the X-Ahood-Device-Code header on every poll, and is never printed or
+  // persisted.
+  describe("device_code header (ahood-cli#1320 contract §1/§3)", () => {
+    it("sends X-Ahood-Device-Code on every poll when the START response includes one", async () => {
+      const pollHeaders: (string | null)[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (url === `${API_URL}/api/v1/auth/cli/device`) {
+            return new Response(
+              JSON.stringify({
+                code: "ABCD",
+                verification_url: `${API_URL}/cli-auth?code=ABCD`,
+                expires_in: 600,
+                device_code: "super-secret-device-code",
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          if (url.startsWith(`${API_URL}/api/v1/auth/cli/device/`)) {
+            pollHeaders.push(new Headers(init?.headers).get("X-Ahood-Device-Code"));
+            return new Response(JSON.stringify({ status: "approved", token: "ahd_tok" }), { status: 200 });
+          }
+          return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+        }),
+      );
+
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await login();
+
+      expect(pollHeaders).toEqual(["super-secret-device-code"]);
+      // Never printed.
+      const printed = logSpy.mock.calls.flat().join("\n");
+      expect(printed).not.toContain("super-secret-device-code");
+      // Never persisted: only the token, which writeCredentials always wrote.
+      expect(JSON.parse(readFileSync(join(dir, ".config", "ahood", "credentials.json"), "utf-8"))).toEqual({
+        token: "ahd_tok",
+      });
+    });
+
+    it("polls without the header when the START response has no device_code (older server)", async () => {
+      const pollHeaders: (string | null)[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (url === `${API_URL}/api/v1/auth/cli/device`) {
+            return new Response(
+              JSON.stringify({ code: "ABCD", verification_url: `${API_URL}/cli-auth?code=ABCD`, expires_in: 600 }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          if (url.startsWith(`${API_URL}/api/v1/auth/cli/device/`)) {
+            pollHeaders.push(new Headers(init?.headers).get("X-Ahood-Device-Code"));
+            return new Response(JSON.stringify({ status: "approved", token: "ahd_tok" }), { status: 200 });
+          }
+          return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+        }),
+      );
+
+      await login();
+
+      expect(pollHeaders).toEqual([null]);
+    });
+  });
+
   // ahood-cli#159: a 429 from the poll endpoint means "stop asking so often".
   // The loop must back off by Retry-After (exponentially when absent) instead
   // of continuing on its normal cadence -- the retry-storm shape -- while
