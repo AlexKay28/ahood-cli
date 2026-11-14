@@ -55,3 +55,110 @@ describe("structured snaps (ahood#979, server ahood#946)", () => {
     expect(JSON.parse(io.out[0])).toEqual({ id: "snap-1", created_at: "t" });
   });
 });
+
+// SNAP PROTOCOL: the server's 201 body now carries `evolution`, saying whether
+// this snap feeds an artifact's self-evolution and why not when it doesn't.
+describe("the server's `evolution` field (SNAP PROTOCOL)", () => {
+  let env: ReturnType<typeof setupEnv>;
+  let io: ReturnType<typeof captureConsole>;
+
+  beforeEach(() => {
+    env = setupEnv();
+    io = captureConsole();
+  });
+  afterEach(() => env.restore());
+
+  function stubCreateResponse(extra: Record<string, unknown>) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ id: "snap-1", created_at: "t", ...extra }, 201)),
+    );
+  }
+
+  it("prints the evolution message on its own line", async () => {
+    stubCreateResponse({
+      evolution: {
+        artifact: "alice/pdf-tools",
+        status: "ok",
+        feeds_evolution: true,
+        message: "Feeds alice/pdf-tools' evolution.",
+        enrolled: ["alice/pdf-tools"],
+      },
+    });
+
+    await createSnap(["pdf split bug", "--artifact", "alice/pdf-tools"]);
+
+    expect(io.err).toContain("Feeds alice/pdf-tools' evolution.");
+  });
+
+  it("also prints the enrolled list when the snap does not feed any artifact's evolution", async () => {
+    stubCreateResponse({
+      evolution: {
+        artifact: null,
+        status: "absent",
+        feeds_evolution: false,
+        message: "No artifact given -- this snap won't feed any artifact's evolution.",
+        enrolled: ["alice/pdf-tools", "alice/cli-helper"],
+      },
+    });
+
+    await createSnap(["just a note"]);
+
+    expect(io.err).toContain("No artifact given -- this snap won't feed any artifact's evolution.");
+    expect(io.err.some((line) => line.includes("alice/pdf-tools") && line.includes("alice/cli-helper"))).toBe(true);
+  });
+
+  it("omits the enrolled line when feeds_evolution is false but nothing is enrolled", async () => {
+    stubCreateResponse({
+      evolution: {
+        artifact: "alice/not-mine",
+        status: "other_owner",
+        feeds_evolution: false,
+        message: "alice/not-mine is not yours -- this snap won't feed its evolution.",
+        enrolled: [],
+      },
+    });
+
+    await createSnap(["just a note", "--artifact", "alice/not-mine"]);
+
+    expect(io.err).toContain("alice/not-mine is not yours -- this snap won't feed its evolution.");
+    expect(io.err.some((line) => line.startsWith("Enrolled"))).toBe(false);
+  });
+
+  it("prints nothing extra when an older server sends no `evolution` field at all", async () => {
+    stubCreateResponse({});
+
+    await createSnap(["just a note"]);
+
+    expect(io.stderr()).toContain("private snap -- only you can see it");
+    expect(io.err).toHaveLength(1);
+  });
+
+  it("--json passes the evolution field through untouched", async () => {
+    stubCreateResponse({
+      evolution: {
+        artifact: "alice/pdf-tools",
+        status: "ok",
+        feeds_evolution: true,
+        message: "Feeds alice/pdf-tools' evolution.",
+        enrolled: ["alice/pdf-tools"],
+      },
+    });
+
+    await createSnap(["hello", "--json"]);
+
+    expect(JSON.parse(io.out[0])).toEqual({
+      id: "snap-1",
+      created_at: "t",
+      evolution: {
+        artifact: "alice/pdf-tools",
+        status: "ok",
+        feeds_evolution: true,
+        message: "Feeds alice/pdf-tools' evolution.",
+        enrolled: ["alice/pdf-tools"],
+      },
+    });
+    // --json is a pure passthrough: no extra lines on stderr either.
+    expect(io.err).toHaveLength(0);
+  });
+});

@@ -2,6 +2,7 @@ import { apiJson } from "../http.js";
 import { flagValue, parseSearchQuery, unrecognizedArgs, unrecognizedIndices } from "../flags.js";
 import { confirm } from "../confirm.js";
 import { UsageError } from "../usage-error.js";
+import { sanitizeForTerminal } from "../terminal-safe.js";
 
 // Mirrors POST/GET /api/v1/snaps' response shapes exactly (see the ahood
 // repo's app/api/v1/snaps routes, built concurrently against this frozen
@@ -28,7 +29,21 @@ type SnapDetail = {
 };
 
 const CREATE_USAGE =
-  "Usage: ahood snap create <content> [--tags tag1,tag2] [--failed <text>] [--worked <text>] [--fix <text>] [--lesson <text>] [--artifact <owner/slug>] (or pipe content on stdin; put -- before content that starts with --)";
+  "Usage: ahood snap create <content> [--tags tag1,tag2] [--failed <text>] [--worked <text>] [--fix <text>] [--lesson <text>] [--artifact <owner/slug or slug>] (or pipe content on stdin; put -- before content that starts with --)";
+
+// The registry's SNAP PROTOCOL: `structured.artifact` only feeds automatic
+// skill evolution when it is exactly <ahood username>/<slug of an artifact
+// the caller owns and has enrolled>. The server now also accepts a bare slug
+// and rewrites it to <user>/<slug> when the caller owns it -- this regex has
+// to accept that shape too, or the CLI would refuse input the server is
+// happy to take. The 201 response also carries this shape under `evolution`.
+type SnapEvolution = {
+  artifact: string | null;
+  status: "ok" | "not_enrolled" | "other_owner" | "absent";
+  feeds_evolution: boolean;
+  message: string;
+  enrolled: string[];
+};
 
 // ahood#946/#979: the optional structured header POST /api/v1/snaps accepts
 // as `structured` (lib/snaps/validation.ts SNAP_STRUCTURED_FIELDS), one flag
@@ -42,7 +57,9 @@ export const SNAP_STRUCTURED_FLAGS = {
   "--artifact": "artifact",
 } as const;
 const STRUCTURED_FLAG_NAMES = Object.keys(SNAP_STRUCTURED_FLAGS);
-const ARTIFACT_REF_RE = /^[a-z0-9]+(-[a-z0-9]+)*\/[a-z0-9]+(-[a-z0-9]+)*(@[0-9a-z][0-9a-z.+-]{0,63})?$/i;
+// The `owner/` part is now optional (SNAP PROTOCOL): a bare slug of the
+// caller's own skill is valid too, and the server resolves and rewrites it.
+const ARTIFACT_REF_RE = /^(?:[a-z0-9]+(-[a-z0-9]+)*\/)?[a-z0-9]+(-[a-z0-9]+)*(@[0-9a-z][0-9a-z.+-]{0,63})?$/i;
 
 // Every flag `snap create` consumes -- exported so `ahood snap --lesson ...`
 // (no verb) can be routed to create by index.ts.
@@ -138,7 +155,7 @@ export async function createSnap(args: string[]): Promise<void> {
     if (value) structured[field] = value;
   }
   if (structured.artifact !== undefined && !ARTIFACT_REF_RE.test(structured.artifact)) {
-    throw new UsageError(`--artifact must be owner/slug, optionally @version (got "${structured.artifact}").\n${CREATE_USAGE}`);
+    throw new UsageError(`--artifact must be owner/slug or slug, optionally @version (got "${structured.artifact}").\n${CREATE_USAGE}`);
   }
 
   // Every leftover used to be kept and folded into the note body, because
@@ -210,7 +227,7 @@ export async function createSnap(args: string[]): Promise<void> {
       .filter(Boolean);
   }
 
-  const created = await apiJson<{ id: string; created_at: string }>("/api/v1/snaps", {
+  const created = await apiJson<{ id: string; created_at: string; evolution?: SnapEvolution }>("/api/v1/snaps", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -223,6 +240,18 @@ export async function createSnap(args: string[]): Promise<void> {
   console.log(created.id);
   // stderr, so `id=$(ahood snap create ...)` still captures just the id.
   console.error(`Saved as a private snap -- only you can see it. Share it with \`ahood snap share ${created.id}\`.`);
+
+  // `evolution` is new (SNAP PROTOCOL) and absent on an older server, which
+  // sends back just {id, created_at} -- skip silently rather than printing
+  // "undefined". `.message` is server-authored text reaching the terminal,
+  // same class of input add.ts/review.ts already run through
+  // sanitizeForTerminal before printing (ahood-cli#122/#127).
+  if (created.evolution) {
+    console.error(sanitizeForTerminal(created.evolution.message));
+    if (!created.evolution.feeds_evolution && created.evolution.enrolled.length > 0) {
+      console.error(`Enrolled for evolution: ${created.evolution.enrolled.map((a) => sanitizeForTerminal(a, 200)).join(", ")}`);
+    }
+  }
 }
 
 export async function listSnaps(args: string[]): Promise<void> {

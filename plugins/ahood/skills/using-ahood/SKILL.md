@@ -39,18 +39,25 @@ plugin's release, so no global install is needed.
 ## Capture snaps
 
 Capture a snap at two moments: right after you hand over a deliverable, and right after the
-user corrects you.
+user corrects you. One snap = one artifact. The registry's SNAP PROTOCOL:
 
-1. Draft it: a one-line summary, plus the structured header when you can -- **failed** (what
-   went wrong, or what the user corrected), **worked** (what worked), **fix** (the change made
-   or needed), **lesson** (the general takeaway, with no names or private details) and
-   **artifact** (the skill, agent or MCP server it is about, as owner/slug). Each field is at
-   most 1000 characters. Leave out secrets: tokens, keys, credentials, private data.
-2. Show the draft and ask whether to save it. Never save a snap the user has not seen and
-   agreed to.
-3. On yes, save it with the MCP tool `create_snap`, or the CLI:
-   `ahood snap create "<summary>" --failed "..." --worked "..." --fix "..." --lesson "..." --artifact <owner/slug>`
-   (omit the flags you have nothing for).
+1. Find the exact artifact first: `owner/slug`, from `ahood status`, the lockfile, or the MCP
+   tool `list_my_skills` -- the **ahood username**, never a GitHub handle (a common miss: your
+   GitHub handle may differ from your ahood one). A bare slug of your own skill also works -- the server
+   resolves it. Omit **artifact** only when the session was not about an ahood artifact.
+2. **failed** -- concrete: what broke, or what the user corrected (the command, the symptom).
+3. **fix** -- the change made or needed.
+4. **lesson** -- ONE general imperative rule the artifact should contain ("Always X before Y,
+   because Z"). No names, secrets, or private paths.
+5. **worked** -- optional.
+6. **tags** -- include the artifact's slug; avoid vendor-only tags (e.g. "yandex") that would
+   match many unrelated skills.
+7. Show the draft and ask whether to save it. Never save a snap the user has not seen and
+   agreed to. On yes, save it with the MCP tool `create_snap`, or the CLI:
+   `ahood snap create "<summary>" --failed "..." --worked "..." --fix "..." --lesson "..." --artifact <owner/slug or slug> --tags <tag1,tag2>`
+   (omit the fields you have nothing for).
+8. Read the reply: if it says the artifact is not enabled for evolution, or not found, tell
+   the user -- they can enable evolution on the artifact's page -- or fix the name and retry.
 
 Snaps are private to you: only you can read them, unless you create a share link. They feed
 automatic evolution only for artifacts you have enabled after giving consent, and they are
