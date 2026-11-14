@@ -1,8 +1,11 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { apiJson } from "../http.js";
 import { unrecognizedArgs } from "../flags.js";
 import { UsageError } from "../usage-error.js";
 import { itemKey, migrateProjectLockfileOrWarn, readInstalled, type InstalledItem } from "../installed.js";
+import { reconcileLockfileSkillId } from "../lockfile.js";
+import { LOCKFILE_PATH } from "../spec.js";
 
 const USAGE = "Usage: ahood status [--json]";
 
@@ -26,6 +29,12 @@ export type ServerStatusItem =
       update_available: boolean;
       is_owner: boolean;
       evolution?: ServerEvolution;
+      // ahood-cli#1320 contract §5 (ahood#1395): the server's stable
+      // identity for this artifact, and the canonical (possibly renamed)
+      // owner -- both optional so an older server response still parses.
+      // See reconcileSkillIds below for what this CLI does with them.
+      skill_id?: string;
+      canonical_owner?: string;
     };
 export type ServerStatus = { items: ServerStatusItem[]; plan: { evolution_available: boolean; consented: boolean } };
 
@@ -76,6 +85,11 @@ export type StatusRow = {
   missing: boolean;
   is_owner: boolean;
   evolution: ServerEvolution | null;
+  /** ahood-cli#1320 contract §5: this entry's recorded skillId disagrees
+   *  with the server's for this owner/slug -- the name now points at a
+   *  different skill, and sync_target is forced to null so nothing (this
+   *  command, `ahood sync`) moves it forward. */
+  skill_id_mismatch: boolean;
 };
 
 /** What sync would move an install to: a pin holds it at the pinned version
@@ -85,7 +99,7 @@ export function syncTarget(item: InstalledItem, latest: string | null): string |
   return target !== null && target !== item.version ? target : null;
 }
 
-export function toRow(item: InstalledItem, server: ServerStatusItem | undefined): StatusRow {
+export function toRow(item: InstalledItem, server: ServerStatusItem | undefined, skillIdMismatch = false): StatusRow {
   const ok = server?.status === "ok" ? server : undefined;
   const latest = ok?.latest_version ?? null;
   return {
@@ -96,14 +110,48 @@ export function toRow(item: InstalledItem, server: ServerStatusItem | undefined)
     latest_version: latest,
     update_available: latest !== null && latest !== item.version,
     pinned: item.pinned ?? null,
-    sync_target: ok ? syncTarget(item, latest) : null,
+    sync_target: ok && !skillIdMismatch ? syncTarget(item, latest) : null,
     status: ok ? "ok" : "not_found",
     installed_path: item.installedPath,
     project_dir: item.projectDir,
     missing: !existsSync(item.installedPath),
     is_owner: ok?.is_owner ?? false,
     evolution: ok?.evolution ?? null,
+    skill_id_mismatch: skillIdMismatch,
   };
+}
+
+/** ahood-cli#1320 contract §5: reconcile every found item's project
+ *  lockfile entry against the server's skill_id/canonical_owner --
+ *  recording a missing skillId, moving a renamed account's entry to its
+ *  canonical owner, or refusing (and reporting) a skillId mismatch. Returns
+ *  the keys (`<projectDir>::<owner>/<slug>`, lowercased) that were refused,
+ *  for toRow to block sync_target on. Best-effort per item: one project's
+ *  broken lockfile must not stop every other item's status/sync. */
+function reconcileSkillIds(items: InstalledItem[], byKey: Map<string, ServerStatusItem>): Set<string> {
+  const mismatched = new Set<string>();
+  for (const item of items) {
+    const server = byKey.get(itemKey(item).toLowerCase());
+    if (!server || server.status !== "ok" || !server.skill_id) continue;
+    const lockPath = join(item.projectDir, LOCKFILE_PATH);
+    try {
+      const outcome = reconcileLockfileSkillId(lockPath, itemKey(item), {
+        skillId: server.skill_id,
+        canonicalOwner: server.canonical_owner,
+      });
+      if (outcome.action === "refused") {
+        console.warn(`WARNING: ${outcome.message}`);
+        mismatched.add(`${item.projectDir}::${itemKey(item).toLowerCase()}`);
+      } else if (outcome.action === "renamed") {
+        console.log(`${outcome.from} is now ${outcome.to} -- its account was renamed, and the pin in ${lockPath} was updated to match.`);
+      }
+    } catch (error) {
+      console.warn(
+        `WARNING: could not reconcile ${itemKey(item)}'s entry in ${lockPath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return mismatched;
 }
 
 export async function loadStatusRows(): Promise<{ items: InstalledItem[]; rows: StatusRow[]; plan: ServerStatus["plan"] | null }> {
@@ -111,7 +159,14 @@ export async function loadStatusRows(): Promise<{ items: InstalledItem[]; rows: 
   const items = readInstalled().items;
   if (items.length === 0) return { items, rows: [], plan: null };
   const { byKey, plan } = await fetchStatus(items);
-  return { items, rows: items.map((i) => toRow(i, byKey.get(itemKey(i).toLowerCase()))), plan };
+  const mismatched = reconcileSkillIds(items, byKey);
+  return {
+    items,
+    rows: items.map((i) =>
+      toRow(i, byKey.get(itemKey(i).toLowerCase()), mismatched.has(`${i.projectDir}::${itemKey(i).toLowerCase()}`)),
+    ),
+    plan,
+  };
 }
 
 function pad(cells: string[], widths: number[]): string {
@@ -120,6 +175,10 @@ function pad(cells: string[], widths: number[]): string {
 
 function stateOf(r: StatusRow): string {
   if (r.status === "not_found") return "not found in registry";
+  // ahood-cli#1320 contract §5: checked before "files missing" -- a
+  // mismatched skillId is the more actionable fact, and the warning
+  // already printed above the table says why.
+  if (r.skill_id_mismatch) return "blocked -- now a different skill";
   if (r.missing) return "files missing";
   if (r.pinned !== null) return r.sync_target ? `pinned @${r.pinned} (sync moves to it)` : `pinned @${r.pinned}`;
   return r.update_available ? "update available" : "up to date";
@@ -148,8 +207,9 @@ export async function status(args: string[]): Promise<void> {
 
   const updates = rows.filter((r) => r.sync_target !== null && !r.missing);
   const missing = rows.filter((r) => r.missing && r.status === "ok");
-  // A row the table flags (files gone, not in the registry) is not "up to date".
-  const flagged = rows.some((r) => r.missing || r.status === "not_found");
+  // A row the table flags (files gone, not in the registry, or blocked by a
+  // skillId mismatch -- ahood-cli#1320 contract §5) is not "up to date".
+  const flagged = rows.some((r) => r.missing || r.status === "not_found" || r.skill_id_mismatch);
   console.log("");
   if (updates.length > 0) console.log(`${updates.length} update(s) available -- run \`ahood sync\` to review and apply them.`);
   else if (!flagged) console.log("Everything is up to date.");

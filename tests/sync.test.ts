@@ -141,6 +141,36 @@ describe("ahood sync (ahood#979)", () => {
     expect(downloads()).toEqual([]);
   });
 
+  // ahood-cli#1320 contract §5: a lockfile entry whose recorded skillId no
+  // longer matches the server's is never moved forward, whatever version
+  // the registry now reports as latest.
+  it("skips an entry whose recorded skillId disagrees with the server's, and never downloads it", async () => {
+    const { writeLockfileEntry } = await import("../src/lockfile.js");
+    const existing = readLockfile(".claude/skills.lock.json")["alice/pdf-tools"];
+    writeLockfileEntry(".claude/skills.lock.json", "alice/pdf-tools", { ...existing, skillId: "skill-OLD" });
+    stubMeApi(() =>
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              owner: "alice", slug: "pdf-tools", installed_version: "1.0.0", status: "ok", kind: "skill",
+              latest_version: "1.1.0", update_available: true, is_owner: false, skill_id: "skill-NEW",
+            },
+          ],
+          plan: { evolution_available: true, consented: true },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await sync(["--yes"]);
+
+    expect(io.stdout()).toContain("now points to a different skill");
+    expect(downloads()).toEqual([]);
+    expect(readFileSync(`${SKILL}/SKILL.md`, "utf-8")).toContain("old body");
+    expect(readLockfile(".claude/skills.lock.json")["alice/pdf-tools"]).toEqual({ ...existing, skillId: "skill-OLD" });
+  });
+
   it("skips an install whose files were deleted by hand instead of resurrecting it", async () => {
     rmSync(SKILL, { recursive: true });
     await sync(["--yes"]);

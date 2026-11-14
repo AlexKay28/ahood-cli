@@ -39,6 +39,13 @@ export type VersionMeta = {
   yanked_at: string | null;
   changelog_md?: string | null;
   kind?: CliKind;
+  // ahood-cli#1320 contract §5: the server's stable identity for this
+  // artifact, when either metadata route happens to include it. Optional
+  // because the contract only requires it on POST /api/v1/me/status -- if
+  // it's absent here, the lockfile entry this install writes just has no
+  // skillId yet, and `ahood status`'s own reconciliation records it the
+  // first time it runs against this install.
+  skill_id?: string;
 };
 
 // Shared wording for the checksum-pin tamper-detection guard, used both by
@@ -770,6 +777,7 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
       version: meta.version,
       checksum_sha256: meta.checksum_sha256,
       mcp_config_hash: hashMcpServerConfig(serverConfig),
+      ...(meta.skill_id ? { skillId: meta.skill_id } : {}),
     });
   } catch (error) {
     // Roll back the .mcp.json merge above under the same lock pattern --
@@ -896,11 +904,13 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
     writeJsonFileAtomic(MCP_CONFIG_PATH, fresh, wroteSecrets ? 0o600 : undefined);
   });
 
+  const skillId = meta.skill_id ?? currentEntry?.skillId;
   try {
     writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
       version: meta.version,
       checksum_sha256: meta.checksum_sha256,
       mcp_config_hash: hashMcpServerConfig(serverConfig),
+      ...(skillId ? { skillId } : {}),
     });
   } catch (error) {
     // Roll back the .mcp.json overwrite above under the same lock pattern,
@@ -995,6 +1005,7 @@ async function installPinnedFile(kind: PinnedFileKind, owner: string, skill: str
       version: meta.version,
       checksum_sha256: meta.checksum_sha256,
       kind,
+      ...(meta.skill_id ? { skillId: meta.skill_id } : {}),
     });
   } catch (error) {
     rollbackOrWarn(
@@ -1109,7 +1120,11 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
     const destPath = agentPath(owner, skill);
     writeFileAtomic(destPath, content);
     try {
-      writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, { version: meta.version, checksum_sha256: meta.checksum_sha256 });
+      writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
+        version: meta.version,
+        checksum_sha256: meta.checksum_sha256,
+        ...(meta.skill_id ? { skillId: meta.skill_id } : {}),
+      });
     } catch (error) {
       // Widened past the checksum-conflict case with installMcpEntry's own
       // rollback (ahood-cli#132): an agent file left behind by a lock
@@ -1150,6 +1165,7 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
     writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
       version: meta.version,
       checksum_sha256: meta.checksum_sha256,
+      ...(meta.skill_id ? { skillId: meta.skill_id } : {}),
     });
   } catch (error) {
     // Same widening as the agent path above (ahood-cli#132). extractFreshVersion

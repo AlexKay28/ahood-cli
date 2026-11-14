@@ -128,6 +128,10 @@ function base(row: StatusRow): Omit<SyncResult, "action"> {
 /** Rows with nothing to sync, and why -- reported, never acted on. */
 function skipReason(row: StatusRow): string | null {
   if (row.status === "not_found") return "not found in the registry (or not visible to you)";
+  // ahood-cli#1320 contract §5: loadStatusRows() already forced sync_target
+  // to null and warned loudly about this when it reconciled the lockfile --
+  // this is just the per-row reason sync's own skip list repeats it under.
+  if (row.skill_id_mismatch) return "now points to a different skill in the registry -- refusing to update; reinstall explicitly if intended";
   if (row.missing) return `its files are gone from ${row.installed_path}; reinstall it with \`ahood ${row.kind ?? "skill"} add ${itemKey(row)}\``;
   if (row.sync_target === null) return null;
   if (row.kind === "mcp") {
