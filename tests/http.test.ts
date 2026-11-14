@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apiFetch, apiJson, ApiError, NetworkError, sanitizeErrorMessage } from "../src/http.js";
+import { writeCredentials } from "../src/credentials.js";
 import { CLI_NAME, CLI_VERSION } from "../src/version.js";
 
 const API_URL = "http://ahood.test";
@@ -167,10 +168,82 @@ describe("apiJson outage detection on a non-JSON error body (ahood-cli#159)", ()
     await expect(apiJson("/x")).rejects.toThrow("Request failed with status 404");
   });
 
-  it("does NOT treat a non-JSON 401 body as an outage", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("not json", { status: 401 })));
+  it("does NOT treat a non-JSON 401 body as an outage -- it gets the fixed ahood-cli#1320 message instead, regardless of body shape", async () => {
+    const originalToken = process.env.AHOOD_TOKEN;
+    process.env.AHOOD_TOKEN = "ahd_test_token";
+    try {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("not json", { status: 401 })));
 
-    await expect(apiJson("/x")).rejects.toThrow("Request failed with status 401");
+      await expect(apiJson("/x")).rejects.toThrow("AHOOD_TOKEN was rejected (expired or revoked).");
+    } finally {
+      if (originalToken === undefined) delete process.env.AHOOD_TOKEN;
+      else process.env.AHOOD_TOKEN = originalToken;
+    }
+  });
+});
+
+// ahood-cli#1320 contract §4: CLI-login tokens now expire (90 days), and a
+// 401 always means the token this request used was rejected -- but the two
+// places a token can come from need different advice, so the message is
+// fixed per source rather than passed through from the server's own `error`.
+describe("401 handling (ahood-cli#1320 contract §4)", () => {
+  const originalToken = process.env.AHOOD_TOKEN;
+  const originalHome = process.env.HOME;
+  const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
+  let dir: string;
+
+  beforeEach(() => {
+    process.env.AHOOD_API_URL = API_URL;
+    // Point HOME at an empty temp dir, same reasoning as the 429 login-hint
+    // tests above: resolveToken() falls back to ~/.config/ahood/credentials.json
+    // when AHOOD_TOKEN is unset, and this suite must not accidentally pick up
+    // a real logged-in developer's credentials file on the machine running it.
+    dir = mkdtempSync(join(tmpdir(), "ahood-http-401-test-"));
+    process.env.HOME = dir;
+    delete process.env.XDG_CONFIG_HOME;
+    delete process.env.AHOOD_TOKEN;
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+    if (originalToken === undefined) delete process.env.AHOOD_TOKEN;
+    else process.env.AHOOD_TOKEN = originalToken;
+  });
+
+  it("tells an AHOOD_TOKEN caller their env var was rejected, not the server's own message", async () => {
+    process.env.AHOOD_TOKEN = "ahd_env_token";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "token expired" }), { status: 401 })));
+
+    let caught: unknown;
+    try {
+      await apiJson("/x");
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(401);
+    expect((caught as ApiError).message).toBe("AHOOD_TOKEN was rejected (expired or revoked).");
+    expect((caught as ApiError).message).not.toMatch(/token expired/);
+  });
+
+  it("tells a stored-credentials caller to log in again, not the server's own message", async () => {
+    writeCredentials({ token: "ahd_stored_token" });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "token expired" }), { status: 401 })));
+
+    let caught: unknown;
+    try {
+      await apiJson("/x");
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(401);
+    expect((caught as ApiError).message).toBe("Your ahood login has expired or was revoked. Run `ahood login` again.");
+    expect((caught as ApiError).message).not.toMatch(/token expired/);
   });
 });
 
