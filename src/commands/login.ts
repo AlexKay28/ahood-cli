@@ -1,9 +1,18 @@
-import { apiJson, parseRetryAfterMs } from "../http.js";
+import { ApiError, apiJson, parseRetryAfterMs, sanitizeErrorMessage } from "../http.js";
 import { getApiUrl } from "../config.js";
 import { writeCredentials } from "../credentials.js";
 
 type DeviceCodeResponse = { code: string; verification_url: string; expires_in: number };
 type PollResponse = { status: "pending" | "approved"; token?: string };
+
+// A terminal, non-retryable poll response that carries a JSON `error`
+// (ahood-cli#1320 contract §3): any 4xx other than 429/404/410 (already
+// handled elsewhere in the loop), or any 5xx. Narrowed structurally rather
+// than cast, since the poll body's shape otherwise has nothing in common
+// with PollResponse.
+function structuredError(body: unknown): body is { error: string } {
+  return !!body && typeof body === "object" && typeof (body as { error?: unknown }).error === "string";
+}
 
 const DEFAULT_EXPIRES_IN_SECONDS = 600; // 10 minutes, matching the previous timeout loop's real-world duration
 const POLL_TIMEOUT_MS = 10_000;
@@ -112,9 +121,9 @@ export async function login(): Promise<void> {
       continue;
     }
     consecutive429s = 0;
-    let body: PollResponse;
+    let body: unknown;
     try {
-      body = (await res.json()) as PollResponse;
+      body = await res.json();
     } catch (error) {
       // A genuinely malformed/non-JSON body on a non-terminal status (e.g. a
       // transient 502 while still pending) is the same kind of transient
@@ -123,8 +132,25 @@ export async function login(): Promise<void> {
       console.error(`Polling failed (${error instanceof Error ? error.message : String(error)}); retrying...`);
       continue;
     }
-    if (res.status === 200 && body.status === "approved" && body.token) {
-      writeCredentials({ token: body.token });
+    // ahood-cli#1320 contract §3: any OTHER 4xx (409 too many tokens, say)
+    // or any 5xx, carrying a JSON `error`, is final -- not the transient
+    // blip a malformed body above is treated as. 429/404/410 are already
+    // handled above this point; everything else non-2xx with no parseable
+    // `error` falls through to "pending" below exactly as before, since
+    // there is nothing here to distinguish it from a still-provisioning
+    // response the server simply didn't annotate.
+    //
+    // Routed through the same ApiError + exitCodeFor every other command
+    // uses (401/403 -> 4, a non-401/403 4xx -> 2, 5xx -> 6) instead of a
+    // bespoke error class, so a caller branching on login's exit code gets
+    // the same documented table the README promises for every other
+    // command.
+    if (!res.ok && structuredError(body)) {
+      throw new ApiError(res.status, sanitizeErrorMessage(body.error));
+    }
+    const poll = body as PollResponse;
+    if (res.status === 200 && poll.status === "approved" && poll.token) {
+      writeCredentials({ token: poll.token });
       console.log("Logged in.");
       return;
     }

@@ -3,6 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { login } from "../src/commands/login.js";
+import { ApiError } from "../src/http.js";
+import { exitCodeFor } from "../src/exit-code.js";
 
 const API_URL = "http://ahood.test";
 const EVIL_URL = "http://evil.example.com";
@@ -125,6 +127,83 @@ describe("login", () => {
     // this would still be looping (every 2s, up to 10 minutes) instead of
     // having already thrown.
     expect(calls.filter((u) => u.startsWith(`${API_URL}/api/v1/auth/cli/device/`))).toHaveLength(1);
+  });
+
+  // ahood-cli#1320 contract §3: any 4xx other than 429/404/410, and any 5xx,
+  // carrying a JSON `error` is final -- not retried as a transient blip the
+  // way a malformed/unparseable body on a non-terminal status is. Routed
+  // through ApiError so exitCodeFor gives the same documented code every
+  // other command's errors do.
+  describe("terminal 4xx/5xx with a JSON error (ahood-cli#1320 contract §3)", () => {
+    function stubDeviceFlow(poll: Response): void {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url === `${API_URL}/api/v1/auth/cli/device`) {
+            return new Response(
+              JSON.stringify({ code: "ABCD", verification_url: `${API_URL}/cli-auth?code=ABCD`, expires_in: 600 }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          if (url.startsWith(`${API_URL}/api/v1/auth/cli/device/`)) return poll;
+          return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+        }),
+      );
+    }
+
+    it("stops polling on a 409 with a JSON error, prints it, and exits 2 (usage/validation)", async () => {
+      stubDeviceFlow(new Response(JSON.stringify({ error: "too many active tokens" }), { status: 409 }));
+
+      let caught: unknown;
+      try {
+        await login();
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(ApiError);
+      expect((caught as ApiError).message).toBe("too many active tokens");
+      expect(exitCodeFor(caught)).toBe(2);
+    });
+
+    it("stops polling on a 500 with a JSON error, prints it, and exits 6 (upstream)", async () => {
+      stubDeviceFlow(new Response(JSON.stringify({ error: "database is down" }), { status: 500 }));
+
+      let caught: unknown;
+      try {
+        await login();
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(ApiError);
+      expect((caught as ApiError).message).toBe("database is down");
+      expect(exitCodeFor(caught)).toBe(6);
+    });
+
+    it("keeps polling (does not treat as terminal) a 409 with no JSON error at all", async () => {
+      let pollCount = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url === `${API_URL}/api/v1/auth/cli/device`) {
+            return new Response(
+              JSON.stringify({ code: "ABCD", verification_url: `${API_URL}/cli-auth?code=ABCD`, expires_in: 600 }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          if (url.startsWith(`${API_URL}/api/v1/auth/cli/device/`)) {
+            pollCount++;
+            if (pollCount === 1) return new Response(null, { status: 409 });
+            return new Response(JSON.stringify({ status: "approved", token: "ahd_tok" }), { status: 200 });
+          }
+          return new Response(JSON.stringify({ error: `unexpected: ${url}` }), { status: 404 });
+        }),
+      );
+
+      await login();
+      expect(pollCount).toBe(2);
+    });
   });
 
   // ahood-cli#159: a 429 from the poll endpoint means "stop asking so often".
