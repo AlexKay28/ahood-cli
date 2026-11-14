@@ -25,7 +25,16 @@ import type { PinnedFileKind } from "./kind-info.js";
 // (#185). The other kinds are told apart by what they leave on disk
 // (kinds.ts localInstalledKind), and their pins keep the exact shape they
 // have always had.
-export type LockEntry = { version: string; checksum_sha256: string; mcp_config_hash?: string; kind?: PinnedFileKind };
+//
+// skillId (ahood-cli#1320 contract §5) is the server's stable identity for
+// the artifact this pin points at -- POST /api/v1/me/status's `skill_id`.
+// Unlike owner/slug, which can be reused (a delete+republish under the same
+// name, or an account rename), this is what lets status/sync tell "the same
+// skill, a new version" apart from "the name now means something else" --
+// see reconcileLockEntrySkillId below. Absent until the first status/sync
+// call after this field existed, and absent for every other kind's write
+// path that hasn't been taught to record it yet.
+export type LockEntry = { version: string; checksum_sha256: string; mcp_config_hash?: string; kind?: PinnedFileKind; skillId?: string };
 export type Lockfile = Record<string, LockEntry>;
 
 export function readLockfile(path: string): Lockfile {
@@ -669,5 +678,91 @@ export function removeLockfileEntry(path: string, ownerSlashSkill: string): bool
     delete lockfile[ownerSlashSkill];
     writeLockfile(path, lockfile);
     return existed;
+  });
+}
+
+// ahood-cli#1320 contract §5: what `ahood status`/`ahood sync` do with a
+// lockfile entry once a status call tells them the server's skill_id (and
+// canonical_owner, ahood#1395) for the owner/slug it pins.
+export type SkillIdReconcileOutcome =
+  | { action: "unchanged" }
+  | { action: "recorded" }
+  | { action: "renamed"; from: string; to: string }
+  | { action: "refused"; message: string };
+
+function renameOwner(ownerSlashSkill: string, canonicalOwner: string): string {
+  return `${canonicalOwner}${ownerSlashSkill.slice(ownerSlashSkill.indexOf("/"))}`;
+}
+
+// Mutates `lockfile` in place; callers that need the result persisted use
+// reconcileLockfileSkillId below, which wraps this in the same locked
+// read-modify-write every other lockfile writer in this file uses.
+//
+// No entry for this key at all: nothing pinned locally, nothing to
+// reconcile -- an item `ahood status` knows about only through the
+// user-level installed.json (ahood#979), never through this project's
+// lockfile, has no entry here to compare against.
+//
+// An entry that already has a skillId and it disagrees with the server's:
+// owner/slug now resolves to a different artifact than the one actually
+// installed under this pin -- most plausibly a delete-and-republish under
+// the same name. Moving the pin forward would silently start tracking that
+// other thing, so this refuses outright and writes nothing; the caller
+// decides how loudly to report it.
+//
+// An entry with no skillId yet records the one the server just reported --
+// every pin from before this field existed gets it on its first
+// status/sync after this release.
+//
+// canonical_owner differing from the entry's own owner (an account rename,
+// ahood#1395) moves the entry to the new owner/slug key. Orthogonal to the
+// skillId check above -- a renamed account is not "a different skill", and
+// both can apply to the same call (a stale pin that both needs its skillId
+// recorded and has followed the owner to a new name).
+export function reconcileLockEntrySkillId(
+  lockfile: Lockfile,
+  ownerSlashSkill: string,
+  server: { skillId: string; canonicalOwner?: string },
+): SkillIdReconcileOutcome {
+  const entry = lockfile[ownerSlashSkill];
+  if (!entry) return { action: "unchanged" };
+
+  if (entry.skillId !== undefined && entry.skillId !== server.skillId) {
+    return {
+      action: "refused",
+      message: `${ownerSlashSkill} now points to a different skill -- refusing to update; reinstall explicitly if intended`,
+    };
+  }
+
+  const recorded = entry.skillId === undefined;
+  if (recorded) entry.skillId = server.skillId;
+
+  const owner = ownerSlashSkill.slice(0, ownerSlashSkill.indexOf("/"));
+  if (server.canonicalOwner && server.canonicalOwner !== owner) {
+    const to = renameOwner(ownerSlashSkill, server.canonicalOwner);
+    delete lockfile[ownerSlashSkill];
+    lockfile[to] = entry;
+    return { action: "renamed", from: ownerSlashSkill, to };
+  }
+
+  return recorded ? { action: "recorded" } : { action: "unchanged" };
+}
+
+/** Locked read-modify-write wrapper around reconcileLockEntrySkillId:
+ *  persists the file on a "recorded" or "renamed" outcome, and leaves it
+ *  untouched on "unchanged" or "refused" (nothing moved, nothing to
+ *  persist). */
+export function reconcileLockfileSkillId(
+  path: string,
+  ownerSlashSkill: string,
+  server: { skillId: string; canonicalOwner?: string },
+): SkillIdReconcileOutcome {
+  return withLock(path, () => {
+    const lockfile = readLockfile(path);
+    const outcome = reconcileLockEntrySkillId(lockfile, ownerSlashSkill, server);
+    if (outcome.action === "recorded" || outcome.action === "renamed") {
+      writeLockfile(path, lockfile);
+    }
+    return outcome;
   });
 }

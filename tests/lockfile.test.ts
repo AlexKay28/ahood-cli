@@ -12,6 +12,7 @@ import {
   writeLockfileEntryVerifyingChecksum,
   LockfileChecksumConflictError,
   currentHostIdentity,
+  reconcileLockfileSkillId,
 } from "../src/lockfile.js";
 
 describe("lockfile", () => {
@@ -671,6 +672,85 @@ describe("lockfile", () => {
       ).toThrow(LockfileChecksumConflictError);
       expect(readLockfile(lockPath)).toEqual({
         "alice/my-skill": { version: "1.0.0", checksum_sha256: "concurrent-writer-won" },
+      });
+    });
+  });
+
+  // ahood-cli#1320 contract §5.
+  describe("reconcileLockfileSkillId", () => {
+    it("does nothing when there is no lockfile entry for this key", () => {
+      const outcome = reconcileLockfileSkillId(lockPath, "alice/my-skill", { skillId: "s1" });
+      expect(outcome).toEqual({ action: "unchanged" });
+      expect(readLockfile(lockPath)).toEqual({});
+    });
+
+    it("records the skillId when the entry has none yet", () => {
+      writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "abc" });
+
+      const outcome = reconcileLockfileSkillId(lockPath, "alice/my-skill", { skillId: "s1" });
+
+      expect(outcome).toEqual({ action: "recorded" });
+      expect(readLockfile(lockPath)).toEqual({
+        "alice/my-skill": { version: "1.0.0", checksum_sha256: "abc", skillId: "s1" },
+      });
+    });
+
+    it("does nothing when the recorded skillId already matches", () => {
+      writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "abc", skillId: "s1" });
+
+      const outcome = reconcileLockfileSkillId(lockPath, "alice/my-skill", { skillId: "s1" });
+
+      expect(outcome).toEqual({ action: "unchanged" });
+      expect(readLockfile(lockPath)).toEqual({
+        "alice/my-skill": { version: "1.0.0", checksum_sha256: "abc", skillId: "s1" },
+      });
+    });
+
+    it("refuses and writes nothing when the recorded skillId disagrees with the server's", () => {
+      writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "abc", skillId: "s1" });
+
+      const outcome = reconcileLockfileSkillId(lockPath, "alice/my-skill", { skillId: "s2" });
+
+      expect(outcome).toEqual({
+        action: "refused",
+        message: "alice/my-skill now points to a different skill -- refusing to update; reinstall explicitly if intended",
+      });
+      // Untouched: no version bump, no skillId overwrite.
+      expect(readLockfile(lockPath)).toEqual({
+        "alice/my-skill": { version: "1.0.0", checksum_sha256: "abc", skillId: "s1" },
+      });
+    });
+
+    it("moves the entry to the canonical owner (an account rename), preserving the rest of the entry", () => {
+      writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "abc", skillId: "s1" });
+
+      const outcome = reconcileLockfileSkillId(lockPath, "alice/my-skill", { skillId: "s1", canonicalOwner: "alice2" });
+
+      expect(outcome).toEqual({ action: "renamed", from: "alice/my-skill", to: "alice2/my-skill" });
+      expect(readLockfile(lockPath)).toEqual({
+        "alice2/my-skill": { version: "1.0.0", checksum_sha256: "abc", skillId: "s1" },
+      });
+    });
+
+    it("records a missing skillId AND renames in the same call", () => {
+      writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "abc" });
+
+      const outcome = reconcileLockfileSkillId(lockPath, "alice/my-skill", { skillId: "s1", canonicalOwner: "alice2" });
+
+      expect(outcome).toEqual({ action: "renamed", from: "alice/my-skill", to: "alice2/my-skill" });
+      expect(readLockfile(lockPath)).toEqual({
+        "alice2/my-skill": { version: "1.0.0", checksum_sha256: "abc", skillId: "s1" },
+      });
+    });
+
+    it("a mismatch wins over a canonical_owner rename -- refuses without moving anything", () => {
+      writeLockfileEntry(lockPath, "alice/my-skill", { version: "1.0.0", checksum_sha256: "abc", skillId: "s1" });
+
+      const outcome = reconcileLockfileSkillId(lockPath, "alice/my-skill", { skillId: "s2", canonicalOwner: "alice2" });
+
+      expect(outcome.action).toBe("refused");
+      expect(readLockfile(lockPath)).toEqual({
+        "alice/my-skill": { version: "1.0.0", checksum_sha256: "abc", skillId: "s1" },
       });
     });
   });

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { status, toRow, type ServerStatus } from "../src/commands/status.js";
+import { status, toRow, loadStatusRows, type ServerStatus } from "../src/commands/status.js";
 import { installedPathFor, recordInstall, updateInstalled } from "../src/installed.js";
 import { ApiError } from "../src/http.js";
 import { exitCodeFor } from "../src/exit-code.js";
@@ -151,5 +151,98 @@ describe("ahood status (ahood#979)", () => {
 
   it("rejects unknown arguments", async () => {
     await expect(status(["--verbose"])).rejects.toThrow(/Unknown argument: --verbose/);
+  });
+});
+
+// ahood-cli#1320 contract §5: the project lockfile entry's skillId is
+// reconciled against the server's skill_id/canonical_owner every time
+// loadStatusRows() runs (status, sync).
+describe("skillId reconciliation (ahood-cli#1320 contract §5)", () => {
+  let env: ReturnType<typeof setupEnv>;
+  let io: ReturnType<typeof captureConsole>;
+  beforeEach(() => {
+    env = setupEnv();
+    io = captureConsole();
+  });
+  afterEach(() => env.restore());
+
+  it("records a missing skillId onto the project lockfile entry the first time status sees it", async () => {
+    const { writeLockfileEntry, readLockfile } = await import("../src/lockfile.js");
+    seed("alice", "pdf-tools", "1.0.0");
+    writeLockfileEntry(".claude/skills.lock.json", "alice/pdf-tools", { version: "1.0.0", checksum_sha256: "c" });
+    stubMeApi(() =>
+      json({
+        items: [
+          {
+            owner: "alice", slug: "pdf-tools", installed_version: "1.0.0", status: "ok", kind: "skill",
+            latest_version: "1.0.0", update_available: false, is_owner: false, skill_id: "skill-1",
+          },
+        ],
+        plan: { evolution_available: true, consented: true },
+      }),
+    );
+
+    await loadStatusRows();
+
+    expect(readLockfile(".claude/skills.lock.json")["alice/pdf-tools"]).toEqual({
+      version: "1.0.0", checksum_sha256: "c", skillId: "skill-1",
+    });
+  });
+
+  it("warns and blocks sync_target when the recorded skillId disagrees with the server's", async () => {
+    const { writeLockfileEntry, readLockfile } = await import("../src/lockfile.js");
+    seed("alice", "pdf-tools", "1.0.0");
+    writeLockfileEntry(".claude/skills.lock.json", "alice/pdf-tools", {
+      version: "1.0.0", checksum_sha256: "c", skillId: "skill-OLD",
+    });
+    stubMeApi(() =>
+      json({
+        items: [
+          {
+            owner: "alice", slug: "pdf-tools", installed_version: "1.0.0", status: "ok", kind: "skill",
+            latest_version: "2.0.0", update_available: true, is_owner: false, skill_id: "skill-NEW",
+          },
+        ],
+        plan: { evolution_available: true, consented: true },
+      }),
+    );
+
+    const { rows } = await loadStatusRows();
+
+    expect(rows[0]).toMatchObject({ sync_target: null, skill_id_mismatch: true, update_available: true });
+    expect(io.stderr()).toContain(
+      "alice/pdf-tools now points to a different skill -- refusing to update; reinstall explicitly if intended",
+    );
+    // Untouched: no version bump, no skillId overwrite.
+    expect(readLockfile(".claude/skills.lock.json")["alice/pdf-tools"]).toEqual({
+      version: "1.0.0", checksum_sha256: "c", skillId: "skill-OLD",
+    });
+  });
+
+  it("moves the lockfile entry to the canonical owner and prints a one-line notice", async () => {
+    const { writeLockfileEntry, readLockfile } = await import("../src/lockfile.js");
+    seed("alice", "pdf-tools", "1.0.0");
+    writeLockfileEntry(".claude/skills.lock.json", "alice/pdf-tools", {
+      version: "1.0.0", checksum_sha256: "c", skillId: "skill-1",
+    });
+    stubMeApi(() =>
+      json({
+        items: [
+          {
+            owner: "alice", slug: "pdf-tools", installed_version: "1.0.0", status: "ok", kind: "skill",
+            latest_version: "1.0.0", update_available: false, is_owner: false, skill_id: "skill-1",
+            canonical_owner: "alice2",
+          },
+        ],
+        plan: { evolution_available: true, consented: true },
+      }),
+    );
+
+    await loadStatusRows();
+
+    const lockfile = readLockfile(".claude/skills.lock.json");
+    expect(lockfile["alice/pdf-tools"]).toBeUndefined();
+    expect(lockfile["alice2/pdf-tools"]).toEqual({ version: "1.0.0", checksum_sha256: "c", skillId: "skill-1" });
+    expect(io.stdout()).toContain("alice/pdf-tools is now alice2/pdf-tools");
   });
 });

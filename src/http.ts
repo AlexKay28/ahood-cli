@@ -1,5 +1,5 @@
 import { getApiUrl } from "./config.js";
-import { resolveToken } from "./credentials.js";
+import { LEGACY_TOKEN_ENV, resolveToken, resolveTokenWithSource, TOKEN_ENV } from "./credentials.js";
 import { sanitizeForTerminal } from "./terminal-safe.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
 
@@ -171,6 +171,26 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
         ? ""
         : " You're not logged in, so this request shares a rate limit with every other anonymous caller on your network -- `ahood login` may get you your own.";
       throw new ApiError(429, `Rate limited -- try again in ${seconds} seconds.${loginHint}`);
+    }
+
+    // ahood-cli#1320 contract §4: CLI-login tokens now expire (90 days), and
+    // a 401 always means the token this request used was rejected -- but
+    // what the user should actually DO about it differs by where that token
+    // came from, so this replaces whatever the server's own `error` text
+    // says with one of two fixed messages instead of running it through the
+    // generic handling below. Checked before the generic !res.ok branch so
+    // it applies regardless of whether the body happens to be JSON.
+    if (res.status === 401) {
+      // The body carries nothing either message below needs; drained so
+      // undici releases the socket instead of holding it for a body nobody
+      // reads, same as the 429 branch above.
+      await res.text().catch(() => "");
+      const source = resolveTokenWithSource()?.source;
+      const message =
+        source === TOKEN_ENV || source === LEGACY_TOKEN_ENV
+          ? "AHOOD_TOKEN was rejected (expired or revoked)."
+          : "Your ahood login has expired or was revoked. Run `ahood login` again.";
+      throw new ApiError(401, message);
     }
 
     if (!res.ok) {

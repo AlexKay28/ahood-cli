@@ -171,6 +171,36 @@ describe("add", () => {
     });
   });
 
+  // ahood-cli#1320 contract §5: install records the server's skill_id onto
+  // the lockfile entry whenever the metadata response happens to include
+  // one, so a later status call has nothing to backfill.
+  it("records the server's skill_id on the lockfile entry when the metadata response includes one", async () => {
+    const archive = await tarGz({ "SKILL.md": "# demo\n" });
+    const checksum = sha256(archive);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}`) {
+          return new Response(
+            JSON.stringify({ skill_versions: { version: VERSION, manifest: [{ path: "SKILL.md" }], checksum_sha256: checksum, skill_id: "skill-123" } }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}/download?version=${VERSION}`) {
+          return new Response(new Uint8Array(archive), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: `unexpected request: ${url}` }), { status: 404 });
+      }),
+    );
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
+      [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: checksum, skillId: "skill-123" },
+    });
+  });
+
   it("refuses an archive whose entry name escapes the destination directory", async () => {
     // Checksum deliberately CORRECT here, so the only thing that can stop this
     // is the path-containment guard in extractTarGz.

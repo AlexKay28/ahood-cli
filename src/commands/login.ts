@@ -1,9 +1,23 @@
-import { apiJson, parseRetryAfterMs } from "../http.js";
+import { ApiError, apiJson, parseRetryAfterMs, sanitizeErrorMessage } from "../http.js";
 import { getApiUrl } from "../config.js";
 import { writeCredentials } from "../credentials.js";
 
-type DeviceCodeResponse = { code: string; verification_url: string; expires_in: number };
+// device_code (ahood-cli#1320 contract §1/§3): a one-shot secret the START
+// response carries ONLY to let this CLI re-identify itself on every poll via
+// the X-Ahood-Device-Code header -- never the code's own user/verification
+// story. Optional because an older server hasn't been taught to send it yet
+// (contract §2: the server still accepts a header-less poll in that case).
+type DeviceCodeResponse = { code: string; verification_url: string; expires_in: number; device_code?: string };
 type PollResponse = { status: "pending" | "approved"; token?: string };
+
+// A terminal, non-retryable poll response that carries a JSON `error`
+// (ahood-cli#1320 contract §3): any 4xx other than 429/404/410 (already
+// handled elsewhere in the loop), or any 5xx. Narrowed structurally rather
+// than cast, since the poll body's shape otherwise has nothing in common
+// with PollResponse.
+function structuredError(body: unknown): body is { error: string } {
+  return !!body && typeof body === "object" && typeof (body as { error?: unknown }).error === "string";
+}
 
 const DEFAULT_EXPIRES_IN_SECONDS = 600; // 10 minutes, matching the previous timeout loop's real-world duration
 const POLL_TIMEOUT_MS = 10_000;
@@ -18,9 +32,14 @@ function sleep(ms: number): Promise<void> {
 }
 
 export async function login(): Promise<void> {
-  const { code, verification_url, expires_in } = await apiJson<DeviceCodeResponse>("/api/v1/auth/cli/device", {
-    method: "POST",
-  });
+  // device_code is destructured here and ONLY ever passed to
+  // apiFetchWithTimeout below, which turns it into a poll header -- per
+  // contract §1 it must never be printed or persisted, unlike `code`, which
+  // is deliberately echoed to the terminal a few lines down.
+  const { code, verification_url, expires_in, device_code } = await apiJson<DeviceCodeResponse>(
+    "/api/v1/auth/cli/device",
+    { method: "POST" },
+  );
 
   // Printed VERBATIM, deliberately not through sanitizeForTerminal the way
   // `add` treats server-supplied text: this line exists so the user can
@@ -78,7 +97,7 @@ export async function login(): Promise<void> {
       // unreserved, so encodeURIComponent left it alone. Pinned by
       // tests/login-device-code-verbatim.test.ts; contract in ahood's
       // docs/adr/backend/0005-device-code-cross-repo-contract.md (ahood#357).
-      res = await apiFetchWithTimeout(`/api/v1/auth/cli/device/${encodeURIComponent(code)}`);
+      res = await apiFetchWithTimeout(`/api/v1/auth/cli/device/${encodeURIComponent(code)}`, device_code);
     } catch (error) {
       // A THROWN fetch (DNS blip, dropped socket) is transient by nature, and
       // this loop runs for up to ten minutes while a human walks to their
@@ -112,9 +131,9 @@ export async function login(): Promise<void> {
       continue;
     }
     consecutive429s = 0;
-    let body: PollResponse;
+    let body: unknown;
     try {
-      body = (await res.json()) as PollResponse;
+      body = await res.json();
     } catch (error) {
       // A genuinely malformed/non-JSON body on a non-terminal status (e.g. a
       // transient 502 while still pending) is the same kind of transient
@@ -123,8 +142,25 @@ export async function login(): Promise<void> {
       console.error(`Polling failed (${error instanceof Error ? error.message : String(error)}); retrying...`);
       continue;
     }
-    if (res.status === 200 && body.status === "approved" && body.token) {
-      writeCredentials({ token: body.token });
+    // ahood-cli#1320 contract §3: any OTHER 4xx (409 too many tokens, say)
+    // or any 5xx, carrying a JSON `error`, is final -- not the transient
+    // blip a malformed body above is treated as. 429/404/410 are already
+    // handled above this point; everything else non-2xx with no parseable
+    // `error` falls through to "pending" below exactly as before, since
+    // there is nothing here to distinguish it from a still-provisioning
+    // response the server simply didn't annotate.
+    //
+    // Routed through the same ApiError + exitCodeFor every other command
+    // uses (401/403 -> 4, a non-401/403 4xx -> 2, 5xx -> 6) instead of a
+    // bespoke error class, so a caller branching on login's exit code gets
+    // the same documented table the README promises for every other
+    // command.
+    if (!res.ok && structuredError(body)) {
+      throw new ApiError(res.status, sanitizeErrorMessage(body.error));
+    }
+    const poll = body as PollResponse;
+    if (res.status === 200 && poll.status === "approved" && poll.token) {
+      writeCredentials({ token: poll.token });
       console.log("Logged in.");
       return;
     }
@@ -141,6 +177,14 @@ export async function login(): Promise<void> {
 // is expected and must not throw -- the status code is inspected by the
 // caller instead. Still routed through the same trusted host + a bounded
 // timeout, unlike the raw, unbounded `fetch` this replaced.
-async function apiFetchWithTimeout(path: string): Promise<Response> {
-  return fetch(`${getApiUrl()}${path}`, { signal: AbortSignal.timeout(POLL_TIMEOUT_MS) });
+//
+// deviceCode (ahood-cli#1320 contract §2/§3) goes out as the
+// X-Ahood-Device-Code header -- a header, never a query param, so it can't
+// end up in a URL or a log line the way a query string would. Omitted
+// (undefined) against an older server that never sent one in the START
+// response, which the server treats exactly as it does today (contract
+// §2's "if header absent -> current behaviour").
+async function apiFetchWithTimeout(path: string, deviceCode?: string): Promise<Response> {
+  const headers = deviceCode ? { "X-Ahood-Device-Code": deviceCode } : undefined;
+  return fetch(`${getApiUrl()}${path}`, { signal: AbortSignal.timeout(POLL_TIMEOUT_MS), headers });
 }

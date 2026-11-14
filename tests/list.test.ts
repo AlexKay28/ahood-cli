@@ -76,7 +76,12 @@ describe("listSkills", () => {
   });
 
   it("surfaces the server's error message on a non-2xx response", async () => {
-    stubApi(401, { error: "Unauthorized" });
+    // 403, not 401: since ahood-cli#1320 contract §4, a 401's message is a
+    // fixed string keyed on where the token came from, not the server's own
+    // `error` -- see tests/http.test.ts's "401 handling" describe block for
+    // that. This test is about the generic pass-through every OTHER status
+    // still gets.
+    stubApi(403, { error: "Unauthorized" });
 
     await expect(listSkills()).rejects.toThrow(/Unauthorized/);
   });
