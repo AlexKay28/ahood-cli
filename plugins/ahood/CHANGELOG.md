@@ -9,8 +9,11 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 `preversion` hook (and the release workflow) refuse a version without one
 (`scripts/check-changelog.mjs`).
 
-## Unreleased
+## 0.19.0 (2026-11-15)
 
+- The using-ahood skill and `/ahood-snap` follow a numbered snap protocol: one snap per artifact,
+  find its exact `owner/slug` first (your ahood username, not a GitHub handle), and write the
+  lesson as one general rule. Snaps written this way are the ones self-evolution can use.
 - `ahood snap create` prints what the registry says about whether the snap feeds an artifact's
   self-evolution right after saving (which artifact, or why not, and which of your artifacts
   are enrolled when it doesn't). `--artifact` now also accepts a bare slug of your own artifact,
