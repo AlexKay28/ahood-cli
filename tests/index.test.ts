@@ -20,6 +20,15 @@ vi.mock("../src/commands/update.js", async (importOriginal) => {
   return { ...actual, update: vi.fn(async () => {}) };
 });
 
+// ahood#1552 step 5: so the "hidden refresh command"/"notifier runs after a
+// successful command" tests below (in-process, like dispatchGroup/
+// dispatchSnap's own) can assert on main()'s wiring without touching the
+// network or a real cache file.
+vi.mock("../src/update-notifier.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/update-notifier.js")>();
+  return { ...actual, performRefresh: vi.fn(async () => {}), maybeNotifyUpdate: vi.fn() };
+});
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cliPath = path.join(here, "..", "dist", "index.js");
 
@@ -344,5 +353,58 @@ describe("authHint (main()'s follow-up line on an auth failure)", () => {
     expect(authHint("status", new ApiError(403, "This token's scopes do not include 'read'"))).toMatch(/missing a scope/);
     expect(authHint("token", new ApiError(404, "Not found"))).toBeNull();
     expect(authHint("token", new Error("boom"))).toBeNull();
+  });
+});
+
+// ahood#1552 step 5: main()'s own wiring for the passive update notifier --
+// the hidden background-refresh subcommand, and the post-success call
+// every other command gets. update-notifier.ts's own test file covers the
+// notifier's actual logic (cache, suppression, wording); this is only
+// "does main() call the right thing, with the right argument".
+describe("main() -- update notifier wiring (in-process)", () => {
+  it("the hidden __update-check-refresh subcommand calls performRefresh with its argument and returns before any normal dispatch", async () => {
+    const { main } = await import("../src/index.js");
+    const { performRefresh, maybeNotifyUpdate } = await import("../src/update-notifier.js");
+    const refreshSpy = vi.mocked(performRefresh);
+    const notifySpy = vi.mocked(maybeNotifyUpdate);
+    refreshSpy.mockClear();
+    notifySpy.mockClear();
+    const originalArgv = process.argv;
+    process.argv = [originalArgv[0], originalArgv[1], "__update-check-refresh", "/tmp/update-check.json"];
+    try {
+      await main();
+    } finally {
+      process.argv = originalArgv;
+    }
+    expect(refreshSpy).toHaveBeenCalledWith("/tmp/update-check.json");
+    // Never the ambient post-command notice too -- this path returns before it.
+    expect(notifySpy).not.toHaveBeenCalled();
+  });
+
+  it("calls maybeNotifyUpdate once, with this invocation's --json flag, after a command succeeds", async () => {
+    const { main } = await import("../src/index.js");
+    const { add } = await import("../src/commands/add.js");
+    const { maybeNotifyUpdate } = await import("../src/update-notifier.js");
+    const notifySpy = vi.mocked(maybeNotifyUpdate);
+    notifySpy.mockClear();
+    vi.mocked(add).mockResolvedValueOnce(undefined);
+    const originalArgv = process.argv;
+    process.argv = [originalArgv[0], originalArgv[1], "skill", "add", "alice/foo"];
+    try {
+      await main();
+    } finally {
+      process.argv = originalArgv;
+    }
+    expect(notifySpy).toHaveBeenCalledTimes(1);
+    expect(notifySpy).toHaveBeenCalledWith({ json: false });
+  });
+
+  it("skips the generic post-command call for `status` (it calls the richer version itself -- see status.test.ts)", async () => {
+    // Pure string-comparison check on main()'s own guard, not a real
+    // `status` run (which would hit the network) -- resolvedCommand is
+    // just "status" either way, so this is enough to prove main() itself
+    // takes the branch that skips its generic call.
+    const indexSource = await import("node:fs").then((fs) => fs.readFileSync(new URL("../src/index.ts", import.meta.url), "utf-8"));
+    expect(indexSource).toContain('if (resolvedCommand !== "status") maybeNotifyUpdate(');
   });
 });

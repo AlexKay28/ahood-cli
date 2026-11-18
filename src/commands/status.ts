@@ -6,8 +6,27 @@ import { UsageError } from "../usage-error.js";
 import { itemKey, migrateProjectLockfileOrWarn, readInstalled, type InstalledItem } from "../installed.js";
 import { reconcileLockfileSkillId } from "../lockfile.js";
 import { LOCKFILE_PATH } from "../spec.js";
+import { maybeNotifyUpdate } from "../update-notifier.js";
 
 const USAGE = "Usage: ahood status [--json]";
+
+// web #1552 step 4 (ahood_status, now shipped on origin/dev e6601682 --
+// lib/status/installed.ts, lib/client-versions.ts's ClientStatusBlock): an
+// additive `ahood` block on this same response. Every field here is still
+// read defensively (optional chaining throughout): an OLDER server that
+// hasn't deployed this yet simply omits it, and this CLI must keep working
+// against it either way.
+export type AhoodStatusBlock = {
+  server?: { version?: string; sha?: string; built_at?: string };
+  client?: {
+    surface?: string;
+    version?: string;
+    latest?: string;
+    update_available?: boolean;
+    below_minimum?: boolean;
+    upgrade_command?: string;
+  } | null;
+};
 
 // POST /api/v1/me/status (ahood#978, lib/skills/installed-status.ts on the
 // server). Mirrors InstalledStatusItem / InstalledStatus exactly.
@@ -36,7 +55,12 @@ export type ServerStatusItem =
       skill_id?: string;
       canonical_owner?: string;
     };
-export type ServerStatus = { items: ServerStatusItem[]; plan: { evolution_available: boolean; consented: boolean } };
+export type ServerStatus = {
+  items: ServerStatusItem[];
+  plan: { evolution_available: boolean; consented: boolean };
+  /** Optional (web #1552 step 4); see AhoodStatusBlock above. */
+  ahood?: AhoodStatusBlock;
+};
 
 /** The server's documented per-request cap (MAX_STATUS_ITEMS). */
 export const STATUS_BATCH = 500;
@@ -44,7 +68,13 @@ export const STATUS_BATCH = 500;
 /** One request per 500 distinct artifacts. The server answers per
  *  owner/slug; the installed version sent is the first install's, and
  *  update_available is recomputed per install by the caller (toRow). */
-export async function fetchStatus(items: InstalledItem[]): Promise<{ byKey: Map<string, ServerStatusItem>; plan: ServerStatus["plan"] | null }> {
+export async function fetchStatus(
+  items: InstalledItem[],
+): Promise<{
+  byKey: Map<string, ServerStatusItem>;
+  plan: ServerStatus["plan"] | null;
+  ahood: AhoodStatusBlock | null;
+}> {
   const distinct = new Map<string, InstalledItem>();
   for (const item of items) {
     const key = itemKey(item).toLowerCase();
@@ -53,6 +83,7 @@ export async function fetchStatus(items: InstalledItem[]): Promise<{ byKey: Map<
   const unique = [...distinct.values()];
   const byKey = new Map<string, ServerStatusItem>();
   let plan: ServerStatus["plan"] | null = null;
+  let ahood: AhoodStatusBlock | null = null;
   for (let i = 0; i < unique.length; i += STATUS_BATCH) {
     const batch = unique.slice(i, i + STATUS_BATCH);
     const res = await apiJson<ServerStatus>("/api/v1/me/status", {
@@ -61,10 +92,11 @@ export async function fetchStatus(items: InstalledItem[]): Promise<{ byKey: Map<
       body: JSON.stringify({ installed: batch.map((b) => ({ owner: b.owner, slug: b.slug, version: b.version })) }),
     });
     plan = res.plan;
+    if (res.ahood) ahood = res.ahood;
     // The server lowercases owner/slug; match on that.
     for (const s of res.items) byKey.set(`${s.owner}/${s.slug}`.toLowerCase(), s);
   }
-  return { byKey, plan };
+  return { byKey, plan, ahood };
 }
 
 export type StatusRow = {
@@ -154,11 +186,16 @@ function reconcileSkillIds(items: InstalledItem[], byKey: Map<string, ServerStat
   return mismatched;
 }
 
-export async function loadStatusRows(): Promise<{ items: InstalledItem[]; rows: StatusRow[]; plan: ServerStatus["plan"] | null }> {
+export async function loadStatusRows(): Promise<{
+  items: InstalledItem[];
+  rows: StatusRow[];
+  plan: ServerStatus["plan"] | null;
+  ahood: AhoodStatusBlock | null;
+}> {
   migrateProjectLockfileOrWarn();
   const items = readInstalled().items;
-  if (items.length === 0) return { items, rows: [], plan: null };
-  const { byKey, plan } = await fetchStatus(items);
+  if (items.length === 0) return { items, rows: [], plan: null, ahood: null };
+  const { byKey, plan, ahood } = await fetchStatus(items);
   const mismatched = reconcileSkillIds(items, byKey);
   return {
     items,
@@ -166,6 +203,7 @@ export async function loadStatusRows(): Promise<{ items: InstalledItem[]; rows: 
       toRow(i, byKey.get(itemKey(i).toLowerCase()), mismatched.has(`${i.projectDir}::${itemKey(i).toLowerCase()}`)),
     ),
     plan,
+    ahood,
   };
 }
 
@@ -189,9 +227,17 @@ export async function status(args: string[]): Promise<void> {
   if (leftover.length > 0) throw new UsageError(`Unknown argument: ${leftover[0]}\n${USAGE}`);
   const json = args.includes("--json");
 
-  const { rows, plan } = await loadStatusRows();
+  const { rows, plan, ahood } = await loadStatusRows();
+  // ahood#1552 step 5: status sees the server's own `ahood.client` block (if
+  // and when the server sends one -- optional, see AhoodStatusBlock above),
+  // so it calls the shared notifier directly with that fresher data instead
+  // of the generic post-command call index.ts makes for every other
+  // command (which only has the local npm-registry cache). Absent the
+  // block, this behaves exactly like the generic call: `latest`/
+  // `belowMinimum` fall back to undefined/false and the cache is used.
+  maybeNotifyUpdate({ json, belowMinimum: ahood?.client?.below_minimum, latest: ahood?.client?.latest });
   if (json) {
-    console.log(JSON.stringify({ items: rows, plan }));
+    console.log(JSON.stringify({ items: rows, plan, ahood }));
     return;
   }
   if (rows.length === 0) {

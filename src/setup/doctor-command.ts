@@ -15,10 +15,15 @@ import { displayPath } from "./paths.js";
 import { RELEASE_BRANCH, RELEASE_REPO, releaseBranchExists } from "./release-channel.js";
 import { runner } from "./runner.js";
 import { AHOOD_CLI, AHOOD_MCP_URL } from "./templates/ahood-commands.js";
+// ahood#1552 step 5: `newer()` and the npm-latest URL moved to the shared
+// update-notifier module, which also runs the passive stderr notice every
+// other command gets; doctor keeps its own live (non-cached) `versionCheck`
+// below, built on the same comparator.
+import { newer, NPM_LATEST_URL } from "../update-notifier.js";
 
 const USAGE = "Usage: ahood doctor [--offline] [--json]";
 const PROBE_TIMEOUT_MS = 5_000;
-export const NPM_LATEST_URL = "https://registry.npmjs.org/@ahood%2fcli/latest";
+export { NPM_LATEST_URL };
 /** The npm registry document for `pkg` at `version` (404 when that version was never published). */
 export const npmVersionUrl = (pkg: string, version: string) => `https://registry.npmjs.org/${pkg.replace("/", "%2f")}/${version}`;
 
@@ -85,13 +90,6 @@ async function loginCheck(offline: boolean): Promise<Check> {
   }
   if (auth.authenticated === false) return { name, status: "warn", detail: "token rejected -- run `ahood login` again" };
   return { name, status: "warn", detail: `could not verify the token (${auth.error})` };
-}
-
-function newer(a: string, b: string): boolean {
-  const parts = (v: string) => v.split("-")[0].split(".").map((n) => Number(n) || 0);
-  const [x, y] = [parts(a), parts(b)];
-  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
-  return false;
 }
 
 async function versionCheck(offline: boolean): Promise<Check> {

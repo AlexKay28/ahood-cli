@@ -58,6 +58,7 @@ import { formatHelp, formatKindHelp, formatGroupHelp, formatSnapHelp, formatComm
 import { ApiError } from "./http.js";
 import { exitCodeFor } from "./exit-code.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
+import { maybeNotifyUpdate, performRefresh, REFRESH_COMMAND } from "./update-notifier.js";
 
 // Every registry verb, reached as `ahood <noun> <verb>` for every registry
 // noun (skill, agent, mcp, doc, project, loop, prompt) -- one handler per verb shared by
@@ -478,6 +479,15 @@ export function authHint(command: string, error: unknown): string | null {
 async function main() {
   const [command, ...args] = process.argv.slice(2);
 
+  // ahood#1552 step 5: the detached background refresh this CLI spawns on
+  // itself (update-notifier.ts's spawnBackgroundRefresh) -- hidden, never in
+  // help/suggestions, never reached by a real user. Returns before anything
+  // else below (including the --version/-v check) runs.
+  if (command === REFRESH_COMMAND) {
+    await performRefresh(args[0]);
+    return;
+  }
+
   if (command === "--version" || command === "-v") {
     console.log(`${CLI_NAME} ${CLI_VERSION}`);
     return;
@@ -553,6 +563,14 @@ async function main() {
 
   try {
     await handler(args);
+    // ahood#1552 step 5: one passive stderr line, after the command's own
+    // output, when a newer CLI is out. maybeNotifyUpdate is synchronous and
+    // never touches the network itself, so this can never delay the
+    // process exiting. `status` is excluded here: it already calls the
+    // notifier itself, with the server's own (optional) `ahood.client`
+    // block when one comes back, which is fresher than the local cache --
+    // calling it again here would risk a duplicate line.
+    if (resolvedCommand !== "status") maybeNotifyUpdate({ json: args.includes("--json") });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);
