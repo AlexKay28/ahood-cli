@@ -301,3 +301,61 @@ describe("ahood.client (ahood#1552 step 5)", () => {
     expect(maybeNotifyUpdate).toHaveBeenCalledWith({ json: false, belowMinimum: undefined, latest: undefined });
   });
 });
+
+// ahood#1554 step 2: the server's optional top-level `notices[]` on the
+// same response. Additive and absent from every fixture above.
+describe("notices[] (ahood#1554 step 5)", () => {
+  let env: ReturnType<typeof setupEnv>;
+  let io: ReturnType<typeof captureConsole>;
+  beforeEach(() => {
+    env = setupEnv();
+    io = captureConsole();
+  });
+  afterEach(() => env.restore());
+
+  const NOTICE = {
+    id: "client-update-2026-11",
+    kind: "client_update",
+    severity: "action",
+    message: "A newer ahood client is available.",
+    action: { label: "Update", command: "npx @ahood/cli@latest setup" },
+  };
+
+  it("--json passes notices through verbatim, additive to the existing shape", async () => {
+    seed("alice", "pdf-tools", "1.0.0");
+    stubMeApi(() => json({ ...fixture("me-status.json"), notices: [NOTICE] }));
+    await status(["--json"]);
+    const out = JSON.parse(io.out[0]);
+    expect(out.notices).toEqual([NOTICE]);
+  });
+
+  it("prints the highest-severity notice on the human-readable path, after the table", async () => {
+    seed("alice", "pdf-tools", "1.0.0");
+    const required = {
+      id: "x",
+      kind: "client_update",
+      severity: "required",
+      message: "Below the minimum supported version.",
+      action: { label: "Update", command: "npx @ahood/cli@latest setup" },
+    };
+    stubMeApi(() => json({ ...fixture("me-status.json"), notices: [NOTICE, required] }));
+    await status([]);
+    expect(io.stderr()).toContain("ahood notice (required): Below the minimum supported version.");
+    expect(io.stderr()).toContain("npx @ahood/cli@latest setup");
+    expect(io.stderr()).not.toContain("A newer ahood client is available.");
+  });
+
+  it("prints nothing extra when notices is empty or absent", async () => {
+    seed("alice", "pdf-tools", "1.0.0");
+    stubMeApi(() => json(fixture("me-status.json")));
+    await status([]);
+    expect(io.stderr()).toBe("");
+  });
+
+  it("never prints a notice line in --json mode", async () => {
+    seed("alice", "pdf-tools", "1.0.0");
+    stubMeApi(() => json({ ...fixture("me-status.json"), notices: [NOTICE] }));
+    await status(["--json"]);
+    expect(io.stderr()).toBe("");
+  });
+});

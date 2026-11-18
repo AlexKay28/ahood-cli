@@ -14,7 +14,7 @@
 //     description, argument-hint, allowed-tools, disable-model-invocation.
 //   - allowed-tools pre-approves those tools only for the turn the command is
 //     invoked in; the grant clears on the user's next message.
-import { CLI_VERSION } from "../../version.js";
+import { CLI_NAME, CLI_VERSION } from "../../version.js";
 import { AHOOD_CLI, AHOOD_CLIENT_HEADER, AHOOD_COMMANDS, AHOOD_MCP_URL, ahoodClientHeaderValue, type AhoodCommand } from "./ahood-commands.js";
 
 export const CLAUDE_PLUGIN_DIR = "plugins/ahood";
@@ -167,11 +167,159 @@ export function claudePluginMcpManifest(): string {
   )}\n`;
 }
 
+/**
+ * plugins/ahood/hooks/hooks.json (ahood#1554 step 5): registers the
+ * SessionStart hook below alongside the pre-existing, hand-written Stop
+ * hook (hooks/snap-prompt.mjs -- NOT generated, and deliberately kept out
+ * of claudePluginFiles() below: ahood#981's import-free/version-free
+ * constraint on it has nothing to do with this feature). Generated, unlike
+ * snap-prompt.mjs, because session-start.mjs needs the pinned CLI version
+ * baked in (the same reason every /ahood command body does).
+ */
+export function claudePluginHooksManifest(): string {
+  return `${JSON.stringify(
+    {
+      hooks: {
+        SessionStart: [{ hooks: [{ type: "command", command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs"', timeout: 5 }] }],
+        Stop: [{ hooks: [{ type: "command", command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/snap-prompt.mjs"', timeout: 10 }] }],
+      },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+// The exact argv runStatus() below shells out to -- the same pinned-CLI
+// shape every /ahood command body runs (ahood-commands.ts's AHOOD_CLI),
+// just as an array instead of a backtick string (execFileSync takes argv,
+// not a shell line).
+const SESSION_START_ARGV = JSON.stringify(["npx", "-y", `${CLI_NAME}@${CLI_VERSION}`, "status", "--json"]);
+
+/**
+ * plugins/ahood/hooks/session-start.mjs (ahood#1554 step 5): a Claude Code
+ * SessionStart hook. At most once per 24h (its own cache file, separate
+ * from the CLI's own update-check.json: this runs inside the harness
+ * process, not the CLI, and needs no npm-registry check of its own --
+ * `ahood status --json` already carries both the update and notices
+ * facts) it shells out to the pinned CLI's `status --json`, with a 3s
+ * execFileSync timeout, and -- only when there is something to say --
+ * returns `hookSpecificOutput.additionalContext` telling the agent to
+ * SUGGEST `/ahood sync` and/or `npx @ahood/cli@latest setup`, and to never
+ * run either itself (using-ahood's own "never sync on your own" rule).
+ * Fails silently throughout: a missing token, a timeout, a malformed
+ * response, an unwritable cache -- none of these may ever surface as an
+ * error, a warning, or a delay at session start.
+ */
+export function claudePluginSessionStartHook(): string {
+  return `#!/usr/bin/env node
+// Generated from src/setup/templates/claude-plugin.ts's claudePluginSessionStartHook() by \`npm run sync-plugin\`; edit that function, not this file.
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+export const CACHE_FILE_ENV = "AHOOD_SESSION_START_CACHE_FILE";
+export const INTERVAL_MS = 24 * 60 * 60 * 1000;
+export const BUDGET_MS = 3000;
+const ARGV = ${SESSION_START_ARGV};
+const SEVERITY_RANK = { required: 2, action: 1, info: 0 };
+
+function cachePath(env) {
+  return env[CACHE_FILE_ENV] || join(env.CLAUDE_PLUGIN_DATA || join(tmpdir(), "ahood-session-start"), "status-cache.json");
+}
+
+export function readCache(path) {
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf-8"));
+    return typeof parsed?.checked_at === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isStale(cache, now = Date.now()) {
+  if (!cache) return true;
+  const checkedAt = Date.parse(cache.checked_at);
+  return Number.isNaN(checkedAt) || now - checkedAt >= INTERVAL_MS;
+}
+
+function writeCache(path) {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ checked_at: new Date().toISOString() }));
+  } catch {
+    // Best-effort: no cache written just means the next session tries again.
+  }
+}
+
+/** Runs the pinned CLI's \`status --json\`, at most BUDGET_MS; null on any failure (no token, no network, a non-zero exit, a malformed response). */
+export function runStatus(env) {
+  try {
+    const out = execFileSync(ARGV[0], ARGV.slice(1), { timeout: BUDGET_MS, encoding: "utf-8", env, stdio: ["ignore", "pipe", "ignore"] });
+    return JSON.parse(out);
+  } catch {
+    return null;
+  }
+}
+
+/** The additionalContext text, or null when there is nothing worth telling the agent. */
+export function buildContext(status) {
+  if (!status) return null;
+  const updates = Array.isArray(status.items) ? status.items.filter((i) => i && i.update_available) : [];
+  const notices = Array.isArray(status.notices) ? status.notices : [];
+  if (updates.length === 0 && notices.length === 0) return null;
+  const lines = ["ahood: there is something to tell the user (relay it in one line; never run either suggestion yourself)."];
+  if (updates.length > 0) lines.push(\`\${updates.length} installed skill/agent/MCP server update(s) are available.\`);
+  if (notices.length > 0) {
+    const top = notices.reduce((best, n) => ((SEVERITY_RANK[n.severity] ?? 0) > (SEVERITY_RANK[best.severity] ?? 0) ? n : best));
+    lines.push(\`Notice (\${top.severity}): \${top.message}\`);
+  }
+  lines.push("Tell the user about this in one line and SUGGEST \`/ahood sync\` and/or \`npx @ahood/cli@latest setup\`; do not run either yourself.");
+  return lines.join(" ");
+}
+
+/** The hook's decision for one SessionStart event: the JSON to print, or null to print nothing. */
+export function decide(input, env) {
+  if (!input || input.hook_event_name !== "SessionStart") return null;
+  const path = cachePath(env);
+  if (!isStale(readCache(path))) return null; // at most once per 24h -- nothing new to say this session
+  writeCache(path);
+  const context = buildContext(runStatus(env));
+  if (!context) return null;
+  return { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } };
+}
+
+function main() {
+  let input;
+  try {
+    input = JSON.parse(readFileSync(0, "utf-8"));
+  } catch {
+    return;
+  }
+  const out = decide(input, process.env);
+  if (out) process.stdout.write(JSON.stringify(out));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    main();
+  } catch {
+    // A hook failure must never get in the way of starting the session.
+  }
+  process.exitCode = 0;
+}
+`;
+}
+
 /** Every Claude plugin file this module owns, as paths relative to the plugin root. */
 export function claudePluginFiles(): Array<{ file: string; content: string }> {
   return [
     { file: ".claude-plugin/plugin.json", content: claudePluginManifest() },
     { file: ".mcp.json", content: claudePluginMcpManifest() },
+    { file: "hooks/hooks.json", content: claudePluginHooksManifest() },
+    { file: "hooks/session-start.mjs", content: claudePluginSessionStartHook() },
     ...claudePluginCommandFiles(),
   ];
 }

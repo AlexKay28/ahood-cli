@@ -1,5 +1,6 @@
-// ahood#1552 step 5: the passive update notifier -- cache, suppression,
-// the "never delays exit" guarantee, and required-vs-available wording.
+// ahood#1552 step 5 / ahood#1554 step 5: the passive update notifier --
+// cache, suppression, the "never delays exit" guarantee, required-vs-
+// available wording, and the notices[] helpers it shares with status.ts.
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,10 +17,12 @@ import { spawn } from "node:child_process";
 const spawnMock = vi.mocked(spawn);
 
 import {
+  highestSeverityNotice,
   isStale,
   isSuppressed,
   maybeNotifyUpdate,
   newer,
+  noticeAnnouncementLine,
   noticeLine,
   performRefresh,
   readUpdateCheckCache,
@@ -28,6 +31,7 @@ import {
   UPDATE_CHECK_FILE_ENV,
   NO_UPDATE_NOTIFIER_ENV,
   UPDATE_CHECK_INTERVAL_MS,
+  type CliNotice,
 } from "../src/update-notifier.js";
 import { CLI_NAME, CLI_VERSION } from "../src/version.js";
 
@@ -310,5 +314,34 @@ describe("maybeNotifyUpdate()", () => {
       throw new Error("terminal gone");
     });
     expect(() => maybeNotifyUpdate({ env: { [UPDATE_CHECK_FILE_ENV]: cachePath() }, isTTY: true, cliVersion: "0.1.0" })).not.toThrow();
+  });
+});
+
+describe("notices[] helpers (ahood#1554 step 5)", () => {
+  const info: CliNotice = { id: "a", kind: "new_feature", severity: "info", message: "low", action: { label: "x", url: "https://x" } };
+  const action: CliNotice = { id: "b", kind: "skill_updates", severity: "action", message: "mid", action: { label: "Sync", command: "ahood sync" } };
+  const required: CliNotice = {
+    id: "c",
+    kind: "client_update",
+    severity: "required",
+    message: "upgrade now",
+    action: { label: "Update", command: "npx @ahood/cli@latest setup" },
+  };
+
+  it("highestSeverityNotice picks required over action over info", () => {
+    expect(highestSeverityNotice([info, action, required])).toBe(required);
+    expect(highestSeverityNotice([info, action])).toBe(action);
+    expect(highestSeverityNotice([info])).toBe(info);
+  });
+
+  it("highestSeverityNotice returns null for an empty or absent list", () => {
+    expect(highestSeverityNotice([])).toBeNull();
+    expect(highestSeverityNotice(undefined)).toBeNull();
+  });
+
+  it("noticeAnnouncementLine includes the message and the suggested (never run) action", () => {
+    expect(noticeAnnouncementLine(action)).toContain("mid");
+    expect(noticeAnnouncementLine(action)).toContain("ahood sync");
+    expect(noticeAnnouncementLine(info)).toContain("https://x");
   });
 });

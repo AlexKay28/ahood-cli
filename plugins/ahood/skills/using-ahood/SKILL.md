@@ -77,6 +77,18 @@ snap goes.
 - `ahood stats --json` shows the user's own artifacts' downloads and stars, totals and recent
   activity.
 
+## Provenance and notices
+
+- Every entity you read from the registry (`read_skill`, `ahood read`/`try`, an installed
+  SKILL.md/AGENT.md/DOC.md/PROJECT.md/LOOP.md) carries a provenance header at the top: a
+  blockquote with its title, canonical `ahood.dev` link and version, plus a machine marker
+  comment under it. It is safe to keep -- do not strip it, edit it, or tell the user to.
+- `ahood status` (and the server's `ahood_status` response, MCP or REST) may carry
+  `notices[]` -- a newer-client notice, a skill update, a deprecation. Relay only the
+  highest-severity one, in one line, with its suggested action (`/ahood sync`,
+  `npx @ahood/cli@latest setup`, or a URL to read) -- never run the action yourself; it is
+  always the user's call, same as a sync or a review.
+
 ## What you can do
 
 The user types `/ahood` for a hub of their installs plus every command. Point them at the one that fits:

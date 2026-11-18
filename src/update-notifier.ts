@@ -46,6 +46,34 @@ const CHANGELOG_URL = "https://www.ahood.dev/changelog";
 
 export type UpdateCheckCache = { checked_at: string; latest: string | null };
 
+// ahood#1554 step 5: the server's `ahood_status` `notices[]` (web
+// lib/notices/select.ts's DeliveredNotice -- already audience-filtered and
+// de-duplicated server-side, so a notice reaching here is always meant to
+// be shown). Optional everywhere it's read: an older server simply omits
+// the field.
+export type CliNoticeSeverity = "info" | "action" | "required";
+export type CliNotice = {
+  id: string;
+  kind: string;
+  severity: CliNoticeSeverity;
+  message: string;
+  action: { label: string; command?: string; url?: string };
+};
+
+const SEVERITY_RANK: Record<CliNoticeSeverity, number> = { required: 2, action: 1, info: 0 };
+
+/** The one notice worth leading with, or null for an empty/absent list. Ties keep the first (server order). */
+export function highestSeverityNotice(notices: CliNotice[] | undefined): CliNotice | null {
+  if (!notices || notices.length === 0) return null;
+  return notices.reduce((best, n) => ((SEVERITY_RANK[n.severity] ?? 0) > (SEVERITY_RANK[best.severity] ?? 0) ? n : best));
+}
+
+/** One line for a notice: the message, plus its suggested action -- never run, only shown. */
+export function noticeAnnouncementLine(notice: CliNotice): string {
+  const action = notice.action.command ? `\`${notice.action.command}\`` : notice.action.url ?? "";
+  return `ahood notice (${notice.severity}): ${notice.message}${action ? ` -- ${notice.action.label}: ${action}` : ""}`;
+}
+
 export function updateCheckFilePath(env: NodeJS.ProcessEnv = process.env): string {
   return env[UPDATE_CHECK_FILE_ENV] || join(homedir(), ".ahood", "update-check.json");
 }
