@@ -1,4 +1,6 @@
 import { apiJson } from "../http.js";
+import { provenanceMetaFor } from "./add.js";
+import { buildProvenanceHeader, type ProvenanceHeaderMeta } from "../provenance-header.js";
 import { parseOwnerSkill } from "../spec.js";
 import { sanitizeDocumentForTerminal, sanitizeForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
@@ -15,18 +17,33 @@ const USAGE = "Usage: ahood skill read <owner>/<skill> [--json]";
 type SkillReadDetail = {
   owner: string;
   slug: string;
+  // ahood#1553 step 4: this route already selects/spreads `name` (same
+  // column add.ts's fetchVersionMeta reads for the same purpose) -- the
+  // provenance header's title, falling back to the slug when absent.
+  name?: string | null;
   skill_versions: {
     version: string;
     skill_md_content: string | null;
     yanked_at?: string | null;
     yanked_reason?: string | null;
+    created_at?: string | null;
   } | null;
 };
 
-export async function readSkillMd(
-  owner: string,
-  skill: string,
-): Promise<{ version: string; content: string; yanked_at: string | null; yanked_reason: string | null }> {
+export type ReadSkillMdResult = {
+  version: string;
+  content: string;
+  yanked_at: string | null;
+  yanked_reason: string | null;
+  // ahood#1553 step 4: this REST route's content is never stamped
+  // server-side (only the MCP read_skill tool is), so the CLI builds the
+  // header itself from this -- the same {title, owner, slug, version, url}
+  // shape add.ts's install path stamps SKILL.md with.
+  provenance: ProvenanceHeaderMeta;
+  published_at: string | null;
+};
+
+export async function readSkillMd(owner: string, skill: string): Promise<ReadSkillMdResult> {
   const detail = await apiJson<SkillReadDetail>(
     `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`,
   );
@@ -70,6 +87,8 @@ export async function readSkillMd(
     // --json output, so this addition doesn't change that shape.
     yanked_at: detail.skill_versions.yanked_at ?? null,
     yanked_reason: detail.skill_versions.yanked_reason ?? null,
+    provenance: provenanceMetaFor(detail.owner, detail.slug, { version: detail.skill_versions.version, name: detail.name }),
+    published_at: detail.skill_versions.created_at ?? null,
   };
 }
 
@@ -80,10 +99,13 @@ export async function read(args: string[], scope?: KindScope): Promise<void> {
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
 
   await ensureRemoteKind(scope, owner, skill, "read", "read");
-  const { version, content } = await readSkillMd(owner, skill);
+  const { version, content, provenance } = await readSkillMd(owner, skill);
 
+  // ahood#1553 step 4: --json keeps `content` exactly as the registry
+  // served it (existing consumers, tests/read.test.ts, parse this already)
+  // and adds the structured facts as their own field, additive.
   if (jsonOutput) {
-    console.log(JSON.stringify({ version, content }));
+    console.log(JSON.stringify({ version, content, provenance }));
     return;
   }
 
@@ -109,8 +131,17 @@ export async function read(args: string[], scope?: KindScope): Promise<void> {
   // or switch charsets (ESC(0) and corrupt every later line in the session. So
   // strip on the TTY path only, leaving the redirected path the exact bytes
   // #90 guaranteed (ahood-cli#133).
+  //
+  // ahood#1553 step 4: the provenance header is stamped on this same TTY
+  // path, for the same reason -- a human reading `ahood read`'s output is
+  // exactly who the header is for, and the piped path's byte-exactness
+  // promise (#90 above) would otherwise be broken by injecting it there.
+  // Built, not stripped, so run it through the sanitizer like the rest of
+  // the document (its own field values are already escaped --
+  // provenance-header.ts's escapeHeaderValue -- but this keeps it under
+  // the same single safety net as everything else this command prints).
   if (process.stdout.isTTY) {
-    process.stdout.write(sanitizeDocumentForTerminal(content));
+    process.stdout.write(sanitizeDocumentForTerminal(buildProvenanceHeader(content, provenance)));
     return;
   }
 

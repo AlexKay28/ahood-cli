@@ -1,7 +1,20 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { read } from "../src/commands/read.js";
+import { buildProvenanceHeader } from "../src/provenance-header.js";
 
 const API_URL = "http://ahood.test";
+
+// ahood#1553 step 4: `read` stamps the provenance header on the TTY path
+// (never the piped path -- #90's byte-exactness promise) and adds a
+// structured `provenance` field to --json. Builds the exact expected text
+// from the real module rather than hand-typing it, so these tests track the
+// header's actual shape instead of a second, driftable copy of it.
+function withHeader(content: string, opts: { owner?: string; slug?: string; version?: string } = {}): string {
+  const owner = opts.owner ?? "alice";
+  const slug = opts.slug ?? "demo";
+  const version = opts.version ?? "1.0.0";
+  return buildProvenanceHeader(content, { title: slug, owner, slug, version, url: `https://www.ahood.dev/${owner}/${slug}` });
+}
 
 describe("read", () => {
   const originalApiUrl = process.env.AHOOD_API_URL;
@@ -84,7 +97,7 @@ describe("read", () => {
       // ESC(0 charset switch) can't slip through a payload-shaped assertion.
       expect(written).not.toContain("\x1b");
       expect(written).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/);
-      expect(written).toBe("# Demo Skill\n ]52;c;AAAA \nVerified safe.\n");
+      expect(written).toBe(withHeader("# Demo Skill\n ]52;c;AAAA \nVerified safe.\n"));
     });
 
     it("keeps the document readable on a terminal: newlines and tabs survive, only controls go", async () => {
@@ -97,7 +110,7 @@ describe("read", () => {
       // Flattening newlines the way sanitizeForTerminal does for short
       // interpolated fields (ahood-cli#127) would turn a whole SKILL.md into
       // one unreadable line, which is why read uses the document sanitizer.
-      expect(writeSpy).toHaveBeenCalledWith("# Title\n\n- one\n-\ttwo\n");
+      expect(writeSpy).toHaveBeenCalledWith(withHeader("# Title\n\n- one\n-\ttwo\n"));
     });
 
     it("does not truncate a long document on a terminal", async () => {
@@ -110,7 +123,7 @@ describe("read", () => {
 
       // Capping would let a publisher hide the part worth hiding past the cap
       // and have the CLI do the concealing -- see terminal-safe.ts.
-      expect(writeSpy).toHaveBeenCalledWith(long);
+      expect(writeSpy).toHaveBeenCalledWith(withHeader(long));
     });
 
     it("leaves the piped path byte-identical, escapes and all, so redirection still round-trips (#90)", async () => {
@@ -147,7 +160,7 @@ describe("read", () => {
     });
   });
 
-  it("--json emits {version, content} as a single line", async () => {
+  it("--json emits {version, content, provenance}, content byte-exact and raw (ahood#1553 step 4)", async () => {
     const detail = {
       owner: "alice",
       slug: "demo",
@@ -159,7 +172,29 @@ describe("read", () => {
     await read(["alice/demo", "--json"]);
 
     expect(logSpy).toHaveBeenCalledTimes(1);
-    expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ version: "1.2.3", content: "# Demo Skill\n" }));
+    expect(logSpy).toHaveBeenCalledWith(
+      JSON.stringify({
+        version: "1.2.3",
+        content: "# Demo Skill\n",
+        provenance: { title: "demo", owner: "alice", slug: "demo", version: "1.2.3", url: "https://www.ahood.dev/alice/demo" },
+      }),
+    );
+  });
+
+  it("--json's provenance.title prefers the registry's `name` field over the slug", async () => {
+    const detail = {
+      owner: "alice",
+      slug: "demo",
+      name: "Demo Skill (display name)",
+      skill_versions: { version: "1.2.3", skill_md_content: "# Demo Skill\n" },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(detail), { status: 200 })));
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await read(["alice/demo", "--json"]);
+
+    const [line] = logSpy.mock.calls[0] as [string];
+    expect(JSON.parse(line).provenance.title).toBe("Demo Skill (display name)");
   });
 
   it("warns when the latest version has been yanked, with the reason appended, before printing content", async () => {

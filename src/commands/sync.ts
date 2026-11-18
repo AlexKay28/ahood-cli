@@ -2,12 +2,13 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, existsSync } 
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { createPatch } from "diff";
-import { add, downloadVerifiedArchive, extractSingleFileContent, extractTarGz, fetchVersionMeta } from "./add.js";
+import { add, downloadVerifiedArchive, extractSingleFileContent, extractTarGz, fetchVersionMeta, provenanceMetaFor, type VersionMeta } from "./add.js";
 import { loadStatusRows, type StatusRow } from "./status.js";
 import { confirmYesNo, isInteractive } from "../confirm.js";
 import { unrecognizedArgs } from "../flags.js";
 import { itemKey } from "../installed.js";
 import { isCliKind, isPinnedFileKind, KINDS, type CliKind } from "../kinds.js";
+import { stripProvenanceHeader } from "../provenance-header.js";
 import { sanitizeDocumentForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
 
@@ -72,20 +73,44 @@ export function diffFileMaps(before: FileMap, after: FileMap, fromLabel: string,
   return parts.join("\n");
 }
 
+/** A copy of `map` with `fileName`'s entry (if present) run through
+ *  stripProvenanceHeader -- ahood#1553 step 4: the header's own version
+ *  line always differs between "installed" and "registry" (that's the
+ *  whole point of it), so left in, every sync diff would show a one-line
+ *  change on every single update, real content change or not. Stripping
+ *  both sides first means the diff is exactly the real content change. */
+function stripRootDoc(map: FileMap, fileName: string): FileMap {
+  const current = map.get(fileName);
+  if (current === undefined) return map;
+  const stripped = Buffer.from(stripProvenanceHeader(current.toString("utf-8")), "utf-8");
+  return new Map([...map, [fileName, stripped]]);
+}
+
 /** The candidate's files vs the installed ones, as one unified diff. */
-async function diffAgainstInstalled(row: StatusRow, kind: CliKind | null, buffer: Buffer, to: string): Promise<string> {
+async function diffAgainstInstalled(row: StatusRow, kind: CliKind | null, buffer: Buffer, to: string, meta: VersionMeta): Promise<string> {
   const fromLabel = `installed ${row.installed_version}`;
   const toLabel = `registry ${to}`;
+  // ahood#1553 step 4: stamped with the SAME helper (and the SAME meta --
+  // just version: `to` instead of the currently-installed version) the
+  // real install path (add.ts) uses, so this preview shows what will
+  // actually land on disk -- then stripped from both sides right below, so
+  // the header's own version churn never shows up as a spurious diff line.
+  const provenance = provenanceMetaFor(row.owner, row.slug, { ...meta, version: to });
   if (kind !== null && kind !== "skill") {
     const rootDoc = KINDS[kind].rootDoc;
-    const next = await extractSingleFileContent(buffer, rootDoc);
+    const next = await extractSingleFileContent(buffer, rootDoc, provenance);
     const current = existsSync(row.installed_path) ? readFileSync(row.installed_path) : undefined;
-    return diffFileMaps(new Map(current ? [[rootDoc, current]] : []), new Map([[rootDoc, next]]), fromLabel, toLabel);
+    return diffFileMaps(
+      stripRootDoc(new Map(current ? [[rootDoc, current]] : []), rootDoc),
+      stripRootDoc(new Map([[rootDoc, next]]), rootDoc),
+      fromLabel,
+      toLabel,
+    );
   }
   const scratch = mkdtempSync(join(tmpdir(), "ahood-sync-"));
   try {
-    await extractTarGz(buffer, scratch);
-    return diffFileMaps(walkFiles(row.installed_path), walkFiles(scratch), fromLabel, toLabel);
+    await extractTarGz(buffer, scratch, { fileName: "SKILL.md", meta: provenance });
+    return diffFileMaps(stripRootDoc(walkFiles(row.installed_path), "SKILL.md"), stripRootDoc(walkFiles(scratch), "SKILL.md"), fromLabel, toLabel);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -189,7 +214,7 @@ export async function sync(args: string[]): Promise<void> {
         continue;
       }
       const buffer = await downloadVerifiedArchive(row.owner, row.slug, meta);
-      const diff = await diffAgainstInstalled(row, kind, buffer, to);
+      const diff = await diffAgainstInstalled(row, kind, buffer, to, meta);
 
       if (!json) {
         console.log(`\n${key}: ${row.installed_version} -> ${to}  (${row.installed_path})`);

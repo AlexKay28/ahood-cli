@@ -9,6 +9,7 @@ import { add, extractTarGz, downloadVerifiedArchive, hashMcpServerConfig, matche
 import { LOCKFILE_PATH, agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { ApiError } from "../src/http.js";
 import { writeLockfileEntry } from "../src/lockfile.js";
+import { buildProvenanceHeader } from "../src/provenance-header.js";
 
 vi.mock("../src/secret-prompt.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/secret-prompt.js")>();
@@ -20,6 +21,17 @@ const API_URL = "http://ahood.test";
 const OWNER = "alice";
 const SKILL = "demo-skill";
 const VERSION = "1.0.0";
+
+// ahood#1553 step 4: install stamps SKILL.md/AGENT.md with the provenance
+// header -- stubApi's metadata responses below never set `name`, so the
+// title always falls back to the slug. Built from the real module rather
+// than hand-typed, so these tests track its actual shape.
+function withHeader(content: string, opts: { owner?: string; slug?: string; version?: string } = {}): string {
+  const owner = opts.owner ?? OWNER;
+  const slug = opts.slug ?? SKILL;
+  const version = opts.version ?? VERSION;
+  return buildProvenanceHeader(content, { title: slug, owner, slug, version, url: `https://www.ahood.dev/${owner}/${slug}` });
+}
 
 // A real gzipped tar, built the same way `publish` builds one -- the checksum
 // test has to fail on the CHECKSUM, not on an unparseable archive, or it would
@@ -165,7 +177,7 @@ describe("add", () => {
     await add([`${OWNER}/${SKILL}`]);
 
     // Owner-namespaced (flat, @-joined): alice/demo-skill and bob/demo-skill must not collide.
-    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# demo\n");
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(withHeader("# demo\n"));
     expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
       [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: sha256(archive) },
     });
@@ -227,7 +239,7 @@ describe("add", () => {
     stubApi(v2, sha256(v2), [{ path: "SKILL.md" }], "2.0.0");
     await add([`${OWNER}/${SKILL}@2.0.0`]);
 
-    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# v2\n");
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(withHeader("# v2\n", { version: "2.0.0" }));
     expect(existsSync(join(dir, skillDir(OWNER, SKILL), "old-removed-file.md"))).toBe(false);
   });
 
@@ -249,7 +261,7 @@ describe("add", () => {
 
     await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/does not match the one already pinned/);
     // Original install must be untouched.
-    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# demo\n");
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(withHeader("# demo\n"));
   });
 
   it("catches a checksum conflict that lands DURING the download, after the early unlocked pre-check already saw none (#101)", async () => {
@@ -350,7 +362,7 @@ describe("add", () => {
 
     const dest = join(dir, agentPath(OWNER, SKILL));
     expect(existsSync(dest)).toBe(true);
-    expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
+    expect(readFileSync(dest, "utf-8")).toBe(withHeader("# reviewer agent\n"));
     // A single flat file, not a directory -- distinct from the skills' own
     // flat, @-joined .claude/skills/<owner>@<skill>/ layout.
     expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
@@ -365,7 +377,7 @@ describe("add", () => {
 
     await add([`${OWNER}/${SKILL}`]);
 
-    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# demo\n");
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(withHeader("# demo\n"));
     expect(existsSync(join(dir, ".claude", "agents"))).toBe(false);
   });
 
@@ -411,7 +423,7 @@ describe("add", () => {
 
     const dest = join(dir, agentPath(OWNER, SKILL));
     expect(existsSync(dest)).toBe(true);
-    expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
+    expect(readFileSync(dest, "utf-8")).toBe(withHeader("# reviewer agent\n"));
     expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
   });
 
@@ -430,7 +442,7 @@ describe("add", () => {
 
     const dest = join(dir, agentPath(OWNER, SKILL));
     expect(existsSync(dest)).toBe(true);
-    expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
+    expect(readFileSync(dest, "utf-8")).toBe(withHeader("# reviewer agent\n"));
     expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
     expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
       [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: sha256(archive) },
@@ -449,7 +461,7 @@ describe("add", () => {
 
     const dest = join(dir, agentPath(OWNER, SKILL));
     expect(existsSync(dest)).toBe(true);
-    expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
+    expect(readFileSync(dest, "utf-8")).toBe(withHeader("# reviewer agent\n"));
   });
 
   it("refuses an agent archive with two entries at the same canonical name instead of picking one (AlexKay28/ahood#792)", async () => {

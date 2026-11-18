@@ -15,6 +15,7 @@ import { readLockfile, writeLockfileEntry } from "../src/lockfile.js";
 import { agentPath, docPath, loopPath, skillDir, LOCKFILE_PATH } from "../src/spec.js";
 import { UsageError } from "../src/usage-error.js";
 import { hashMcpServerConfig } from "../src/commands/add.js";
+import { buildProvenanceHeader } from "../src/provenance-header.js";
 
 // Every kind-scoped verb (ahood-cli#172) must refuse a target of another kind
 // BEFORE its first side effect. The fake registry below records every request
@@ -551,7 +552,18 @@ describe("ahood doc (ahood-cli#182)", () => {
       quiet();
       fakeRegistry({ "alice/guide": await entry("doc") });
       await dispatchDoc(["add", "alice/guide"]);
-      expect(readFileSync(docFile, "utf8")).toBe("---\nname: x\ndescription: d\n---\nbody\n");
+      // ahood#1553 step 4: stamped on install; fakeRegistry's "latest"
+      // metadata route always answers `name: "N"` (fake-registry.ts),
+      // which is this header's title.
+      expect(readFileSync(docFile, "utf8")).toBe(
+        buildProvenanceHeader("---\nname: x\ndescription: d\n---\nbody\n", {
+          title: "N",
+          owner: "alice",
+          slug: "guide",
+          version: "1.0.0",
+          url: "https://www.ahood.dev/alice/guide",
+        }),
+      );
       const pin = readLockfile(LOCKFILE_PATH)["alice/guide"];
       expect(pin).toMatchObject({ version: "1.0.0", kind: "doc" });
       expect(existsSync(join(".claude", "skills"))).toBe(false);
@@ -904,7 +916,15 @@ describe("ahood loop (ahood-cli, ahood#858)", () => {
       quiet();
       fakeRegistry({ "alice/sweep": await entry("loop") });
       await dispatchLoop(["add", "alice/sweep"]);
-      expect(readFileSync(loopFile, "utf8")).toBe("---\nname: x\ndescription: d\n---\nbody\n");
+      expect(readFileSync(loopFile, "utf8")).toBe(
+        buildProvenanceHeader("---\nname: x\ndescription: d\n---\nbody\n", {
+          title: "N",
+          owner: "alice",
+          slug: "sweep",
+          version: "1.0.0",
+          url: "https://www.ahood.dev/alice/sweep",
+        }),
+      );
       const pin = readLockfile(LOCKFILE_PATH)["alice/sweep"];
       expect(pin).toMatchObject({ version: "1.0.0", kind: "loop" });
       expect(existsSync(join(".claude", "skills"))).toBe(false);
