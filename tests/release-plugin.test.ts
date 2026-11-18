@@ -14,14 +14,28 @@ const PLUGIN_MANIFEST = join("packages", "opencode-plugin", "package.json");
 const CODEX_MANIFEST = join("plugins", "codex", ".codex-plugin", "plugin.json");
 const CLAUDE_MANIFEST = join("plugins", "ahood", ".claude-plugin", "plugin.json");
 const MARKETPLACE = join(".claude-plugin", "marketplace.json");
+// ahood#1552 step 6: the three X-Ahood-Client header sources check-plugin-
+// version.mjs also reads (CLIENT_HEADER_SOURCES there).
+const CLAUDE_MCP = join("plugins", "ahood", ".mcp.json");
+const CODEX_MCP = join("plugins", "codex", ".mcp.json");
+const OPENCODE_GENERATED = join("packages", "opencode-plugin", "src", "generated.ts");
 const readJson = (file: string) => JSON.parse(readFileSync(file, "utf-8"));
 const rootPkg = readJson(join(ROOT, "package.json"));
 const pluginPkg = readJson(join(ROOT, PLUGIN_MANIFEST));
 const releaseYml = readFileSync(join(ROOT, ".github", "workflows", "release.yml"), "utf-8");
 
-/** A scratch repo root holding this repo's package.json and every manifest the check reads. */
+/** A scratch repo root holding this repo's package.json and every manifest/header-source file the check reads. */
 function copyRepoManifests(dir: string) {
-  for (const file of ["package.json", PLUGIN_MANIFEST, CODEX_MANIFEST, CLAUDE_MANIFEST, MARKETPLACE]) {
+  for (const file of [
+    "package.json",
+    PLUGIN_MANIFEST,
+    CODEX_MANIFEST,
+    CLAUDE_MANIFEST,
+    MARKETPLACE,
+    CLAUDE_MCP,
+    CODEX_MCP,
+    OPENCODE_GENERATED,
+  ]) {
     mkdirSync(dirname(join(dir, file)), { recursive: true });
     cpSync(join(ROOT, file), join(dir, file));
   }
@@ -75,6 +89,68 @@ describe("plugin versions (opencode, Codex, Claude Code)", () => {
       }
     });
   }
+
+  // ahood#1552 step 6: the X-Ahood-Client header's own version must also
+  // match -- a plugin manifest at the right version with a stale header
+  // would otherwise ship unnoticed.
+  it("fails when the Claude plugin's .mcp.json X-Ahood-Client header is behind", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ahood-plugin-version-"));
+    try {
+      copyRepoManifests(dir);
+      const mcp = readJson(join(dir, CLAUDE_MCP));
+      mcp.ahood.headers["X-Ahood-Client"] = "claude-plugin/0.0.1";
+      writeFileSync(join(dir, CLAUDE_MCP), JSON.stringify(mcp));
+      const result = runCheck(dir);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(CLAUDE_MCP);
+      expect(result.stderr).toContain("claude-plugin/0.0.1");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when the Codex plugin's .mcp.json X-Ahood-Client header is behind", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ahood-plugin-version-"));
+    try {
+      copyRepoManifests(dir);
+      const mcp = readJson(join(dir, CODEX_MCP));
+      mcp.mcpServers.ahood.http_headers["X-Ahood-Client"] = "codex-plugin/0.0.1";
+      writeFileSync(join(dir, CODEX_MCP), JSON.stringify(mcp));
+      const result = runCheck(dir);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(CODEX_MCP);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when the opencode plugin's generated CLIENT_HEADER_VALUE is behind", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ahood-plugin-version-"));
+    try {
+      copyRepoManifests(dir);
+      const generated = readFileSync(join(dir, OPENCODE_GENERATED), "utf-8").replace(
+        /CLIENT_HEADER_VALUE = "opencode-plugin\/[^"]+"/,
+        'CLIENT_HEADER_VALUE = "opencode-plugin/0.0.1"',
+      );
+      writeFileSync(join(dir, OPENCODE_GENERATED), generated);
+      const result = runCheck(dir);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(OPENCODE_GENERATED);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("passes on this repo's real X-Ahood-Client headers", () => {
+    for (const { file, extract } of [
+      { file: CLAUDE_MCP, extract: (t: string) => JSON.parse(t).ahood.headers["X-Ahood-Client"] },
+      { file: CODEX_MCP, extract: (t: string) => JSON.parse(t).mcpServers.ahood.http_headers["X-Ahood-Client"] },
+      { file: OPENCODE_GENERATED, extract: (t: string) => /CLIENT_HEADER_VALUE = "([^"]+)"/.exec(t)?.[1] },
+    ]) {
+      const value = extract(readFileSync(join(ROOT, file), "utf-8"));
+      expect(value.endsWith(`/${rootPkg.version}`), `${file}: ${value}`).toBe(true);
+    }
+  });
 
   it("fails when the Claude marketplace entry sets a version", () => {
     const dir = mkdtempSync(join(tmpdir(), "ahood-plugin-version-"));

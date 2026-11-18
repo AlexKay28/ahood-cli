@@ -3,7 +3,10 @@
     "ahood": {
       "type": "http",
       "url": "https://www.ahood.dev/api/mcp",
-      "bearer_token_env_var": "AHOOD_TOKEN"
+      "bearer_token_env_var": "AHOOD_TOKEN",
+      "http_headers": {
+        "X-Ahood-Client": "codex-plugin/0.19.0"
+      }
     }
   }
 }

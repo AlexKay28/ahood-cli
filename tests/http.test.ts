@@ -44,6 +44,25 @@ describe("User-Agent header (ahood-cli#159)", () => {
   });
 });
 
+// ahood#1552 step 6 / coordinator follow-up: every request also carries the
+// explicit `X-Ahood-Client: cli/<version>` header the server's
+// client-identity parser prefers over User-Agent, the same shape the three
+// plugin manifests send for their own surfaces.
+describe("X-Ahood-Client header", () => {
+  useStubbedApi();
+
+  it("sends 'cli/<version>' on every request", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await apiFetch("/x");
+
+    const [, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(requestInit.headers);
+    expect(headers.get("X-Ahood-Client")).toBe(`cli/${CLI_VERSION}`);
+  });
+});
+
 describe("apiJson error sanitization", () => {
   useStubbedApi();
 

@@ -15,7 +15,7 @@
 //   - allowed-tools pre-approves those tools only for the turn the command is
 //     invoked in; the grant clears on the user's next message.
 import { CLI_VERSION } from "../../version.js";
-import { AHOOD_CLI, AHOOD_COMMANDS, type AhoodCommand } from "./ahood-commands.js";
+import { AHOOD_CLI, AHOOD_CLIENT_HEADER, AHOOD_COMMANDS, AHOOD_MCP_URL, ahoodClientHeaderValue, type AhoodCommand } from "./ahood-commands.js";
 
 export const CLAUDE_PLUGIN_DIR = "plugins/ahood";
 
@@ -145,7 +145,33 @@ export function claudePluginManifest(): string {
   )}\n`;
 }
 
+/**
+ * plugins/ahood/.mcp.json (ahood#1552 step 6): the hosted MCP server entry,
+ * at the CLI's version. Alongside the existing Authorization header, it
+ * carries `X-Ahood-Client: claude-plugin/<version>` so the server can tell
+ * a Claude Code plugin request from a bare CLI one (which identifies
+ * itself via User-Agent instead, http.ts) or another harness's plugin.
+ * Generated, like plugin.json, so a release can never let the two drift.
+ */
+export function claudePluginMcpManifest(): string {
+  return `${JSON.stringify(
+    {
+      ahood: {
+        type: "http",
+        url: AHOOD_MCP_URL,
+        headers: { Authorization: "Bearer ${AHOOD_TOKEN}", [AHOOD_CLIENT_HEADER]: ahoodClientHeaderValue("claude-plugin") },
+      },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
 /** Every Claude plugin file this module owns, as paths relative to the plugin root. */
 export function claudePluginFiles(): Array<{ file: string; content: string }> {
-  return [{ file: ".claude-plugin/plugin.json", content: claudePluginManifest() }, ...claudePluginCommandFiles()];
+  return [
+    { file: ".claude-plugin/plugin.json", content: claudePluginManifest() },
+    { file: ".mcp.json", content: claudePluginMcpManifest() },
+    ...claudePluginCommandFiles(),
+  ];
 }

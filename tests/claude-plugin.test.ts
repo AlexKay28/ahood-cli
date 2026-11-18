@@ -72,12 +72,12 @@ describe("plugin manifest and marketplace", () => {
     expect(existsSync(join(ROOT, entry.source, ".claude-plugin", "plugin.json"))).toBe(true);
   });
 
-  it(".mcp.json points at the hosted server and names the token env var, never a token", () => {
+  it(".mcp.json points at the hosted server, names the token env var (never a token), and identifies this surface (ahood#1552 step 6)", () => {
     const mcp = readJson(join(PLUGIN, ".mcp.json"));
     expect(mcp.ahood).toEqual({
       type: "http",
       url: "https://www.ahood.dev/api/mcp",
-      headers: { Authorization: "Bearer ${AHOOD_TOKEN}" },
+      headers: { Authorization: "Bearer ${AHOOD_TOKEN}", "X-Ahood-Client": `claude-plugin/${CLI_VERSION}` },
     });
   });
 
