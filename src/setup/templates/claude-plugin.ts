@@ -196,19 +196,25 @@ export function claudePluginHooksManifest(): string {
 const SESSION_START_ARGV = JSON.stringify(["npx", "-y", `${CLI_NAME}@${CLI_VERSION}`, "status", "--json"]);
 
 /**
- * plugins/ahood/hooks/session-start.mjs (ahood#1554 step 5): a Claude Code
- * SessionStart hook. At most once per 24h (its own cache file, separate
- * from the CLI's own update-check.json: this runs inside the harness
- * process, not the CLI, and needs no npm-registry check of its own --
- * `ahood status --json` already carries both the update and notices
- * facts) it shells out to the pinned CLI's `status --json`, with a 3s
- * execFileSync timeout, and -- only when there is something to say --
- * returns `hookSpecificOutput.additionalContext` telling the agent to
- * SUGGEST `/ahood sync` and/or `npx @ahood/cli@latest setup`, and to never
- * run either itself (using-ahood's own "never sync on your own" rule).
- * Fails silently throughout: a missing token, a timeout, a malformed
- * response, an unwritable cache -- none of these may ever surface as an
- * error, a warning, or a delay at session start.
+ * plugins/ahood/hooks/session-start.mjs (ahood#1554 step 5, ahood#1569
+ * polish): a Claude Code SessionStart hook. At most once per 24h (its own
+ * cache file, separate from the CLI's own update-check.json: this runs
+ * inside the harness process, not the CLI, and needs no npm-registry check
+ * of its own -- `ahood status --json` already carries the update, client
+ * and notices facts) it shells out to the pinned CLI's `status --json`,
+ * with a 3s execFileSync timeout, and -- only when there is something to
+ * say -- returns `hookSpecificOutput.additionalContext` NAMING what is out
+ * of date (up to 3 `owner/slug installed→latest` items, "and N more" past
+ * that, plus the CLI's own `ahood CLI <installed> → <latest>` line when the
+ * server says one is available) and telling the agent, ONCE, to suggest
+ * `/ahood sync` and/or `npx @ahood/cli@latest setup` and never run either
+ * itself (using-ahood's own "never sync on your own" rule) -- ahood#1554's
+ * first cut said neither of those things: it only reported a bare count
+ * ("1 installed skill/agent/MCP server update(s) are available") and stated
+ * the "relay this in one line" instruction twice (once up front, once at
+ * the end). Fails silently throughout: a missing token, a timeout, a
+ * malformed response, an unwritable cache -- none of these may ever surface
+ * as an error, a warning, or a delay at session start.
  */
 export function claudePluginSessionStartHook(): string {
   return `#!/usr/bin/env node
@@ -264,20 +270,34 @@ export function runStatus(env) {
   }
 }
 
+/** Up to MAX_NAMED_UPDATES \`owner/slug installed→latest\` items, "and N more" past that. */
+const MAX_NAMED_UPDATES = 3;
+export function describeUpdates(updates) {
+  const named = updates
+    .slice(0, MAX_NAMED_UPDATES)
+    .map((u) => \`\${u.owner}/\${u.slug} \${u.installed_version}→\${u.latest_version}\`);
+  const rest = updates.length - named.length;
+  return rest > 0 ? \`\${named.join(", ")}, and \${rest} more\` : named.join(", ");
+}
+
 /** The additionalContext text, or null when there is nothing worth telling the agent. */
 export function buildContext(status) {
   if (!status) return null;
   const updates = Array.isArray(status.items) ? status.items.filter((i) => i && i.update_available) : [];
   const notices = Array.isArray(status.notices) ? status.notices : [];
-  if (updates.length === 0 && notices.length === 0) return null;
-  const lines = ["ahood: there is something to tell the user (relay it in one line; never run either suggestion yourself)."];
-  if (updates.length > 0) lines.push(\`\${updates.length} installed skill/agent/MCP server update(s) are available.\`);
+  const client = status.ahood && status.ahood.client && status.ahood.client.update_available ? status.ahood.client : null;
+  if (updates.length === 0 && notices.length === 0 && !client) return null; // nothing to say this session
+
+  const facts = [];
+  if (updates.length > 0) facts.push(\`updates available: \${describeUpdates(updates)}\`);
+  if (client) facts.push(\`ahood CLI \${client.version} → \${client.latest}\`);
   if (notices.length > 0) {
     const top = notices.reduce((best, n) => ((SEVERITY_RANK[n.severity] ?? 0) > (SEVERITY_RANK[best.severity] ?? 0) ? n : best));
-    lines.push(\`Notice (\${top.severity}): \${top.message}\`);
+    facts.push(\`Notice (\${top.severity}): \${top.message}\`);
   }
-  lines.push("Tell the user about this in one line and SUGGEST \`/ahood sync\` and/or \`npx @ahood/cli@latest setup\`; do not run either yourself.");
-  return lines.join(" ");
+  // The relay instruction is stated exactly once (ahood#1569: the first cut
+  // said it twice, once up front and once at the end).
+  return \`ahood: \${facts.join("; ")}. Tell the user in one line and suggest \\\`/ahood sync\\\` (and \\\`npx @ahood/cli@latest setup\\\` for the CLI); never run them yourself.\`;
 }
 
 /** The hook's decision for one SessionStart event: the JSON to print, or null to print nothing. */

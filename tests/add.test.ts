@@ -83,6 +83,11 @@ function stubApi(
   manifest: Array<{ path: string }> = [{ path: "SKILL.md" }],
   version: string = VERSION,
   kind?: "skill" | "agent" | "mcp",
+  name?: string | null,
+  // Only used by tests that also call `read`'s readSkillMd against this same
+  // stub (ahood#1569's install/read parity tests below) -- every other
+  // caller leaves this undefined and gets the pre-existing fixture shape.
+  skillMdContent?: string,
 ) {
   const calls: string[] = [];
   vi.stubGlobal(
@@ -91,13 +96,22 @@ function stubApi(
       const url = String(input);
       calls.push(url);
       if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}`) {
-        // Real server shape: `kind` is a TOP-LEVEL sibling of `skill_versions`,
-        // not nested inside it (GET /api/v1/skills/{owner}/{skill} route.ts) --
-        // nesting it here would mask the exact bug this fixture exists to pin.
+        // Real server shape: `kind` and `name` are TOP-LEVEL siblings of
+        // `skill_versions`, not nested inside it (GET
+        // /api/v1/skills/{owner}/{skill} route.ts) -- nesting either here
+        // would mask the exact bug this fixture exists to pin.
         return new Response(
           JSON.stringify({
-            skill_versions: { version, manifest, checksum_sha256: checksum },
+            owner: OWNER,
+            slug: SKILL,
+            skill_versions: {
+              version,
+              manifest,
+              checksum_sha256: checksum,
+              ...(skillMdContent !== undefined ? { skill_md_content: skillMdContent } : {}),
+            },
             ...(kind ? { kind } : {}),
+            ...(name !== undefined ? { name } : {}),
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -181,6 +195,55 @@ describe("add", () => {
     expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
       [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: sha256(archive) },
     });
+  });
+
+  // ahood#1569: `ahood skill add` and `ahood skill read` must stamp the exact
+  // same title -- both go through provenanceMetaFor, fed from the same
+  // GET /api/v1/skills/{owner}/{skill} response, so a registry `name` that
+  // differs from the slug (the real-world case this bug was filed from:
+  // alexkay/ahood's name is "Ahood Skill Registry") has to win over the slug
+  // on the install side exactly like it already does on the read side
+  // (tests/read.test.ts's "prefers the registry's `name` field" case).
+  it("install's provenance header title matches `skill read`'s title when the registry name differs from the slug", async () => {
+    const registryName = "Demo Skill (display name)";
+    const archive = await tarGz({ "SKILL.md": "# demo\n" });
+    stubApi(archive, sha256(archive), [{ path: "SKILL.md" }], VERSION, undefined, registryName, "# demo\n");
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    // Install used the registry name, not the slug.
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(
+      buildProvenanceHeader("# demo\n", {
+        title: registryName,
+        owner: OWNER,
+        slug: SKILL,
+        version: VERSION,
+        url: `https://www.ahood.dev/${OWNER}/${SKILL}`,
+      }),
+    );
+
+    // `skill read` hits the same stubbed endpoint and must resolve to the
+    // identical title -- this is the actual install/read parity the bug
+    // report asked for, not just two separate assertions against the fixture.
+    const { readSkillMd } = await import("../src/commands/read.js");
+    const { provenance } = await readSkillMd(OWNER, SKILL);
+    expect(provenance.title).toBe(registryName);
+  });
+
+  // The slug fallback: no `name` on the registry response (an older route,
+  // or a skill published without one) leaves the title as the slug, on both
+  // sides, same as before #1569.
+  it("install falls back to the slug when the registry response has no `name`", async () => {
+    const archive = await tarGz({ "SKILL.md": "# demo\n" });
+    stubApi(archive, sha256(archive), [{ path: "SKILL.md" }], VERSION, undefined, undefined, "# demo\n"); // no `name` -- response omits the field entirely
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(withHeader("# demo\n"));
+
+    const { readSkillMd } = await import("../src/commands/read.js");
+    const { provenance } = await readSkillMd(OWNER, SKILL);
+    expect(provenance.title).toBe(SKILL);
   });
 
   // ahood-cli#1320 contract §5: install records the server's skill_id onto
