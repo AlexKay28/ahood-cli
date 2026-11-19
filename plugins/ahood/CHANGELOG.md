@@ -9,6 +9,15 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 `preversion` hook (and the release workflow) refuse a version without one
 (`scripts/check-changelog.mjs`).
 
+## 0.20.1 (2026-11-19)
+
+- The header on an installed skill now shows the skill's registry title (for example
+  "Ahood Skill Registry") for every kind of install: a pinned `@version`, an update through
+  `ahood sync`, and agents, docs and MCP servers. Before, these showed the slug.
+- The session-start notice names what is out of date, for example
+  `alexkay/ahood 2.7.0→2.8.0` (up to three, then "and N more"), and the CLI itself when it is
+  behind, instead of only a count.
+
 ## 0.20.0 (2026-11-19)
 
 - Every skill, agent and doc ahood installs now starts with a short header: its title, a link
