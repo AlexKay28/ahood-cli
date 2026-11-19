@@ -8,6 +8,7 @@ import { buildProvenanceHeader } from "../src/provenance-header.js";
 import { UsageError } from "../src/usage-error.js";
 import { fakeRegistry, tarGz, type Entry } from "./helpers/fake-registry.js";
 import { captureConsole, setupEnv, statusFrom, stubMeApi } from "./helpers/me-env.js";
+import { resetProvenanceNameCacheForTests } from "../src/commands/add.js";
 
 vi.mock("../src/confirm.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/confirm.js")>()),
@@ -33,6 +34,10 @@ describe("ahood sync (ahood#979)", () => {
   let registryCalls: ReturnType<typeof fakeRegistry>;
 
   beforeEach(async () => {
+    // ahood#1569: provenanceMetaForAsync's per-process name cache is keyed
+    // by owner/slug only -- reset it so no earlier test's fakeRegistry name
+    // lookup leaks into this one.
+    resetProvenanceNameCacheForTests();
     env = setupEnv();
     io = captureConsole();
     entries = { "alice/pdf-tools": await skillEntry("1.0.0", V1) };
@@ -198,9 +203,17 @@ describe("ahood sync (ahood#979)", () => {
     // header from both sides (so the diff itself shows only the real
     // content change), but the actual install -- sync's whole point -- still
     // stamps AGENT.md with it, same as a fresh `ahood agent add` would.
+    //
+    // ahood#1569: `sync` always resolves to an explicit target version
+    // (here "2.0.0", never the literal "latest"), which the registry's
+    // versions/{version} route never returns a `name` for -- so this title
+    // only comes out as "N" if provenanceMetaForAsync's one extra lookup
+    // against fakeRegistry's GET /api/v1/skills/alice/helper (name: "N")
+    // actually ran. Before that fix, this fell back to the slug ("helper")
+    // every time, exactly the bug #1569 was filed from.
     expect(readFileSync(".claude/agents/alice@helper.md", "utf-8")).toBe(
       buildProvenanceHeader("agent v2\n", {
-        title: "helper",
+        title: "N",
         owner: "alice",
         slug: "helper",
         version: "2.0.0",
