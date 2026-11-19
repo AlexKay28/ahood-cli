@@ -28,6 +28,25 @@
 // including a line crafted by untrusted content to look like one -- is left
 // untouched. That is what makes "strip" safe to run unconditionally on every
 // publish.
+//
+// #1562 hardening (bug hunt on #1553, confirmed by executing this module):
+// title/owner/slug/version are free text (skills.name especially -- a
+// column with no markdown-safety constraint of its own) interpolated
+// straight into a markdown blockquote and an HTML comment. Unescaped,
+// `x** · [click](https://evil) · **y` as a title renders a forged owner
+// link, and a raw \r/\n in any of the four splits the single-line
+// blockquote/comment across lines -- which breaks stripProvenanceHeader's
+// exact-position match (so build(build(x)) !== build(x): headers stack on
+// every republish/read instead of replacing) as well as the surrounding
+// document's own structure. escapeHeaderField below is applied to all four
+// fields before they ever reach a template string.
+//
+// Also hardened here: a JSON root doc (mcp's server.json) must never be
+// stamped at all -- a markdown blockquote would break JSON.parse for every
+// reader. That decision lives with the one caller that knows the kind
+// (lib/operations/catalog.ts's read_skill, gated on
+// lib/artifact-kinds.ts's hasJsonRootDoc) -- this module has no notion of
+// "kind" of its own to gate on.
 
 export type ProvenanceHeaderMeta = {
   /** The artifact's display name/title. */
@@ -46,28 +65,13 @@ const CTA = "from ahood.dev — check for updates: `ahood status` or /ahood";
 const BOM = "﻿";
 
 // Non-greedy up to the first closing "---" line (or end of string, for a
-// frontmatter block with no trailing newline). CRLF-tolerant. The body +
-// its trailing newline is ONE optional group (not a bare `*?` star) so an
-// EMPTY frontmatter block (`---\n---\n`, zero body lines) still matches --
-// without the group, nothing before the closing fence ever supplies the
-// newline the star would need to see before it, and the whole pattern
-// fails to match at all, which previously meant an empty frontmatter block
-// was never recognised and the header landed BEFORE it instead of after
-// (hardening pass, issue #1553 follow-up: parity with web's own fix).
+// frontmatter block with no trailing newline). CRLF-tolerant. #1562: the
+// body-plus-its-own-newline segment is wrapped as one optional group so
+// EMPTY frontmatter ("---\n---") is recognized too -- without the `?`, the
+// pattern demanded at least one body line (a newline strictly between the
+// two fences), so "---\n---\nbody" fell through unmatched and the header
+// landed before the frontmatter instead of after it.
 const FRONTMATTER_RE = /^---\r?\n(?:[\s\S]*?\r?\n)?---(?:\r?\n|$)/;
-
-// Hardening pass (issue #1553 follow-up): title/owner/slug/version are
-// interpolated into a markdown blockquote and an HTML comment, and none of
-// the four is server-validated free-text (title in particular is whatever
-// the registry's `name` column holds). \r/\n become a space each -- a raw
-// newline inside any of them would otherwise let crafted content split the
-// single-line blockquote or marker into extra lines (or, in the marker,
-// break the HTML comment early). The five markdown-special characters that
-// could otherwise reopen emphasis/links inside the blockquote, or prematurely
-// close the code span the CTA's own backticks open, are backslash-escaped.
-function escapeHeaderValue(value: string): string {
-  return value.replace(/[\r\n]/g, " ").replace(/[*[\]()`]/g, (c) => `\\${c}`);
-}
 
 // Format-anchored, not value-anchored: the title/owner/slug/version/url can
 // be anything, but the surrounding literal text (middle dots, "v", the CTA)
@@ -93,14 +97,22 @@ function frontmatterEnd(text: string): number {
   return match ? match[0].length : 0;
 }
 
+/** #1562: collapses \r/\n to a space (a raw newline would split this
+ *  template's single blockquote/comment line, breaking both the
+ *  document's structure and stripProvenanceHeader's exact-position match),
+ *  then backslash-escapes the five markdown metacharacters this template
+ *  itself relies on (`* [ ] ( )` and the backtick in the CTA) so free text
+ *  (skills.name especially) can never inject a fake `[label](url)` link or
+ *  close the `**bold**` title early. */
+function escapeHeaderField(value: string): string {
+  return value.replace(/[\r\n]+/g, " ").replace(/[*[\]()`]/g, "\\$&");
+}
+
 function renderHeaderLines(meta: ProvenanceHeaderMeta): [blockquote: string, marker: string] {
-  // `url` is deliberately NOT escaped here: it is always the service's own
-  // canonical ahood.dev link (getURL()/AHOOD_SITE_URL), never free text a
-  // publisher controls the way title/owner/slug/version are.
-  const title = escapeHeaderValue(meta.title);
-  const owner = escapeHeaderValue(meta.owner);
-  const slug = escapeHeaderValue(meta.slug);
-  const version = escapeHeaderValue(meta.version);
+  const title = escapeHeaderField(meta.title);
+  const owner = escapeHeaderField(meta.owner);
+  const slug = escapeHeaderField(meta.slug);
+  const version = escapeHeaderField(meta.version);
   const ref = `${owner}/${slug}@${version}`;
   const blockquote = `> **${title}** · [${owner}/${slug}](${meta.url}) · v${version} · ${CTA}`;
   const marker = `<!-- ahood:provenance v=${MARKER_SCHEMA_VERSION} ref=${ref} -->`;
@@ -134,16 +146,18 @@ export function buildProvenanceHeader(content: string, meta: ProvenanceHeaderMet
   const stripped = stripProvenanceHeader(content);
   const { bom, rest } = splitBom(stripped);
   const fmEnd = frontmatterEnd(rest);
-  let before = rest.slice(0, fmEnd);
+  const before = rest.slice(0, fmEnd);
   const after = rest.slice(fmEnd);
   const eol = detectEol(content);
-  // Hardening pass (issue #1553 follow-up): a frontmatter block with no
-  // trailing EOL (FRONTMATTER_RE's own `$` branch -- the closing fence sits
-  // at the very end of the string) leaves `before` without the newline
-  // every other case already has between the fence and whatever follows.
-  // Without this, the header would be glued directly onto the closing
-  // "---" with no line break at all.
-  if (fmEnd > 0 && !/[\r\n]$/.test(before)) before += eol;
   const [blockquote, marker] = renderHeaderLines(meta);
-  return `${bom}${before}${blockquote}${eol}${marker}${eol}${eol}${after}`;
+  // #1562: a frontmatter block with no trailing EOL of its own (the whole
+  // input was exactly "---\n...\n---", ending at FRONTMATTER_RE's `$`
+  // alternative rather than a newline) needs one synthesized here --
+  // without it, the fence's closing "---" and the header's opening "> **"
+  // land on the same line, destroying the fence (e.g. "---> **Title**...").
+  // Re-parsing the result afterwards (a later rebuild, or
+  // stripProvenanceHeader) sees a real newline at this position either
+  // way, so no special-casing is needed anywhere else.
+  const needsFrontmatterEol = fmEnd > 0 && !/\r?\n$/.test(before);
+  return `${bom}${before}${needsFrontmatterEol ? eol : ""}${blockquote}${eol}${marker}${eol}${eol}${after}`;
 }

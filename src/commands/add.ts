@@ -43,6 +43,25 @@ export function provenanceMetaFor(owner: string, slug: string, meta: { version: 
   return { title: meta.name ?? slug, owner, slug, version: meta.version, url: `${AHOOD_SITE_URL}/${owner}/${slug}` };
 }
 
+// Mirrors web's lib/artifact-kinds.ts hasJsonRootDoc (ahood#1553/#1562):
+// the mcp kind's root doc is JSON (server.json), and a markdown blockquote
+// stamped onto it would break JSON.parse for every reader -- web's gate
+// lives at its one caller that knows the kind (catalog.ts's read_skill);
+// this CLI's caller-side equivalent is simpler (installMcpEntry/
+// resolveMcpServerConfig never pass a `provenance`/`provenanceMeta`
+// argument at all, see extractTarGz/extractSingleFileContent below), but
+// this assertion is the explicit, enforced version of that same rule: a
+// provenance stamp requested onto a ".json"-named entry is a programmer
+// error, not a data condition, so it throws loudly instead of silently
+// corrupting the file.
+function assertNotJsonRootDoc(fileName: string): void {
+  if (/\.json$/i.test(fileName)) {
+    throw new Error(
+      `Refusing to stamp a provenance header onto ${fileName}: it is JSON, and the header would break JSON.parse for every reader (ahood#1553/#1562's JSON-root-doc rule).`,
+    );
+  }
+}
+
 // `changelog_md` is optional/nullable here (rather than a plain `string`)
 // because this type is shared with callers -- like `update --dry-run`'s
 // preview -- that only ever read it, never require it: an older API
@@ -225,6 +244,7 @@ export async function extractTarGz(buffer: Buffer, destDir: string, provenance?:
           // at the archive's top level) gets the provenance header; nothing
           // else in the archive is touched.
           if (provenance && entryPath === provenance.fileName) {
+            assertNotJsonRootDoc(provenance.fileName);
             data = Buffer.from(buildProvenanceHeader(data.toString("utf-8"), provenance.meta), "utf-8");
           }
           // Preserve the tar entry's mode (e.g. a scripts/*.sh published with
@@ -336,7 +356,10 @@ export async function extractSingleFileContent(buffer: Buffer, entryName: string
   // ahood#1553 step 4: only when a caller passes a meta -- every existing
   // caller (diff.ts's two-archive compare, resolveMcpServerConfig's
   // server.json read) keeps getting the raw bytes it always has.
-  if (provenanceMeta) return Buffer.from(buildProvenanceHeader(result.toString("utf-8"), provenanceMeta), "utf-8");
+  if (provenanceMeta) {
+    assertNotJsonRootDoc(entryName);
+    return Buffer.from(buildProvenanceHeader(result.toString("utf-8"), provenanceMeta), "utf-8");
+  }
   return result;
 }
 

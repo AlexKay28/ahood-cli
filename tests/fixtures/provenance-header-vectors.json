@@ -145,5 +145,70 @@
     "op": "strip",
     "input": "# Demo skill\n\nBody text.\n",
     "expected": "# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "#1562 JSON content: this module has no JSON-gate of its own -- callers must skip via hasJsonRootDoc",
+    "op": "build",
+    "input": "{\n  \"name\": \"demo-mcp\"\n}\n",
+    "meta": {
+      "title": "Demo Mcp",
+      "owner": "alice",
+      "slug": "demo-mcp",
+      "version": "1.0.0",
+      "url": "https://www.ahood.dev/alice/demo-mcp"
+    },
+    "expected": "> **Demo Mcp** · [alice/demo-mcp](https://www.ahood.dev/alice/demo-mcp) · v1.0.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-mcp@1.0.0 -->\n\n{\n  \"name\": \"demo-mcp\"\n}\n"
+  },
+  {
+    "name": "#1562 injection title: markdown metacharacters are escaped, not rendered as a forged link",
+    "op": "build",
+    "input": "# Demo skill\n\nBody text.\n",
+    "meta": {
+      "title": "x** · [click](https://evil) · **y",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "> **x\\*\\* · \\[click\\]\\(https://evil\\) · \\*\\*y** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "#1562 newline title: a raw newline is collapsed to a space, not left to split the blockquote",
+    "op": "build",
+    "input": "# Demo skill\n\nBody text.\n",
+    "meta": {
+      "title": "Evil\nTitle",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "> **Evil Title** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "#1562 frontmatter with no trailing EOL: a synthesized newline keeps the closing fence intact",
+    "op": "build",
+    "input": "---\nname: x\n---",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "---\nname: x\n---\n> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n"
+  },
+  {
+    "name": "#1562 empty frontmatter: a zero-body frontmatter block is still recognized",
+    "op": "build",
+    "input": "---\n---\nbody\n",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "---\n---\n> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\nbody\n"
   }
 ]

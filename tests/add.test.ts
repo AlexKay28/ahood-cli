@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
-import { add, extractTarGz, downloadVerifiedArchive, hashMcpServerConfig, matchesMcpConfigHash, readMcpConfig, resolveMcpServerConfig } from "../src/commands/add.js";
+import { add, extractTarGz, extractSingleFileContent, downloadVerifiedArchive, hashMcpServerConfig, matchesMcpConfigHash, readMcpConfig, resolveMcpServerConfig } from "../src/commands/add.js";
 import { LOCKFILE_PATH, agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { ApiError } from "../src/http.js";
 import { writeLockfileEntry } from "../src/lockfile.js";
@@ -1588,5 +1588,38 @@ describe("readMcpConfig", () => {
 
     writeFileSync(join(dir, MCP_CONFIG_PATH), '{"mcpServers": []}');
     expect(() => readMcpConfig()).toThrow(/"mcpServers" key exists but is not a JSON object/);
+  });
+});
+
+// ahood#1553/#1562: mirrors web's lib/artifact-kinds.ts hasJsonRootDoc --
+// a provenance header must never be stamped onto a JSON root doc (the mcp
+// kind's server.json), since a markdown blockquote would break JSON.parse
+// for every reader. This CLI's install path never actually passes a
+// provenance meta for server.json (installMcpEntry/resolveMcpServerConfig
+// never do), but extractTarGz/extractSingleFileContent assert it too, so a
+// future caller that tried would fail loudly instead of silently
+// corrupting the file.
+describe("JSON-root-doc guard (ahood#1553/#1562)", () => {
+  const META = { title: "t", owner: "alice", slug: "s", version: "1.0.0", url: "https://www.ahood.dev/alice/s" };
+
+  it("extractSingleFileContent refuses to stamp a .json entry", async () => {
+    const archive = await tarGz({ "server.json": '{"name":"x"}\n' });
+    await expect(extractSingleFileContent(archive, "server.json", META)).rejects.toThrow(
+      /Refusing to stamp a provenance header onto server\.json/,
+    );
+  });
+
+  it("extractSingleFileContent still returns server.json raw when no provenance meta is passed (the real mcp install path)", async () => {
+    const archive = await tarGz({ "server.json": '{"name":"x"}\n' });
+    const content = await extractSingleFileContent(archive, "server.json");
+    expect(content.toString("utf-8")).toBe('{"name":"x"}\n');
+  });
+
+  it("extractTarGz refuses to stamp a .json root doc", async () => {
+    const archive = await tarGz({ "server.json": '{"name":"x"}\n' });
+    const out = mkdtempSync(join(tmpdir(), "ahood-add-json-guard-"));
+    await expect(
+      extractTarGz(archive, out, { fileName: "server.json", meta: META }),
+    ).rejects.toThrow(/Refusing to stamp a provenance header onto server\.json/);
   });
 });
