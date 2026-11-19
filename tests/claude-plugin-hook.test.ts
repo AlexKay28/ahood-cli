@@ -85,16 +85,62 @@ describe("hooks/session-start.mjs", () => {
     expect(result.stdout).toBe("");
   });
 
-  it("tells the agent to suggest (never run) a sync when an installed item has an update", () => {
-    const status = { items: [{ owner: "alice", slug: "x", update_available: true }], plan: {}, notices: [] };
+  // ahood#1569: the hook used to only report a bare count ("1 installed
+  // skill/agent/MCP server update(s) are available") -- it now names what's
+  // actually out of date, as `owner/slug installed→latest`, so the agent
+  // (and the user it relays to) knows what it's being asked to sync.
+  it("names a single update as owner/slug installed→latest", () => {
+    const status = {
+      items: [{ owner: "alexkay", slug: "ahood", update_available: true, installed_version: "2.7.0", latest_version: "2.8.0" }],
+      plan: {},
+      notices: [],
+    };
     const result = runHook({}, sessionStart(), { exit: 0, stdout: JSON.stringify(status) }).run();
     expect(result.status).toBe(0);
     const out = JSON.parse(result.stdout);
     expect(out.hookSpecificOutput.hookEventName).toBe("SessionStart");
-    expect(out.hookSpecificOutput.additionalContext).toContain("1 installed skill/agent/MCP server update(s)");
-    expect(out.hookSpecificOutput.additionalContext).toContain("SUGGEST");
-    expect(out.hookSpecificOutput.additionalContext).toContain("/ahood sync");
-    expect(out.hookSpecificOutput.additionalContext).toContain("never run either");
+    expect(out.hookSpecificOutput.additionalContext).toBe(
+      "ahood: updates available: alexkay/ahood 2.7.0→2.8.0. Tell the user in one line and suggest `/ahood sync` (and `npx @ahood/cli@latest setup` for the CLI); never run them yourself.",
+    );
+  });
+
+  // Four updates: only the first 3 are named, and "and N more" covers the rest.
+  it('names up to 3 updates and says "and N more" for the rest', () => {
+    const item = (slug: string) => ({ owner: "alice", slug, update_available: true, installed_version: "1.0.0", latest_version: "1.1.0" });
+    const status = { items: [item("s1"), item("s2"), item("s3"), item("s4")], plan: {}, notices: [] };
+    const result = runHook({}, sessionStart(), { exit: 0, stdout: JSON.stringify(status) }).run();
+    const out = JSON.parse(result.stdout);
+    expect(out.hookSpecificOutput.additionalContext).toContain(
+      "updates available: alice/s1 1.0.0→1.1.0, alice/s2 1.0.0→1.1.0, alice/s3 1.0.0→1.1.0, and 1 more.",
+    );
+    expect(out.hookSpecificOutput.additionalContext).not.toContain("s4");
+  });
+
+  // ahood#1569: the client-update line (`ahood.client.update_available`,
+  // set by the server on `status --json`'s additive `ahood` block) is
+  // reported even with no installed-item updates and no notices.
+  it("reports the CLI's own update when ahood.client.update_available is set, with no items or notices", () => {
+    const status = {
+      items: [],
+      plan: {},
+      notices: [],
+      ahood: { client: { update_available: true, version: "0.20.0", latest: "0.21.0" } },
+    };
+    const result = runHook({}, sessionStart(), { exit: 0, stdout: JSON.stringify(status) }).run();
+    const out = JSON.parse(result.stdout);
+    expect(out.hookSpecificOutput.additionalContext).toBe(
+      "ahood: ahood CLI 0.20.0 → 0.21.0. Tell the user in one line and suggest `/ahood sync` (and `npx @ahood/cli@latest setup` for the CLI); never run them yourself.",
+    );
+  });
+
+  // The relay instruction appears exactly once, not once up front and once
+  // at the end (ahood#1569's second complaint about the first cut).
+  it("states the relay instruction exactly once", () => {
+    const status = { items: [{ owner: "alice", slug: "x", update_available: true, installed_version: "1.0.0", latest_version: "1.1.0" }], plan: {}, notices: [] };
+    const result = runHook({}, sessionStart(), { exit: 0, stdout: JSON.stringify(status) }).run();
+    const out = JSON.parse(result.stdout);
+    const occurrences = out.hookSpecificOutput.additionalContext.match(/one line/g) ?? [];
+    expect(occurrences).toHaveLength(1);
   });
 
   it("surfaces the highest-severity notice", () => {

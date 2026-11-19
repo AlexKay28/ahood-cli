@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, existsSync } 
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { createPatch } from "diff";
-import { add, downloadVerifiedArchive, extractSingleFileContent, extractTarGz, fetchVersionMeta, provenanceMetaFor, type VersionMeta } from "./add.js";
+import { add, downloadVerifiedArchive, extractSingleFileContent, extractTarGz, fetchVersionMeta, provenanceMetaForAsync, type VersionMeta } from "./add.js";
 import { loadStatusRows, type StatusRow } from "./status.js";
 import { confirmYesNo, isInteractive } from "../confirm.js";
 import { unrecognizedArgs } from "../flags.js";
@@ -95,7 +95,12 @@ async function diffAgainstInstalled(row: StatusRow, kind: CliKind | null, buffer
   // real install path (add.ts) uses, so this preview shows what will
   // actually land on disk -- then stripped from both sides right below, so
   // the header's own version churn never shows up as a spurious diff line.
-  const provenance = provenanceMetaFor(row.owner, row.slug, { ...meta, version: to });
+  // ahood#1569: `meta` here came from fetchVersionMeta(row.owner, row.slug,
+  // to) with `to` an explicit target version (sync always resolves a real
+  // semver, never the literal "latest" -- see loadStatusRows), so it never
+  // carries `name` either; provenanceMetaForAsync resolves it the same way
+  // add.ts's own pinned-install path does.
+  const provenance = await provenanceMetaForAsync(row.owner, row.slug, { ...meta, version: to });
   if (kind !== null && kind !== "skill") {
     const rootDoc = KINDS[kind].rootDoc;
     const next = await extractSingleFileContent(buffer, rootDoc, provenance);

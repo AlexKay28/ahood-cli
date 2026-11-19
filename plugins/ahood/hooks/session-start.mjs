@@ -51,20 +51,34 @@ export function runStatus(env) {
   }
 }
 
+/** Up to MAX_NAMED_UPDATES `owner/slug installed→latest` items, "and N more" past that. */
+const MAX_NAMED_UPDATES = 3;
+export function describeUpdates(updates) {
+  const named = updates
+    .slice(0, MAX_NAMED_UPDATES)
+    .map((u) => `${u.owner}/${u.slug} ${u.installed_version}→${u.latest_version}`);
+  const rest = updates.length - named.length;
+  return rest > 0 ? `${named.join(", ")}, and ${rest} more` : named.join(", ");
+}
+
 /** The additionalContext text, or null when there is nothing worth telling the agent. */
 export function buildContext(status) {
   if (!status) return null;
   const updates = Array.isArray(status.items) ? status.items.filter((i) => i && i.update_available) : [];
   const notices = Array.isArray(status.notices) ? status.notices : [];
-  if (updates.length === 0 && notices.length === 0) return null;
-  const lines = ["ahood: there is something to tell the user (relay it in one line; never run either suggestion yourself)."];
-  if (updates.length > 0) lines.push(`${updates.length} installed skill/agent/MCP server update(s) are available.`);
+  const client = status.ahood && status.ahood.client && status.ahood.client.update_available ? status.ahood.client : null;
+  if (updates.length === 0 && notices.length === 0 && !client) return null; // nothing to say this session
+
+  const facts = [];
+  if (updates.length > 0) facts.push(`updates available: ${describeUpdates(updates)}`);
+  if (client) facts.push(`ahood CLI ${client.version} → ${client.latest}`);
   if (notices.length > 0) {
     const top = notices.reduce((best, n) => ((SEVERITY_RANK[n.severity] ?? 0) > (SEVERITY_RANK[best.severity] ?? 0) ? n : best));
-    lines.push(`Notice (${top.severity}): ${top.message}`);
+    facts.push(`Notice (${top.severity}): ${top.message}`);
   }
-  lines.push("Tell the user about this in one line and SUGGEST `/ahood sync` and/or `npx @ahood/cli@latest setup`; do not run either yourself.");
-  return lines.join(" ");
+  // The relay instruction is stated exactly once (ahood#1569: the first cut
+  // said it twice, once up front and once at the end).
+  return `ahood: ${facts.join("; ")}. Tell the user in one line and suggest \`/ahood sync\` (and \`npx @ahood/cli@latest setup\` for the CLI); never run them yourself.`;
 }
 
 /** The hook's decision for one SessionStart event: the JSON to print, or null to print nothing. */

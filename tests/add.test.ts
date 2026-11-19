@@ -5,7 +5,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
-import { add, extractTarGz, extractSingleFileContent, downloadVerifiedArchive, hashMcpServerConfig, matchesMcpConfigHash, readMcpConfig, resolveMcpServerConfig } from "../src/commands/add.js";
+import {
+  add,
+  extractTarGz,
+  extractSingleFileContent,
+  downloadVerifiedArchive,
+  hashMcpServerConfig,
+  matchesMcpConfigHash,
+  readMcpConfig,
+  resetProvenanceNameCacheForTests,
+  resolveMcpServerConfig,
+} from "../src/commands/add.js";
 import { LOCKFILE_PATH, agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { ApiError } from "../src/http.js";
 import { writeLockfileEntry } from "../src/lockfile.js";
@@ -83,6 +93,11 @@ function stubApi(
   manifest: Array<{ path: string }> = [{ path: "SKILL.md" }],
   version: string = VERSION,
   kind?: "skill" | "agent" | "mcp",
+  name?: string | null,
+  // Only used by tests that also call `read`'s readSkillMd against this same
+  // stub (ahood#1569's install/read parity tests below) -- every other
+  // caller leaves this undefined and gets the pre-existing fixture shape.
+  skillMdContent?: string,
 ) {
   const calls: string[] = [];
   vi.stubGlobal(
@@ -91,13 +106,22 @@ function stubApi(
       const url = String(input);
       calls.push(url);
       if (url === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}`) {
-        // Real server shape: `kind` is a TOP-LEVEL sibling of `skill_versions`,
-        // not nested inside it (GET /api/v1/skills/{owner}/{skill} route.ts) --
-        // nesting it here would mask the exact bug this fixture exists to pin.
+        // Real server shape: `kind` and `name` are TOP-LEVEL siblings of
+        // `skill_versions`, not nested inside it (GET
+        // /api/v1/skills/{owner}/{skill} route.ts) -- nesting either here
+        // would mask the exact bug this fixture exists to pin.
         return new Response(
           JSON.stringify({
-            skill_versions: { version, manifest, checksum_sha256: checksum },
+            owner: OWNER,
+            slug: SKILL,
+            skill_versions: {
+              version,
+              manifest,
+              checksum_sha256: checksum,
+              ...(skillMdContent !== undefined ? { skill_md_content: skillMdContent } : {}),
+            },
             ...(kind ? { kind } : {}),
+            ...(name !== undefined ? { name } : {}),
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -135,6 +159,11 @@ describe("add", () => {
     process.env.HOME = dir;
     process.env.AHOOD_API_URL = API_URL;
     delete process.env.AHOOD_TOKEN;
+    // ahood#1569: provenanceMetaForAsync's per-process name cache is keyed
+    // only by owner/slug -- every test here reuses the same OWNER/SKILL
+    // constants with different stubbed `name` values, so it must be reset
+    // between tests or an earlier test's name leaks into a later one's.
+    resetProvenanceNameCacheForTests();
   });
 
   afterEach(() => {
@@ -181,6 +210,99 @@ describe("add", () => {
     expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
       [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: sha256(archive) },
     });
+  });
+
+  // ahood#1569: `ahood skill add` and `ahood skill read` must stamp the exact
+  // same title -- both go through provenanceMetaFor, fed from the same
+  // GET /api/v1/skills/{owner}/{skill} response, so a registry `name` that
+  // differs from the slug (the real-world case this bug was filed from:
+  // alexkay/ahood's name is "Ahood Skill Registry") has to win over the slug
+  // on the install side exactly like it already does on the read side
+  // (tests/read.test.ts's "prefers the registry's `name` field" case).
+  it("install's provenance header title matches `skill read`'s title when the registry name differs from the slug", async () => {
+    const registryName = "Demo Skill (display name)";
+    const archive = await tarGz({ "SKILL.md": "# demo\n" });
+    stubApi(archive, sha256(archive), [{ path: "SKILL.md" }], VERSION, undefined, registryName, "# demo\n");
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    // Install used the registry name, not the slug.
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(
+      buildProvenanceHeader("# demo\n", {
+        title: registryName,
+        owner: OWNER,
+        slug: SKILL,
+        version: VERSION,
+        url: `https://www.ahood.dev/${OWNER}/${SKILL}`,
+      }),
+    );
+
+    // `skill read` hits the same stubbed endpoint and must resolve to the
+    // identical title -- this is the actual install/read parity the bug
+    // report asked for, not just two separate assertions against the fixture.
+    const { readSkillMd } = await import("../src/commands/read.js");
+    const { provenance } = await readSkillMd(OWNER, SKILL);
+    expect(provenance.title).toBe(registryName);
+  });
+
+  // The slug fallback: no `name` on the registry response (an older route,
+  // or a skill published without one) leaves the title as the slug, on both
+  // sides, same as before #1569.
+  it("install falls back to the slug when the registry response has no `name`", async () => {
+    const archive = await tarGz({ "SKILL.md": "# demo\n" });
+    stubApi(archive, sha256(archive), [{ path: "SKILL.md" }], VERSION, undefined, undefined, "# demo\n"); // no `name` -- response omits the field entirely
+
+    await add([`${OWNER}/${SKILL}`]);
+
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(withHeader("# demo\n"));
+
+    const { readSkillMd } = await import("../src/commands/read.js");
+    const { provenance } = await readSkillMd(OWNER, SKILL);
+    expect(provenance.title).toBe(SKILL);
+  });
+
+  // ahood#1569 (the actual live repro): `ahood skill add owner/skill@version`
+  // -- an explicit, PINNED version -- goes through fetchVersionMeta's
+  // versions/{version} branch, which has no `name` column at all (unlike
+  // the "latest" branch GET /api/v1/skills/{owner}/{skill} uses). Before
+  // this fix, that meant a pinned install's title fell back to the slug
+  // even when the registry has a display name -- this is what provenanceMetaForAsync's
+  // one extra lookup (GET /api/v1/skills/{owner}/{skill}, just for `name`) fixes.
+  it("a pinned @version install resolves the registry title via one extra lookup (ahood#1569)", async () => {
+    const registryName = "Pinned Install Title";
+    const archive = await tarGz({ "SKILL.md": "# demo\n" });
+    const calls = stubApi(archive, sha256(archive), [{ path: "SKILL.md" }], VERSION, undefined, registryName);
+
+    await add([`${OWNER}/${SKILL}@${VERSION}`]);
+
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(
+      buildProvenanceHeader("# demo\n", {
+        title: registryName,
+        owner: OWNER,
+        slug: SKILL,
+        version: VERSION,
+        url: `https://www.ahood.dev/${OWNER}/${SKILL}`,
+      }),
+    );
+
+    // "At most once per install": the one extra name lookup (GET
+    // /api/v1/skills/{owner}/{skill}, no query string) is hit exactly once,
+    // not once per call site that happens to build a provenance header.
+    const baseSkillCalls = calls.filter((u) => u === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}`);
+    expect(baseSkillCalls).toHaveLength(1);
+  });
+
+  // The slug fallback still holds for a pinned install when NEITHER route
+  // carries a `name` (an older server, or a skill genuinely published
+  // without one) -- the extra lookup degrades to the same slug fallback,
+  // not an error.
+  it("a pinned @version install falls back to the slug when the registry has no `name` either", async () => {
+    const archive = await tarGz({ "SKILL.md": "# demo\n" });
+    stubApi(archive, sha256(archive), [{ path: "SKILL.md" }], VERSION); // no `name` arg -- base route also omits it
+
+    await add([`${OWNER}/${SKILL}@${VERSION}`]);
+
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(withHeader("# demo\n"));
   });
 
   // ahood-cli#1320 contract §5: install records the server's skill_id onto
@@ -432,13 +554,17 @@ describe("add", () => {
     // exercises fetchVersionMeta's "latest" branch (GET .../skills/{owner}/
     // {skill}). This one pins an explicit version so the OTHER branch (GET
     // .../versions/{version}) is what actually resolves the agent install.
+    //
+    // ahood#1569: the versions/{version} route has no `name` column, so the
+    // install now ALSO hits GET .../skills/{owner}/{skill} exactly once --
+    // provenanceMetaForAsync's one extra lookup for the registry title.
     const archive = await tarGz({ "AGENT.md": "# reviewer agent\n" });
     const calls = stubApi(archive, sha256(archive), [{ path: "AGENT.md" }], VERSION, "agent");
 
     await add([`${OWNER}/${SKILL}@${VERSION}`]);
 
     expect(calls).toContain(`${API_URL}/api/v1/skills/${OWNER}/${SKILL}/versions/${VERSION}`);
-    expect(calls).not.toContain(`${API_URL}/api/v1/skills/${OWNER}/${SKILL}`);
+    expect(calls.filter((u) => u === `${API_URL}/api/v1/skills/${OWNER}/${SKILL}`)).toHaveLength(1);
 
     const dest = join(dir, agentPath(OWNER, SKILL));
     expect(existsSync(dest)).toBe(true);

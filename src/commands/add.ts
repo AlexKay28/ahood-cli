@@ -33,14 +33,67 @@ const AHOOD_SITE_URL = "https://www.ahood.dev";
 
 /**
  * The provenance header's `{title, owner, slug, version, url}` for an
- * install of `owner/slug` at `meta.version` -- title from the registry
- * response when it had one (only GET /api/v1/skills/{owner}/{skill}, the
- * "latest" branch of fetchVersionMeta below), else the slug. Shared by
- * every install call site below AND by sync.ts's pre-install diff preview,
- * so a header stamped by either path says the exact same thing.
+ * install of `owner/slug` at `meta.version` -- title from `meta.name` when
+ * the caller already has it, else the slug. Shared by every install call
+ * site below AND by sync.ts's pre-install diff preview, so a header stamped
+ * by either path says the exact same thing. Synchronous and never fetches:
+ * callers that might be holding a `meta` with no `name` at all (ahood#1569 --
+ * see provenanceMetaForAsync below) resolve that BEFORE calling this.
  */
 export function provenanceMetaFor(owner: string, slug: string, meta: { version: string; name?: string | null }): ProvenanceHeaderMeta {
   return { title: meta.name ?? slug, owner, slug, version: meta.version, url: `${AHOOD_SITE_URL}/${owner}/${slug}` };
+}
+
+// ahood#1569: `meta.name` is only ever populated by fetchVersionMeta's
+// "latest" branch (GET /api/v1/skills/{owner}/{skill} selects/spreads
+// `name`) -- the explicit-@version branch (GET .../versions/{version}) has
+// no `name` column at all (see fetchVersionMeta's own comment), so a pinned
+// install or a sync update to a specific version always built its
+// provenance title from the slug, never the registry's display name, even
+// though an unpinned `ahood skill add owner/slug` (no @version) got it
+// right. One cache entry per owner/slug, scoped to this module (i.e. to one
+// CLI process = one command invocation): sync.ts's diff preview and the
+// real install that follows it (applyInProject -> add(), same process, two
+// separate VersionMeta fetches) would otherwise each pay for their own
+// lookup of the exact same name.
+const provenanceNameCache = new Map<string, string | null>();
+
+/** Test-only: clears provenanceNameCache so one test's stub doesn't leak a cached name into the next. */
+export function resetProvenanceNameCacheForTests(): void {
+  provenanceNameCache.clear();
+}
+
+/**
+ * Like provenanceMetaFor, but resolves `meta.name` first when `meta` came
+ * from the explicit-version route and so never carried a `name` at all
+ * (`undefined`, not `null` -- a `null` already means "the registry checked
+ * and this skill genuinely has none"). Reuses `meta.name` whenever it's
+ * already present -- the common "latest" case -- so this never costs a
+ * network call there. Only the pinned-version gap costs one: a single GET
+ * /api/v1/skills/{owner}/{skill} (the same route the "latest" branch already
+ * uses), cached per owner/slug for the rest of this process. Best-effort: a
+ * failure here (offline, 404, rate limit) must never fail or even warn
+ * during an install that's otherwise succeeding -- it just leaves the title
+ * at the slug, exactly like before this fix existed.
+ */
+export async function provenanceMetaForAsync(
+  owner: string,
+  slug: string,
+  meta: { version: string; name?: string | null },
+): Promise<ProvenanceHeaderMeta> {
+  if (meta.name !== undefined) return provenanceMetaFor(owner, slug, meta);
+  const key = `${owner}/${slug}`;
+  if (!provenanceNameCache.has(key)) {
+    let name: string | null = null;
+    try {
+      const detail = await apiJson<{ name?: string | null }>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(slug)}`);
+      name = detail.name ?? null;
+    } catch {
+      name = null;
+    }
+    provenanceNameCache.set(key, name);
+  }
+  return provenanceMetaFor(owner, slug, { ...meta, name: provenanceNameCache.get(key) ?? null });
 }
 
 // Mirrors web's lib/artifact-kinds.ts hasJsonRootDoc (ahood#1553/#1562):
@@ -850,8 +903,9 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
   // ahood#1553 step 4 follow-up: server.json stays raw JSON (never gets the
   // inline header), so title/url are recorded on the lockfile entry and
   // mirrored onto the installed.json item below instead -- see
-  // LockEntryProvenance's doc comment.
-  const provenance = provenanceMetaFor(owner, skill, meta);
+  // LockEntryProvenance's doc comment. ahood#1569: an explicit-@version mcp
+  // install needs the same name resolution as a markdown root doc's header.
+  const provenance = await provenanceMetaForAsync(owner, skill, meta);
   try {
     writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, mcpKey, {
       version: meta.version,
@@ -995,8 +1049,8 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
   const skillId = meta.skill_id ?? currentEntry?.skillId;
   // ahood#1553 step 4 follow-up: same substitute-location record as
   // installMcpEntry's -- refreshed on every update so a title/slug change
-  // upstream still shows up here.
-  const provenance = provenanceMetaFor(owner, skill, meta);
+  // upstream still shows up here. ahood#1569: same async name resolution too.
+  const provenance = await provenanceMetaForAsync(owner, skill, meta);
   try {
     writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
       version: meta.version,
@@ -1097,8 +1151,9 @@ export async function downloadVerifiedArchive(owner: string, skill: string, meta
 async function installPinnedFile(kind: PinnedFileKind, owner: string, skill: string, meta: VersionMeta, buffer: Buffer): Promise<void> {
   const key = `${owner}/${skill}`;
   // ahood#1553 step 4: DOC.md/PROJECT.md/LOOP.md are markdown, so (unlike
-  // the mcp kind's server.json) the header is stamped inline.
-  const content = await extractSingleFileContent(buffer, KINDS[kind].rootDoc, provenanceMetaFor(owner, skill, meta));
+  // the mcp kind's server.json) the header is stamped inline. ahood#1569:
+  // async so a pinned-@version install still resolves the registry name.
+  const content = await extractSingleFileContent(buffer, KINDS[kind].rootDoc, await provenanceMetaForAsync(owner, skill, meta));
   const destPath = pinnedFilePath(kind, owner, skill);
   const previous = existsSync(destPath) ? readFileSync(destPath) : undefined;
   writeFileAtomic(destPath, content);
@@ -1218,7 +1273,8 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
 
   if (meta.kind === "agent") {
     // ahood#1553 step 4: AGENT.md is markdown, stamped inline like SKILL.md.
-    const content = await extractSingleFileContent(buffer, "AGENT.md", provenanceMetaFor(owner, skill, meta));
+    // ahood#1569: async so a pinned-@version install still resolves the name.
+    const content = await extractSingleFileContent(buffer, "AGENT.md", await provenanceMetaForAsync(owner, skill, meta));
     mkdirSync(AGENTS_ROOT, { recursive: true });
     const destPath = agentPath(owner, skill);
     writeFileAtomic(destPath, content);
@@ -1265,7 +1321,9 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
   const destDir = skillDir(owner, skill);
   // ahood#1553 step 4: only SKILL.md at the archive's top level is stamped;
   // every other file (scripts/, nested docs, ...) is written as-is.
-  await extractFreshVersion(buffer, destDir, { fileName: "SKILL.md", meta: provenanceMetaFor(owner, skill, meta) });
+  // ahood#1569: this is the exact path the bug was filed from -- a pinned
+  // `ahood skill add owner/skill@version` -- so it needs the async resolver.
+  await extractFreshVersion(buffer, destDir, { fileName: "SKILL.md", meta: await provenanceMetaForAsync(owner, skill, meta) });
   try {
     writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
       version: meta.version,
