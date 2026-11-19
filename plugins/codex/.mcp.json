@@ -5,7 +5,7 @@
       "url": "https://www.ahood.dev/api/mcp",
       "bearer_token_env_var": "AHOOD_TOKEN",
       "http_headers": {
-        "X-Ahood-Client": "codex-plugin/0.20.0"
+        "X-Ahood-Client": "codex-plugin/0.20.1"
       }
     }
   }
