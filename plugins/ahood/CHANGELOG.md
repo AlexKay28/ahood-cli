@@ -9,6 +9,24 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 `preversion` hook (and the release workflow) refuse a version without one
 (`scripts/check-changelog.mjs`).
 
+## 0.20.0 (2026-11-19)
+
+- Every skill, agent and doc ahood installs now starts with a short header: its title, a link
+  to its ahood page, and its version (it goes after the frontmatter, so skills still load).
+  `ahood sync` ignores the header when comparing, and `ahood publish` strips it, so it never
+  shows up as a change or gets republished. JSON files (MCP `server.json`) and prompts are
+  left as they are.
+- The CLI tells you, once a day at most, when a newer `@ahood/cli` is out (one line on stderr
+  after a command; never with `--json`, in CI, when piped, or with `AHOOD_NO_UPDATE_NOTIFIER=1`).
+- `ahood status` shows the most important notice from ahood, for example that your client is
+  out of date, with the command to fix it.
+- New session-start hook: at most once a day it checks your installed skills and the CLI and,
+  only if something is out of date, tells the agent to suggest `/ahood sync` or
+  `npx @ahood/cli@latest setup`. It never updates anything itself.
+- The plugins and the CLI identify their version to ahood (`X-Ahood-Client`), so the server
+  can tell you when an update is available.
+- The using-ahood skill explains the header and how to relay a notice in one line.
+
 ## 0.19.0 (2026-11-15)
 
 - The using-ahood skill and `/ahood-snap` follow a numbered snap protocol: one snap per artifact,
