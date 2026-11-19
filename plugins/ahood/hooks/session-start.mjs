@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 export const CACHE_FILE_ENV = "AHOOD_SESSION_START_CACHE_FILE";
 export const INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const BUDGET_MS = 3000;
-const ARGV = ["npx","-y","@ahood/cli@0.19.0","status","--json"];
+const ARGV = ["npx","-y","@ahood/cli@0.20.0","status","--json"];
 const SEVERITY_RANK = { required: 2, action: 1, info: 0 };
 
 function cachePath(env) {

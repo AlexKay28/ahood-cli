@@ -1,6 +1,6 @@
 {
   "name": "@ahood/cli",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "CLI for ahood, a registry for installing and publishing Claude Code skills.",
   "license": "MIT",
   "homepage": "https://github.com/AlexKay28/ahood-cli",
@@ -37,7 +37,7 @@
     "sync-plugin": "node scripts/sync-plugin.mjs",
     "sync-skill": "node scripts/sync-skill.mjs",
     "preversion": "node scripts/check-changelog.mjs \"$npm_new_version\"",
-    "version": "node scripts/sync-plugin.mjs && node scripts/check-plugin-version.mjs && git add plugins/ahood/.claude-plugin/plugin.json plugins/ahood/commands plugins/codex/.codex-plugin/plugin.json plugins/codex/skills/ahood/SKILL.md packages/opencode-plugin/package.json packages/opencode-plugin/src/generated.ts"
+    "version": "node scripts/sync-plugin.mjs && node scripts/check-plugin-version.mjs && git add plugins/ahood/.claude-plugin/plugin.json plugins/ahood/commands plugins/codex/.codex-plugin/plugin.json plugins/codex/skills/ahood/SKILL.md packages/opencode-plugin/package.json packages/opencode-plugin/src/generated.ts plugins/ahood/.mcp.json plugins/codex/.mcp.json plugins/ahood/hooks"
   },
   "dependencies": {
     "diff": "^9.0.0",
