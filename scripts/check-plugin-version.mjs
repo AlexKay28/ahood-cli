@@ -31,7 +31,31 @@ export const PLUGIN_MANIFESTS = [
 ];
 export const CLAUDE_MARKETPLACE = path.join(".claude-plugin", "marketplace.json");
 
+// ahood#1552 step 6: each plugin's MCP entry also carries
+// `X-Ahood-Client: <surface>/<version>` -- checked here too, alongside the
+// manifest versions above, so a release can't ship a plugin whose header
+// claims a different version than the plugin itself is. Claude Code and
+// Codex keep it in their (JSON) .mcp.json; opencode has no .mcp.json at
+// all -- its MCP entry is built at runtime from generated.ts's
+// CLIENT_HEADER_VALUE constant, so that file is read as text and
+// pattern-matched instead of JSON-parsed.
+export const CLIENT_HEADER_SOURCES = [
+  {
+    file: path.join("plugins", "ahood", ".mcp.json"),
+    extract: (text) => JSON.parse(text).ahood?.headers?.["X-Ahood-Client"],
+  },
+  {
+    file: path.join("plugins", "codex", ".mcp.json"),
+    extract: (text) => JSON.parse(text).mcpServers?.ahood?.http_headers?.["X-Ahood-Client"],
+  },
+  {
+    file: path.join("packages", "opencode-plugin", "src", "generated.ts"),
+    extract: (text) => /^export const CLIENT_HEADER_VALUE = "([^"]+)";$/m.exec(text)?.[1],
+  },
+];
+
 const readJson = (rootDir, file) => JSON.parse(readFileSync(path.join(rootDir, file), "utf8"));
+const readText = (rootDir, file) => readFileSync(path.join(rootDir, file), "utf8");
 
 /** Returns null when every version matches, otherwise the error message (one line per problem). */
 export function pluginVersionMismatch(rootDir) {
@@ -46,6 +70,17 @@ export function pluginVersionMismatch(rootDir) {
   for (const entry of readJson(rootDir, CLAUDE_MARKETPLACE).plugins ?? []) {
     if (entry.version !== undefined) {
       problems.push(`${CLAUDE_MARKETPLACE} sets version ${entry.version} on ${entry.name}; remove it (plugin.json carries the version).`);
+    }
+  }
+  for (const { file, extract } of CLIENT_HEADER_SOURCES) {
+    const value = extract(readText(rootDir, file));
+    if (!value) {
+      problems.push(`${file} has no X-Ahood-Client header value.`);
+      continue;
+    }
+    const version = value.slice(value.indexOf("/") + 1);
+    if (version !== root.version) {
+      problems.push(`${file}'s X-Ahood-Client header is "${value}" (version ${version}), which does not match ${root.name}@${root.version} (package.json).`);
     }
   }
   if (problems.length === 0) return null;

@@ -7,7 +7,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COMMANDS, MCP_SERVER_NAME, MCP_URL, PLUGIN_ID, SNAP_HOOK_ENV, SNAP_PROMPT, TOKEN_ENV } from "./generated.js";
+import { CLIENT_HEADER_NAME, CLIENT_HEADER_VALUE, COMMANDS, MCP_SERVER_NAME, MCP_URL, PLUGIN_ID, SNAP_HOOK_ENV, SNAP_PROMPT, TOKEN_ENV } from "./generated.js";
 import type { Plugin, PluginContext, RemoteMcpConfig } from "./opencode-api.js";
 
 type Env = Record<string, string | undefined>;
@@ -22,7 +22,14 @@ export function renderTemplate(template: string, args: string): string {
 // anywhere. A user's own `mcp.servers.ahood` (e.g. the one `ahood setup
 // opencode --store-token` writes) is already in the editor and wins.
 export function mcpEntry(env: Env): RemoteMcpConfig {
-  return { type: "remote", url: MCP_URL, headers: { Authorization: `Bearer ${env[TOKEN_ENV] ?? ""}` } };
+  return {
+    type: "remote",
+    url: MCP_URL,
+    // ahood#1552 step 6: alongside Authorization, identifies this as the
+    // opencode plugin (vs. the bare CLI's User-Agent, or Claude Code's/
+    // Codex's own plugin header) to the server.
+    headers: { Authorization: `Bearer ${env[TOKEN_ENV] ?? ""}`, [CLIENT_HEADER_NAME]: CLIENT_HEADER_VALUE },
+  };
 }
 
 /** True only for AHOOD_SNAP_HOOK=1, the same switch as the Claude Code plugin's Stop hook. */

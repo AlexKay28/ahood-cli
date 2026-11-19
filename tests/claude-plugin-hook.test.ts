@@ -1,13 +1,16 @@
 // ahood#981: the opt-in snap Stop hook (plugins/ahood/hooks) and the plugin skill.
+// ahood#1554 step 5: the SessionStart hook (session-start.mjs) joins it below.
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLAUDE_PLUGIN_DIR } from "../src/setup/templates/claude-plugin.js";
+import { CLAUDE_PLUGIN_DIR, claudePluginSessionStartHook } from "../src/setup/templates/claude-plugin.js";
+import { CLI_VERSION } from "../src/version.js";
 
 const PLUGIN = join(import.meta.dirname, "..", CLAUDE_PLUGIN_DIR);
 const SCRIPT = join(PLUGIN, "hooks", "snap-prompt.mjs");
+const SESSION_START_SCRIPT = join(PLUGIN, "hooks", "session-start.mjs");
 
 function runHook(env: Record<string, string>, input: unknown) {
   const dataDir = mkdtempSync(join(tmpdir(), "ahood-hook-"));
@@ -25,16 +28,121 @@ const stop = (extra: Record<string, unknown> = {}) => ({
 });
 
 describe("hooks/hooks.json", () => {
-  it("registers one Stop command hook that runs the bundled script, and nothing else", () => {
+  it("registers exactly SessionStart and Stop, each one command hook running its own bundled script", () => {
     const config = JSON.parse(readFileSync(join(PLUGIN, "hooks", "hooks.json"), "utf-8"));
     expect(Object.keys(config)).toEqual(["hooks"]);
-    expect(Object.keys(config.hooks)).toEqual(["Stop"]);
+    expect(Object.keys(config.hooks).sort()).toEqual(["SessionStart", "Stop"]);
     expect(config.hooks.Stop).toHaveLength(1);
-    const [group] = config.hooks.Stop;
-    expect(group.matcher).toBeUndefined(); // Stop takes no matcher
-    expect(group.hooks).toEqual([
+    const [stopGroup] = config.hooks.Stop;
+    expect(stopGroup.matcher).toBeUndefined(); // Stop takes no matcher
+    expect(stopGroup.hooks).toEqual([
       { type: "command", command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/snap-prompt.mjs"', timeout: 10 },
     ]);
+    expect(config.hooks.SessionStart).toHaveLength(1);
+    const [startGroup] = config.hooks.SessionStart;
+    expect(startGroup.matcher).toBeUndefined();
+    expect(startGroup.hooks).toEqual([
+      { type: "command", command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs"', timeout: 5 },
+    ]);
+  });
+
+  it("is exactly what claude-plugin.ts renders (run `npm run sync-plugin`)", () => {
+    expect(readFileSync(join(PLUGIN, "hooks", "session-start.mjs"), "utf-8")).toBe(claudePluginSessionStartHook());
+  });
+});
+
+describe("hooks/session-start.mjs", () => {
+  function runHook(env: Record<string, string>, input: unknown, statusStub?: { exit: number; stdout: string }) {
+    const dataDir = mkdtempSync(join(tmpdir(), "ahood-session-start-"));
+    // AHOOD_CLI_STUB, read by a tiny fake `npx` this test puts first on PATH,
+    // stands in for the real network call runStatus() makes -- so these
+    // tests exercise the hook's actual parsing/caching/budget logic against
+    // a controlled `status --json` answer, never the real registry.
+    const binDir = mkdtempSync(join(tmpdir(), "ahood-session-start-bin-"));
+    const npxStub = join(binDir, "npx");
+    writeFileSync(
+      npxStub,
+      statusStub
+        ? `#!/bin/sh\necho '${statusStub.stdout.replace(/'/g, "'\\''")}'\nexit ${statusStub.exit}\n`
+        : `#!/bin/sh\nexit 1\n`,
+    );
+    chmodSync(npxStub, 0o755);
+    const childEnv: Record<string, string> = {
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      CLAUDE_PLUGIN_DATA: dataDir,
+      ...env,
+    };
+    const run = () =>
+      spawnSync(process.execPath, [SESSION_START_SCRIPT], { input: JSON.stringify(input), env: childEnv, encoding: "utf-8" });
+    return { run, dataDir };
+  }
+
+  const sessionStart = (extra: Record<string, unknown> = {}) => ({ session_id: "sess-1", hook_event_name: "SessionStart", ...extra });
+
+  it("prints nothing when there is no update and no notice", () => {
+    const result = runHook({}, sessionStart(), { exit: 0, stdout: JSON.stringify({ items: [], plan: {}, notices: [] }) }).run();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+  });
+
+  it("tells the agent to suggest (never run) a sync when an installed item has an update", () => {
+    const status = { items: [{ owner: "alice", slug: "x", update_available: true }], plan: {}, notices: [] };
+    const result = runHook({}, sessionStart(), { exit: 0, stdout: JSON.stringify(status) }).run();
+    expect(result.status).toBe(0);
+    const out = JSON.parse(result.stdout);
+    expect(out.hookSpecificOutput.hookEventName).toBe("SessionStart");
+    expect(out.hookSpecificOutput.additionalContext).toContain("1 installed skill/agent/MCP server update(s)");
+    expect(out.hookSpecificOutput.additionalContext).toContain("SUGGEST");
+    expect(out.hookSpecificOutput.additionalContext).toContain("/ahood sync");
+    expect(out.hookSpecificOutput.additionalContext).toContain("never run either");
+  });
+
+  it("surfaces the highest-severity notice", () => {
+    const status = {
+      items: [],
+      plan: {},
+      notices: [
+        { id: "a", kind: "new_feature", severity: "info", message: "low", action: { label: "x", url: "https://x" } },
+        { id: "b", kind: "client_update", severity: "required", message: "upgrade now", action: { label: "Update", command: "npx @ahood/cli@latest setup" } },
+      ],
+    };
+    const result = runHook({}, sessionStart(), { exit: 0, stdout: JSON.stringify(status) }).run();
+    const out = JSON.parse(result.stdout);
+    expect(out.hookSpecificOutput.additionalContext).toContain("Notice (required): upgrade now");
+    expect(out.hookSpecificOutput.additionalContext).not.toContain("low");
+  });
+
+  it("asks at most once per 24h: the second run in the same window prints nothing even though an update exists", () => {
+    const status = { items: [{ update_available: true }], plan: {}, notices: [] };
+    const { run } = runHook({}, sessionStart(), { exit: 0, stdout: JSON.stringify(status) });
+    expect(run().stdout).not.toBe("");
+    expect(run().stdout).toBe("");
+  });
+
+  it("fails silently when the CLI call fails (no token, network down, non-zero exit)", () => {
+    const result = runHook({}, sessionStart(), { exit: 1, stdout: "" }).run();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("fails silently on a malformed status response", () => {
+    const result = runHook({}, sessionStart(), { exit: 0, stdout: "not json" }).run();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+  });
+
+  it("ignores a non-SessionStart event and bad stdin, still exiting 0", () => {
+    expect(runHook({}, sessionStart({ hook_event_name: "Stop" }), { exit: 0, stdout: "{}" }).run().stdout).toBe("");
+    const bad = spawnSync(process.execPath, [SESSION_START_SCRIPT], { input: "not json", encoding: "utf-8" });
+    expect(bad.status).toBe(0);
+    expect(bad.stdout).toBe("");
+  });
+
+  it("shells out through the pinned CLI version, not a bare `ahood`", () => {
+    const source = readFileSync(SESSION_START_SCRIPT, "utf-8");
+    expect(source).toContain(`@ahood/cli@${CLI_VERSION}`);
+    expect(source).not.toMatch(/execFileSync\("ahood"/);
   });
 });
 

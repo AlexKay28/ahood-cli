@@ -6,6 +6,18 @@ import { CLI_NAME, CLI_VERSION } from "../../version.js";
 
 export const AHOOD_MCP_URL = "https://www.ahood.dev/api/mcp";
 
+// ahood#1552 step 6: every plugin's MCP entry (Claude Code's .mcp.json,
+// Codex's .mcp.json, opencode's mcpEntry()) sends this header alongside
+// Authorization, so the server can tell which surface and version a
+// request came from (web issue #1552 step 2, lib/client-identity.ts's
+// `X-Ahood-Client: <surface>/<version>` parsing). The CLI itself already
+// sends its own identity as `User-Agent` (http.ts); this is the plugins'
+// equivalent, since none of the three speaks raw User-Agent to the hosted
+// MCP server itself -- the harness host does.
+export const AHOOD_CLIENT_HEADER = "X-Ahood-Client";
+export type AhoodClientSurface = "claude-plugin" | "codex-plugin" | "opencode-plugin";
+export const ahoodClientHeaderValue = (surface: AhoodClientSurface, version: string = CLI_VERSION): string => `${surface}/${version}`;
+
 // The hosted MCP server answers 401 without a bearer token. Every harness
 // config names this env var -- the same one the CLI and the Claude Code
 // plugin's .mcp.json read (ahood#990, decision A) -- unless the user lets

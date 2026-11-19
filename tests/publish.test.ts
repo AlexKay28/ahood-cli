@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { extract as tarExtract } from "tar-stream";
 import { publish } from "../src/commands/publish.js";
+import { buildProvenanceHeader } from "../src/provenance-header.js";
 
 const API_URL = "http://ahood.test";
 
@@ -23,6 +24,34 @@ async function listArchiveEntries(archiveBody: Uint8Array): Promise<string[]> {
     ex.end(decompressed);
   });
   return names;
+}
+
+// ahood#1553 step 4: reads one named entry's content out of the uploaded
+// archive, so a test can assert on exactly what publish packed for it
+// (not just that it exists, listArchiveEntries' job above).
+async function readArchiveEntry(archiveBody: Uint8Array, name: string): Promise<string | undefined> {
+  const decompressed = gunzipSync(Buffer.from(archiveBody));
+  let found: string | undefined;
+  const ex = tarExtract();
+  await new Promise<void>((resolve, reject) => {
+    ex.on("entry", (header, stream, next) => {
+      if (header.name !== name) {
+        stream.resume();
+        stream.on("end", next);
+        return;
+      }
+      const chunks: Buffer[] = [];
+      stream.on("data", (chunk) => chunks.push(chunk as Buffer));
+      stream.on("end", () => {
+        found = Buffer.concat(chunks).toString("utf-8");
+        next();
+      });
+    });
+    ex.on("finish", resolve);
+    ex.on("error", reject);
+    ex.end(decompressed);
+  });
+  return found;
 }
 
 function stubApi(uploadCapture: { body?: Uint8Array }) {
@@ -136,6 +165,40 @@ describe("publish", () => {
     await publish([`alice/demo@1.0.0`, "--path", dir]);
 
     expect(logSpy).toHaveBeenCalledWith("Published alice/demo@1.0.0 (published)");
+  });
+
+  it("strips a stale provenance header from SKILL.md before packing it (ahood#1553 step 4: an installed-dir republish never carries the old install's header into the registry)", async () => {
+    const body = "# demo\n\nBody text.\n";
+    const stamped = buildProvenanceHeader(body, {
+      title: "Old Title",
+      owner: "someone-else",
+      slug: "old-slug",
+      version: "0.1.0",
+      url: "https://www.ahood.dev/someone-else/old-slug",
+    });
+    writeFileSync(join(dir, "SKILL.md"), stamped);
+    const capture: { body?: Uint8Array } = {};
+    stubApi(capture);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+    expect(capture.body).toBeDefined();
+    const packed = await readArchiveEntry(capture.body!, "SKILL.md");
+    expect(packed).toBe(body);
+    expect(packed).not.toContain("ahood:provenance");
+  });
+
+  it("leaves a root doc with no provenance header byte-exact (strip is a no-op there)", async () => {
+    writeFileSync(join(dir, "SKILL.md"), "# demo\n\nUnrelated content.\n");
+    const capture: { body?: Uint8Array } = {};
+    stubApi(capture);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await publish([`alice/demo@1.0.0`, "--path", dir]);
+
+    const packed = await readArchiveEntry(capture.body!, "SKILL.md");
+    expect(packed).toBe("# demo\n\nUnrelated content.\n");
   });
 
   it("still supports the legacy <path> --owner --slug --version form", async () => {

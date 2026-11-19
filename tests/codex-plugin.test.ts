@@ -65,9 +65,16 @@ describe("plugin.json and marketplace.json", () => {
     expect(existsSync(join(ROOT, entry.source.path, ".codex-plugin", "plugin.json"))).toBe(true);
   });
 
-  it(".mcp.json points at the hosted server and names the token env var, never a token", () => {
+  it(".mcp.json points at the hosted server, names the token env var (never a token), and identifies this surface (ahood#1552 step 6)", () => {
     expect(readJson(join(PLUGIN, ".mcp.json"))).toEqual({
-      mcpServers: { ahood: { type: "http", url: "https://www.ahood.dev/api/mcp", bearer_token_env_var: "AHOOD_TOKEN" } },
+      mcpServers: {
+        ahood: {
+          type: "http",
+          url: "https://www.ahood.dev/api/mcp",
+          bearer_token_env_var: "AHOOD_TOKEN",
+          http_headers: { "X-Ahood-Client": `codex-plugin/${CLI_VERSION}` },
+        },
+      },
     });
   });
 });

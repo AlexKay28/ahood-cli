@@ -64,6 +64,15 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
   headers.set("User-Agent", `${CLI_NAME}/${CLI_VERSION}`);
+  // ahood#1552 step 2 (web's lib/client-identity.ts): User-Agent above is
+  // already `@ahood/cli/<version>` and parses as surface "cli" there, but
+  // sending the explicit header too means one parser (X-Ahood-Client first,
+  // User-Agent as its fallback) is all the server ever needs, and it's what
+  // lets the server's notice delivery (ahood#1554) and version block
+  // (ahood#1552 step 4) key on the SAME header shape for every surface --
+  // the CLI included, not just the three plugins (update-notifier.ts / the
+  // plugin templates send their own `<surface>/<version>` for those).
+  headers.set("X-Ahood-Client", `cli/${CLI_VERSION}`);
   try {
     return await fetch(`${getApiUrl()}${path}`, {
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),

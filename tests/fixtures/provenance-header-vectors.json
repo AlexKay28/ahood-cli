@@ -1,0 +1,214 @@
+[
+  {
+    "name": "no frontmatter",
+    "op": "build",
+    "input": "# Demo skill\n\nBody text.\n",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "with frontmatter",
+    "op": "build",
+    "input": "---\nname: demo-skill\ndescription: A demo skill.\n---\n# Demo skill\n\nBody text.\n",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "---\nname: demo-skill\ndescription: A demo skill.\n---\n> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "CRLF no frontmatter",
+    "op": "build",
+    "input": "# Demo skill\r\n\r\nBody text.\r\n",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\r\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\r\n\r\n# Demo skill\r\n\r\nBody text.\r\n"
+  },
+  {
+    "name": "CRLF with frontmatter",
+    "op": "build",
+    "input": "---\r\nname: demo-skill\r\ndescription: A demo skill.\r\n---\r\n# Demo skill\r\n\r\nBody text.\r\n",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "---\r\nname: demo-skill\r\ndescription: A demo skill.\r\n---\r\n> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\r\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\r\n\r\n# Demo skill\r\n\r\nBody text.\r\n"
+  },
+  {
+    "name": "BOM no frontmatter",
+    "op": "build",
+    "input": "﻿# Demo skill\n\nBody text.\n",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "﻿> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "BOM with frontmatter",
+    "op": "build",
+    "input": "﻿---\nname: demo-skill\ndescription: A demo skill.\n---\n# Demo skill\n\nBody text.\n",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "﻿---\nname: demo-skill\ndescription: A demo skill.\n---\n> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "empty content",
+    "op": "build",
+    "input": "",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n"
+  },
+  {
+    "name": "existing marker is replaced with a new version",
+    "op": "build",
+    "input": "> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "2.0.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v2.0.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@2.0.0 -->\n\n# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "look-alike marker in user content is left untouched",
+    "op": "strip",
+    "input": "# Demo skill\n\nSome text a user wrote.\n<!-- ahood:provenance v=1 ref=evil/thing@9.9.9 -->\nMore text.\n",
+    "expected": "# Demo skill\n\nSome text a user wrote.\n<!-- ahood:provenance v=1 ref=evil/thing@9.9.9 -->\nMore text.\n"
+  },
+  {
+    "name": "marker with no matching blockquote above it is left untouched",
+    "op": "strip",
+    "input": "<!-- ahood:provenance v=1 ref=evil/thing@9.9.9 -->\n\n# Demo skill\n",
+    "expected": "<!-- ahood:provenance v=1 ref=evil/thing@9.9.9 -->\n\n# Demo skill\n"
+  },
+  {
+    "name": "idempotent: build(build(x)) equals build(x)",
+    "op": "build",
+    "input": "> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "strip inverts a fresh build (no frontmatter)",
+    "op": "strip",
+    "input": "> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n",
+    "expected": "# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "strip inverts a fresh build (with frontmatter)",
+    "op": "strip",
+    "input": "---\nname: demo-skill\ndescription: A demo skill.\n---\n> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n",
+    "expected": "---\nname: demo-skill\ndescription: A demo skill.\n---\n# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "strip on content with no header is a no-op",
+    "op": "strip",
+    "input": "# Demo skill\n\nBody text.\n",
+    "expected": "# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "#1562 JSON content: this module has no JSON-gate of its own -- callers must skip via hasJsonRootDoc",
+    "op": "build",
+    "input": "{\n  \"name\": \"demo-mcp\"\n}\n",
+    "meta": {
+      "title": "Demo Mcp",
+      "owner": "alice",
+      "slug": "demo-mcp",
+      "version": "1.0.0",
+      "url": "https://www.ahood.dev/alice/demo-mcp"
+    },
+    "expected": "> **Demo Mcp** · [alice/demo-mcp](https://www.ahood.dev/alice/demo-mcp) · v1.0.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-mcp@1.0.0 -->\n\n{\n  \"name\": \"demo-mcp\"\n}\n"
+  },
+  {
+    "name": "#1562 injection title: markdown metacharacters are escaped, not rendered as a forged link",
+    "op": "build",
+    "input": "# Demo skill\n\nBody text.\n",
+    "meta": {
+      "title": "x** · [click](https://evil) · **y",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "> **x\\*\\* · \\[click\\]\\(https://evil\\) · \\*\\*y** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "#1562 newline title: a raw newline is collapsed to a space, not left to split the blockquote",
+    "op": "build",
+    "input": "# Demo skill\n\nBody text.\n",
+    "meta": {
+      "title": "Evil\nTitle",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "> **Evil Title** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n# Demo skill\n\nBody text.\n"
+  },
+  {
+    "name": "#1562 frontmatter with no trailing EOL: a synthesized newline keeps the closing fence intact",
+    "op": "build",
+    "input": "---\nname: x\n---",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "---\nname: x\n---\n> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\n"
+  },
+  {
+    "name": "#1562 empty frontmatter: a zero-body frontmatter block is still recognized",
+    "op": "build",
+    "input": "---\n---\nbody\n",
+    "meta": {
+      "title": "Demo Skill",
+      "owner": "alice",
+      "slug": "demo-skill",
+      "version": "1.4.0",
+      "url": "https://www.ahood.dev/alice/demo-skill"
+    },
+    "expected": "---\n---\n> **Demo Skill** · [alice/demo-skill](https://www.ahood.dev/alice/demo-skill) · v1.4.0 · from ahood.dev — check for updates: `ahood status` or /ahood\n<!-- ahood:provenance v=1 ref=alice/demo-skill@1.4.0 -->\n\nbody\n"
+  }
+]

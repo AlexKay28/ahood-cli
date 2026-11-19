@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { status, toRow, loadStatusRows, type ServerStatus } from "../src/commands/status.js";
@@ -7,6 +7,16 @@ import { ApiError } from "../src/http.js";
 import { exitCodeFor } from "../src/exit-code.js";
 import { json } from "./helpers/fake-registry.js";
 import { captureConsole, setupEnv, statusFrom, stubMeApi } from "./helpers/me-env.js";
+
+// ahood#1552 step 5 / ahood#1554 step 5: status.ts calls the shared
+// notifier directly (with the server's own optional ahood.client/notices,
+// fresher than the local npm-registry cache update-notifier.ts's own tests
+// cover) -- mocked here so these tests assert on the call, not the
+// notifier's internal logic.
+vi.mock("../src/update-notifier.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/update-notifier.js")>();
+  return { ...actual, maybeNotifyUpdate: vi.fn() };
+});
 
 const fixture = (name: string) => JSON.parse(readFileSync(join(__dirname, "fixtures", name), "utf-8"));
 
@@ -244,5 +254,108 @@ describe("skillId reconciliation (ahood-cli#1320 contract §5)", () => {
     expect(lockfile["alice/pdf-tools"]).toBeUndefined();
     expect(lockfile["alice2/pdf-tools"]).toEqual({ version: "1.0.0", checksum_sha256: "c", skillId: "skill-1" });
     expect(io.stdout()).toContain("alice/pdf-tools is now alice2/pdf-tools");
+  });
+});
+
+// ahood#1552 step 4: the server's optional `ahood` block on POST
+// /api/v1/me/status (web origin/dev e6601682). Additive and absent from
+// every fixture above, which already proves the older-server case
+// (nothing crashes, nothing is printed).
+describe("ahood.client (ahood#1552 step 5)", () => {
+  let env: ReturnType<typeof setupEnv>;
+  let io: ReturnType<typeof captureConsole>;
+  beforeEach(async () => {
+    env = setupEnv();
+    io = captureConsole();
+    const { maybeNotifyUpdate } = await import("../src/update-notifier.js");
+    vi.mocked(maybeNotifyUpdate).mockClear();
+  });
+  afterEach(() => env.restore());
+
+  const AHOOD_BLOCK = {
+    server: { version: "0.1.0+abc1234", sha: "abc1234", built_at: "2026-11-18T00:00:00.000Z" },
+    client: { surface: "cli", version: "0.18.0", latest: "0.19.0", update_available: true, below_minimum: false, upgrade_command: "npx @ahood/cli@latest setup" },
+  };
+
+  it("--json passes ahood through verbatim, additive to the existing shape", async () => {
+    seed("alice", "pdf-tools", "1.0.0");
+    stubMeApi(() => json({ ...fixture("me-status.json"), ahood: AHOOD_BLOCK }));
+    await status(["--json"]);
+    const out = JSON.parse(io.out[0]);
+    expect(out.ahood).toEqual(AHOOD_BLOCK);
+  });
+
+  it("calls the shared notifier with belowMinimum/latest from ahood.client, and with --json's own flag", async () => {
+    seed("alice", "pdf-tools", "1.0.0");
+    stubMeApi(() => json({ ...fixture("me-status.json"), ahood: { ...AHOOD_BLOCK, client: { ...AHOOD_BLOCK.client, below_minimum: true } } }));
+    await status(["--json"]);
+    const { maybeNotifyUpdate } = await import("../src/update-notifier.js");
+    expect(maybeNotifyUpdate).toHaveBeenCalledWith({ json: true, belowMinimum: true, latest: "0.19.0" });
+  });
+
+  it("calls the notifier with undefined/undefined when the server sends no ahood block (older server)", async () => {
+    seed("alice", "pdf-tools", "1.0.0");
+    stubMeApi(() => json(fixture("me-status.json")));
+    await status([]);
+    const { maybeNotifyUpdate } = await import("../src/update-notifier.js");
+    expect(maybeNotifyUpdate).toHaveBeenCalledWith({ json: false, belowMinimum: undefined, latest: undefined });
+  });
+});
+
+// ahood#1554 step 2: the server's optional top-level `notices[]` on the
+// same response. Additive and absent from every fixture above.
+describe("notices[] (ahood#1554 step 5)", () => {
+  let env: ReturnType<typeof setupEnv>;
+  let io: ReturnType<typeof captureConsole>;
+  beforeEach(() => {
+    env = setupEnv();
+    io = captureConsole();
+  });
+  afterEach(() => env.restore());
+
+  const NOTICE = {
+    id: "client-update-2026-11",
+    kind: "client_update",
+    severity: "action",
+    message: "A newer ahood client is available.",
+    action: { label: "Update", command: "npx @ahood/cli@latest setup" },
+  };
+
+  it("--json passes notices through verbatim, additive to the existing shape", async () => {
+    seed("alice", "pdf-tools", "1.0.0");
+    stubMeApi(() => json({ ...fixture("me-status.json"), notices: [NOTICE] }));
+    await status(["--json"]);
+    const out = JSON.parse(io.out[0]);
+    expect(out.notices).toEqual([NOTICE]);
+  });
+
+  it("prints the highest-severity notice on the human-readable path, after the table", async () => {
+    seed("alice", "pdf-tools", "1.0.0");
+    const required = {
+      id: "x",
+      kind: "client_update",
+      severity: "required",
+      message: "Below the minimum supported version.",
+      action: { label: "Update", command: "npx @ahood/cli@latest setup" },
+    };
+    stubMeApi(() => json({ ...fixture("me-status.json"), notices: [NOTICE, required] }));
+    await status([]);
+    expect(io.stderr()).toContain("ahood notice (required): Below the minimum supported version.");
+    expect(io.stderr()).toContain("npx @ahood/cli@latest setup");
+    expect(io.stderr()).not.toContain("A newer ahood client is available.");
+  });
+
+  it("prints nothing extra when notices is empty or absent", async () => {
+    seed("alice", "pdf-tools", "1.0.0");
+    stubMeApi(() => json(fixture("me-status.json")));
+    await status([]);
+    expect(io.stderr()).toBe("");
+  });
+
+  it("never prints a notice line in --json mode", async () => {
+    seed("alice", "pdf-tools", "1.0.0");
+    stubMeApi(() => json({ ...fixture("me-status.json"), notices: [NOTICE] }));
+    await status(["--json"]);
+    expect(io.stderr()).toBe("");
   });
 });

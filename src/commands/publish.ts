@@ -8,6 +8,7 @@ import { parseOwnerSkill, SEMVER_RE, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { assertKind, CLI_KINDS, isCliKind, KINDS, strictKind, type CliKind, type KindScope } from "../kinds.js";
 import { parsePromptDoc } from "../prompt-doc.js";
+import { stripProvenanceHeader } from "../provenance-header.js";
 
 // `ahood agent publish` / `ahood mcp publish` (ahood-cli#172): an existing
 // entry of another kind must be refused before anything is packed, created,
@@ -218,7 +219,17 @@ function warnAboutSkillDescription(skillMdPath: string): void {
   }
 }
 
-async function tarGzDirectory(dir: string): Promise<Buffer> {
+// ahood#1553 step 4 (mandatory, web-side authority): a skill folder reused
+// from an INSTALL (which stamps the header inline, add.ts) must never carry
+// a stale header into the registry -- its title/version/link would be
+// whatever the install last stamped, not this publish's own. stripping
+// unconditionally on every root doc, every publish, regardless of whether
+// the content actually has a header, is what makes that safe to do without
+// knowing where this folder came from: stripProvenanceHeader is a precise,
+// position-anchored no-op on content that doesn't match the exact header
+// shape there (own module doc comment), so a hand-written root doc that
+// never had one is untouched, byte for byte.
+async function tarGzDirectory(dir: string, rootDocName?: string): Promise<Buffer> {
   const tar = pack();
   const gzip = createGzip();
   const chunks: Buffer[] = [];
@@ -240,7 +251,12 @@ async function tarGzDirectory(dir: string): Promise<Buffer> {
       if (stat.isDirectory()) {
         addDir(fullPath, relPath);
       } else if (stat.isFile()) {
-        tar.entry({ name: relPath, size: stat.size }, readFileSync(fullPath));
+        const raw = readFileSync(fullPath);
+        // `prefix === ""` (top level only): a nested file that happens to
+        // share the root doc's name (an example SKILL.md under docs/,
+        // say) is never touched.
+        const content = prefix === "" && relPath === rootDocName ? Buffer.from(stripProvenanceHeader(raw.toString("utf-8")), "utf-8") : raw;
+        tar.entry({ name: relPath, size: content.length }, content);
       }
     }
   }
@@ -530,7 +546,7 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
 
     if (scopedKind !== undefined) await assertPublishTargetKind(scope!, owner, skill);
 
-    const archive = await tarGzDirectory(path);
+    const archive = await tarGzDirectory(path, KINDS[resolvedKind ?? "skill"].rootDoc);
 
     const { init, created } = await initVersion(
       owner,

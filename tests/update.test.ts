@@ -9,8 +9,20 @@ import { update } from "../src/commands/update.js";
 import { writeLockfileEntry, readLockfile } from "../src/lockfile.js";
 import { skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { hashMcpServerConfig } from "../src/commands/add.js";
+import { buildProvenanceHeader } from "../src/provenance-header.js";
 
 const API_URL = "http://ahood.test";
+
+// ahood#1553 step 4: update re-installs through add()'s same path, which
+// stamps the header -- these fixtures' metadata responses never set
+// `name`, so the title always falls back to the slug.
+const GOOD_V1_1 = buildProvenanceHeader("# good\n", {
+  title: "good",
+  owner: "alice",
+  slug: "good",
+  version: "1.1.0",
+  url: "https://www.ahood.dev/alice/good",
+});
 
 function tarGz(files: Record<string, string>): Promise<Buffer> {
   const tar = pack();
@@ -104,7 +116,7 @@ describe("update", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     await update([]);
 
-    expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe("# good\n");
+    expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe(GOOD_V1_1);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("bob/broken"));
     expect(process.exitCode).toBe(1);
     process.exitCode = 0;
@@ -160,7 +172,7 @@ describe("update", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await update(["alice/good", "bob/never-installed"]);
 
-    expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe("# good\n");
+    expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe(GOOD_V1_1);
     expect(warnSpy).toHaveBeenCalledWith("Skipping bob/never-installed: not currently installed.");
     expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("bob/never-installed"))).toBe(false);
     expect(process.exitCode).not.toBe(1);
@@ -214,8 +226,16 @@ describe("update", () => {
     // Every skill in the lockfile passes the "is it installed" check, so the
     // not-installed guard must never fire on the no-args path.
     expect(warnSpy).not.toHaveBeenCalled();
-    expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe("# good\n");
-    expect(readFileSync(join(dir, skillDir("alice", "other"), "SKILL.md"), "utf-8")).toBe("# other\n");
+    expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe(GOOD_V1_1);
+    expect(readFileSync(join(dir, skillDir("alice", "other"), "SKILL.md"), "utf-8")).toBe(
+      buildProvenanceHeader("# other\n", {
+        title: "other",
+        owner: "alice",
+        slug: "other",
+        version: "1.2.0",
+        url: "https://www.ahood.dev/alice/other",
+      }),
+    );
     expect(process.exitCode).not.toBe(1);
   });
 
@@ -616,7 +636,7 @@ describe("update", () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/alice\/weather.*not valid JSON/));
     expect(logSpy.mock.calls.map((c) => String(c[0])).join("\n")).not.toContain("already up to date");
     // The unrelated skill in the same batch still updated.
-    expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe("# good\n");
+    expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe(GOOD_V1_1);
     expect(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).toBe("{ this is not json"); // never rewritten
     expect(process.exitCode).toBe(1);
     process.exitCode = 0;

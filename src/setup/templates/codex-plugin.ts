@@ -20,7 +20,7 @@
 //   - .mcp.json: `{ mcpServers: { <name>: { type: "http", url,
 //     bearer_token_env_var } } }` -- unlike Claude Code's, it is wrapped.
 import { CLI_VERSION } from "../../version.js";
-import { AHOOD_MCP_TOKEN_ENV, AHOOD_MCP_URL } from "./ahood-commands.js";
+import { AHOOD_CLIENT_HEADER, AHOOD_MCP_TOKEN_ENV, AHOOD_MCP_URL, ahoodClientHeaderValue } from "./ahood-commands.js";
 import { CODEX_MARKETPLACE_NAME, CODEX_PLUGIN_NAME, codexPluginSkill } from "./codex.js";
 
 export const CODEX_PLUGIN_DIR = "plugins/codex";
@@ -69,10 +69,22 @@ function manifest(): string {
 
 // Names the env var, never a token: a plugin is shared from a public repo.
 // `ahood setup codex --store-token` cannot put a token here either -- see
-// harnesses/codex.ts for where it goes instead.
+// harnesses/codex.ts for where it goes instead. `http_headers` (ahood#1552
+// step 6) is Codex's own name for extra static headers on an http MCP
+// server (verified against codex-cli 0.164.0 -- `codex mcp get`/`list`
+// show a stored Authorization the same way, see templates/codex.ts), set
+// alongside `bearer_token_env_var` so the server can tell a Codex plugin
+// request apart from a bare CLI one or another harness's plugin.
 function mcpConfig(): string {
   return json({
-    mcpServers: { ahood: { type: "http", url: AHOOD_MCP_URL, bearer_token_env_var: AHOOD_MCP_TOKEN_ENV } },
+    mcpServers: {
+      ahood: {
+        type: "http",
+        url: AHOOD_MCP_URL,
+        bearer_token_env_var: AHOOD_MCP_TOKEN_ENV,
+        http_headers: { [AHOOD_CLIENT_HEADER]: ahoodClientHeaderValue("codex-plugin") },
+      },
+    },
   });
 }
 

@@ -4,6 +4,7 @@ import { sync, diffFileMaps } from "../src/commands/sync.js";
 import { add } from "../src/commands/add.js";
 import { readInstalled, updateInstalled } from "../src/installed.js";
 import { readLockfile } from "../src/lockfile.js";
+import { buildProvenanceHeader } from "../src/provenance-header.js";
 import { UsageError } from "../src/usage-error.js";
 import { fakeRegistry, tarGz, type Entry } from "./helpers/fake-registry.js";
 import { captureConsole, setupEnv, statusFrom, stubMeApi } from "./helpers/me-env.js";
@@ -193,7 +194,19 @@ describe("ahood sync (ahood#979)", () => {
     await sync(["alice/helper", "--yes"]);
     expect(io.stdout()).toContain("-agent v1");
     expect(io.stdout()).toContain("+agent v2");
-    expect(readFileSync(".claude/agents/alice@helper.md", "utf-8")).toBe("agent v2\n");
+    // ahood#1553 step 4: the diff preview above strips the provenance
+    // header from both sides (so the diff itself shows only the real
+    // content change), but the actual install -- sync's whole point -- still
+    // stamps AGENT.md with it, same as a fresh `ahood agent add` would.
+    expect(readFileSync(".claude/agents/alice@helper.md", "utf-8")).toBe(
+      buildProvenanceHeader("agent v2\n", {
+        title: "helper",
+        owner: "alice",
+        slug: "helper",
+        version: "2.0.0",
+        url: "https://www.ahood.dev/alice/helper",
+      }),
+    );
   });
 });
 

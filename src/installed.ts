@@ -36,6 +36,12 @@ export type InstalledItem = {
   pinned?: string;
   /** Set when the entry was imported from a project lockfile, not recorded live. */
   migrated?: true;
+  /** ahood#1553 step 4 follow-up: mirrors the matching lockfile entry's
+   *  `provenance` (lockfile.ts's LockEntryProvenance) -- the mcp kind's
+   *  only record of title/canonical-link, since server.json never carries
+   *  the header inline. Absent for every other kind (the header is inline
+   *  there) and for an mcp entry installed before this field existed. */
+  provenance?: { title: string; url: string };
 };
 
 export type InstalledFile = { version: number; items: InstalledItem[] };
@@ -87,7 +93,14 @@ export function installedPathFor(kind: CliKind | null, owner: string, slug: stri
 
 /** Called after every successful install/update in the current directory. A
  *  re-install keeps the entry's pin; anything else about it is replaced. */
-export function recordInstall(entry: { owner: string; slug: string; version: string; kind: CliKind; checksum_sha256: string }): void {
+export function recordInstall(entry: {
+  owner: string;
+  slug: string;
+  version: string;
+  kind: CliKind;
+  checksum_sha256: string;
+  provenance?: { title: string; url: string };
+}): void {
   const item: InstalledItem = {
     owner: entry.owner,
     slug: entry.slug,
@@ -97,6 +110,7 @@ export function recordInstall(entry: { owner: string; slug: string; version: str
     projectDir: process.cwd(),
     installedAt: new Date().toISOString(),
     checksum_sha256: entry.checksum_sha256,
+    ...(entry.provenance ? { provenance: entry.provenance } : {}),
   };
   updateInstalled((file) => {
     const existing = file.items.find((i) => sameInstall(i, item));

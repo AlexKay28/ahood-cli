@@ -34,7 +34,25 @@ import type { PinnedFileKind } from "./kind-info.js";
 // see reconcileLockEntrySkillId below. Absent until the first status/sync
 // call after this field existed, and absent for every other kind's write
 // path that hasn't been taught to record it yet.
-export type LockEntry = { version: string; checksum_sha256: string; mcp_config_hash?: string; kind?: PinnedFileKind; skillId?: string };
+// ahood#1553 step 4 follow-up (hardening pass): an mcp install's root doc is
+// server.json, raw JSON -- buildProvenanceHeader is never run on it, so
+// there is no on-disk place for the title/canonical-link facts the markdown
+// kinds carry inline. This is the substitute: recorded here (and mirrored
+// onto the matching src/installed.ts InstalledItem) instead, so `ahood
+// status`/`ahood read` can still answer "what is this, and where did it
+// come from" for an mcp install the same way a header answers it for
+// every other kind. Absent for every kind whose root doc already carries
+// the header inline, and for an mcp entry installed before this field
+// existed.
+export type LockEntryProvenance = { title: string; url: string };
+export type LockEntry = {
+  version: string;
+  checksum_sha256: string;
+  mcp_config_hash?: string;
+  kind?: PinnedFileKind;
+  skillId?: string;
+  provenance?: LockEntryProvenance;
+};
 export type Lockfile = Record<string, LockEntry>;
 
 export function readLockfile(path: string): Lockfile {

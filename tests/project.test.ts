@@ -8,6 +8,7 @@ import { KindMismatchError, localInstalledKind, resolveScope } from "../src/kind
 import { readLockfile } from "../src/lockfile.js";
 import { LOCKFILE_PATH, PROJECT_GUIDE_PATH } from "../src/spec.js";
 import { UsageError } from "../src/usage-error.js";
+import { buildProvenanceHeader } from "../src/provenance-header.js";
 
 // `ahood project` (ahood-cli#185): the fifth registry noun, for project guides
 // (PROJECT.md: how to work in one repository). Same shared dispatch and
@@ -18,6 +19,16 @@ vi.mock("../src/confirm.js", () => ({ confirm: vi.fn(async () => true) }));
 import { API_URL, entry, fakeRegistry, json, mutations, backendAcceptsDocMd } from "./helpers/fake-registry.js";
 
 const GUIDE = "---\nname: x\ndescription: d\n---\nbody\n";
+// ahood#1553 step 4: stamped on install; fakeRegistry's "latest" metadata
+// route always answers `name: "N"` (fake-registry.ts), which is this
+// header's title.
+const INSTALLED_GUIDE = buildProvenanceHeader(GUIDE, {
+  title: "N",
+  owner: "alice",
+  slug: "acme",
+  version: "1.0.0",
+  url: "https://www.ahood.dev/alice/acme",
+});
 
 describe("ahood project (ahood-cli#185)", () => {
   let dir: string;
@@ -71,7 +82,7 @@ describe("ahood project (ahood-cli#185)", () => {
       fakeRegistry({ "alice/acme": await entry("project") });
       await dispatchProject(["add", "alice/acme"]);
       expect(PROJECT_GUIDE_PATH).toBe(join(".claude", "project.md"));
-      expect(readFileSync(PROJECT_GUIDE_PATH, "utf8")).toBe(GUIDE);
+      expect(readFileSync(PROJECT_GUIDE_PATH, "utf8")).toBe(INSTALLED_GUIDE);
       const pin = readLockfile(LOCKFILE_PATH)["alice/acme"];
       expect(pin).toMatchObject({ version: "1.0.0", kind: "project" });
       expect(localInstalledKind("alice", "acme", pin)).toBe("project");
@@ -105,7 +116,7 @@ describe("ahood project (ahood-cli#185)", () => {
       await expect(dispatchProject(["add", "bob/other"])).rejects.toThrow(
         /alice\/acme is already installed at .*project\.md.*ahood project remove alice\/acme/,
       );
-      expect(readFileSync(PROJECT_GUIDE_PATH, "utf8")).toBe(GUIDE);
+      expect(readFileSync(PROJECT_GUIDE_PATH, "utf8")).toBe(INSTALLED_GUIDE);
       expect(Object.keys(readLockfile(LOCKFILE_PATH))).toEqual(["alice/acme"]);
     });
 

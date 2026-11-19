@@ -20,11 +20,47 @@ import { sanitizeForTerminal } from "../terminal-safe.js";
 import { assertCanonicalEntryPaths, tarEntryPath } from "../archive-entries.js";
 import { UsageError } from "../usage-error.js";
 import { assertKind, describeKind, isPinnedFileKind, KINDS, strictKind, type CliKind, type KindScope, type PinnedFileKind } from "../kinds.js";
+import { buildProvenanceHeader, type ProvenanceHeaderMeta } from "../provenance-header.js";
 
 const USAGE = "Usage: ahood skill add <owner>/<skill>[@version]";
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB compressed
 const MAX_EXTRACTED_BYTES = 200 * 1024 * 1024; // 200 MB decompressed
 const MAX_ENTRY_COUNT = 10_000;
+// ahood#1553 step 4: the canonical site, always -- not getApiUrl() (which
+// AHOOD_API_URL can point at a staging/local host for testing), because the
+// header's whole point is a stable public link a reader can open later.
+const AHOOD_SITE_URL = "https://www.ahood.dev";
+
+/**
+ * The provenance header's `{title, owner, slug, version, url}` for an
+ * install of `owner/slug` at `meta.version` -- title from the registry
+ * response when it had one (only GET /api/v1/skills/{owner}/{skill}, the
+ * "latest" branch of fetchVersionMeta below), else the slug. Shared by
+ * every install call site below AND by sync.ts's pre-install diff preview,
+ * so a header stamped by either path says the exact same thing.
+ */
+export function provenanceMetaFor(owner: string, slug: string, meta: { version: string; name?: string | null }): ProvenanceHeaderMeta {
+  return { title: meta.name ?? slug, owner, slug, version: meta.version, url: `${AHOOD_SITE_URL}/${owner}/${slug}` };
+}
+
+// Mirrors web's lib/artifact-kinds.ts hasJsonRootDoc (ahood#1553/#1562):
+// the mcp kind's root doc is JSON (server.json), and a markdown blockquote
+// stamped onto it would break JSON.parse for every reader -- web's gate
+// lives at its one caller that knows the kind (catalog.ts's read_skill);
+// this CLI's caller-side equivalent is simpler (installMcpEntry/
+// resolveMcpServerConfig never pass a `provenance`/`provenanceMeta`
+// argument at all, see extractTarGz/extractSingleFileContent below), but
+// this assertion is the explicit, enforced version of that same rule: a
+// provenance stamp requested onto a ".json"-named entry is a programmer
+// error, not a data condition, so it throws loudly instead of silently
+// corrupting the file.
+function assertNotJsonRootDoc(fileName: string): void {
+  if (/\.json$/i.test(fileName)) {
+    throw new Error(
+      `Refusing to stamp a provenance header onto ${fileName}: it is JSON, and the header would break JSON.parse for every reader (ahood#1553/#1562's JSON-root-doc rule).`,
+    );
+  }
+}
 
 // `changelog_md` is optional/nullable here (rather than a plain `string`)
 // because this type is shared with callers -- like `update --dry-run`'s
@@ -46,6 +82,12 @@ export type VersionMeta = {
   // skillId yet, and `ahood status`'s own reconciliation records it the
   // first time it runs against this install.
   skill_id?: string;
+  // ahood#1553 step 4: the skill's display name/title, for the provenance
+  // header -- only ever present on the "latest" branch below (GET
+  // /api/v1/skills/{owner}/{skill} selects and spreads `name`; the explicit-
+  // version route, GET .../versions/{version}, has no such column at all).
+  // provenanceMetaFor() falls back to the slug when this is absent.
+  name?: string | null;
 };
 
 // Shared wording for the checksum-pin tamper-detection guard, used both by
@@ -75,12 +117,15 @@ export async function fetchVersionMeta(owner: string, skill: string, version: st
     // `skill_versions` (as this used to do) silently drops `kind`, which
     // makes an agent install fall through to the skill-directory path with
     // no error anywhere (ahood-cli final review finding #1).
-    const { skill_versions, kind } = await apiJson<{
-      skill_versions: Omit<VersionMeta, "yanked_at" | "kind"> | null;
+    const { skill_versions, kind, name } = await apiJson<{
+      skill_versions: Omit<VersionMeta, "yanked_at" | "kind" | "name"> | null;
       kind?: CliKind;
+      // ahood#1553 step 4: this route selects/spreads the skill's own `name`
+      // column alongside `skill_versions` -- see VersionMeta.name's doc comment.
+      name?: string | null;
     }>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`);
     if (!skill_versions) throw new Error(`${owner}/${skill} has no published version`);
-    return { ...skill_versions, kind, yanked_at: null };
+    return { ...skill_versions, kind, name, yanked_at: null };
   }
   return apiJson<VersionMeta>(
     `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/${encodeURIComponent(version)}`,
@@ -125,7 +170,14 @@ async function readBoundedBody(res: Response, maxBytes: number): Promise<Buffer>
   return Buffer.concat(chunks);
 }
 
-export async function extractTarGz(buffer: Buffer, destDir: string): Promise<void> {
+/** `extractTarGz`'s/`extractFreshVersion`'s optional root-doc stamp (ahood#1553
+ *  step 4): `fileName` is matched against each entry's own canonical,
+ *  top-level path (e.g. "SKILL.md", never a nested one of the same name),
+ *  and only that one entry's content is passed through buildProvenanceHeader
+ *  before it's written -- every other file in the archive is untouched. */
+export type RootDocProvenance = { fileName: string; meta: ProvenanceHeaderMeta };
+
+export async function extractTarGz(buffer: Buffer, destDir: string, provenance?: RootDocProvenance): Promise<void> {
   let decompressed: Buffer;
   try {
     // maxOutputLength caps decompression itself, so a highly-compressed
@@ -187,10 +239,18 @@ export async function extractTarGz(buffer: Buffer, destDir: string): Promise<voi
       stream.on("end", () => {
         try {
           mkdirSync(join(fullPath, ".."), { recursive: true });
+          let data = Buffer.concat(chunks);
+          // ahood#1553 step 4: the one matching entry (the kind's root doc,
+          // at the archive's top level) gets the provenance header; nothing
+          // else in the archive is touched.
+          if (provenance && entryPath === provenance.fileName) {
+            assertNotJsonRootDoc(provenance.fileName);
+            data = Buffer.from(buildProvenanceHeader(data.toString("utf-8"), provenance.meta), "utf-8");
+          }
           // Preserve the tar entry's mode (e.g. a scripts/*.sh published with
           // its executable bit set) instead of always writing with the
           // default mode.
-          writeFileSync(fullPath, Buffer.concat(chunks), header.mode ? { mode: header.mode } : undefined);
+          writeFileSync(fullPath, data, header.mode ? { mode: header.mode } : undefined);
           next();
         } catch (error) {
           // Previously uncaught here -- an ENOSPC/EACCES/EROFS mid-extract
@@ -212,13 +272,13 @@ export async function extractTarGz(buffer: Buffer, destDir: string): Promise<voi
 // on an upgrade -- anything removed in a newer version, including a script
 // pulled for a security reason, silently stuck around. The temp+rename swap
 // also means a failed/interrupted extract never leaves destDir half-upgraded.
-async function extractFreshVersion(buffer: Buffer, destDir: string): Promise<void> {
+async function extractFreshVersion(buffer: Buffer, destDir: string, provenance?: RootDocProvenance): Promise<void> {
   const parentDir = dirname(destDir);
   mkdirSync(parentDir, { recursive: true });
   const tempDir = join(parentDir, `.${basename(destDir)}.tmp-${process.pid}-${Date.now()}`);
   rmSync(tempDir, { recursive: true, force: true });
   try {
-    await extractTarGz(buffer, tempDir);
+    await extractTarGz(buffer, tempDir, provenance);
   } catch (error) {
     rmSync(tempDir, { recursive: true, force: true });
     try {
@@ -239,7 +299,7 @@ async function extractFreshVersion(buffer: Buffer, destDir: string): Promise<voi
 // `diff.ts` can reuse the exact same in-memory single-file extraction to
 // pull SKILL.md out of two downloaded version archives without ever writing
 // either to disk (ahood-cli#88).
-export async function extractSingleFileContent(buffer: Buffer, entryName: string): Promise<Buffer> {
+export async function extractSingleFileContent(buffer: Buffer, entryName: string, provenanceMeta?: ProvenanceHeaderMeta): Promise<Buffer> {
   let decompressed: Buffer;
   try {
     // Same decompression-bomb guard as extractTarGz above: a highly-
@@ -285,7 +345,22 @@ export async function extractSingleFileContent(buffer: Buffer, entryName: string
     extract.end(decompressed);
   });
   if (!found) throw new Error(`${entryName} not found in the downloaded archive`);
-  return found;
+  // TS narrows `found` to `never` here (not just `Buffer`) because its only
+  // non-null assignment happens inside a nested closure, read after the
+  // `await` above -- a pre-existing cross-closure control-flow quirk the
+  // original code never hit (it only ever did a bare `return found`, which
+  // a `never` satisfies trivially). The `as Buffer` below is a type-level
+  // correction only; the runtime guard just above is what actually proves
+  // non-null.
+  const result = found as Buffer;
+  // ahood#1553 step 4: only when a caller passes a meta -- every existing
+  // caller (diff.ts's two-archive compare, resolveMcpServerConfig's
+  // server.json read) keeps getting the raw bytes it always has.
+  if (provenanceMeta) {
+    assertNotJsonRootDoc(entryName);
+    return Buffer.from(buildProvenanceHeader(result.toString("utf-8"), provenanceMeta), "utf-8");
+  }
+  return result;
 }
 
 // Every manifest field used below -- and every tar entry name extractTarGz
@@ -772,12 +847,18 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
   });
 
   const mcpKey = `${owner}/${skill}`;
+  // ahood#1553 step 4 follow-up: server.json stays raw JSON (never gets the
+  // inline header), so title/url are recorded on the lockfile entry and
+  // mirrored onto the installed.json item below instead -- see
+  // LockEntryProvenance's doc comment.
+  const provenance = provenanceMetaFor(owner, skill, meta);
   try {
     writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, mcpKey, {
       version: meta.version,
       checksum_sha256: meta.checksum_sha256,
       mcp_config_hash: hashMcpServerConfig(serverConfig),
       ...(meta.skill_id ? { skillId: meta.skill_id } : {}),
+      provenance: { title: provenance.title, url: provenance.url },
     });
   } catch (error) {
     // Roll back the .mcp.json merge above under the same lock pattern --
@@ -821,7 +902,14 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
     }
     throw error;
   }
-  recordInstallOrWarn({ owner, slug: skill, version: meta.version, kind: "mcp", checksum_sha256: meta.checksum_sha256 });
+  recordInstallOrWarn({
+    owner,
+    slug: skill,
+    version: meta.version,
+    kind: "mcp",
+    checksum_sha256: meta.checksum_sha256,
+    provenance: { title: provenance.title, url: provenance.url },
+  });
   console.log(`Installed ${owner}/${skill}@${meta.version} into ${MCP_CONFIG_PATH} as "${skill}"`);
   // Only the npm+npx package path ever carries secrets into `env` (headers
   // on a remote entry are static per v1's scope, per buildMcpServerConfig).
@@ -905,12 +993,17 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
   });
 
   const skillId = meta.skill_id ?? currentEntry?.skillId;
+  // ahood#1553 step 4 follow-up: same substitute-location record as
+  // installMcpEntry's -- refreshed on every update so a title/slug change
+  // upstream still shows up here.
+  const provenance = provenanceMetaFor(owner, skill, meta);
   try {
     writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
       version: meta.version,
       checksum_sha256: meta.checksum_sha256,
       mcp_config_hash: hashMcpServerConfig(serverConfig),
       ...(skillId ? { skillId } : {}),
+      provenance: { title: provenance.title, url: provenance.url },
     });
   } catch (error) {
     // Roll back the .mcp.json overwrite above under the same lock pattern,
@@ -952,7 +1045,14 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
     throw error;
   }
 
-  recordInstallOrWarn({ owner, slug: skill, version: meta.version, kind: "mcp", checksum_sha256: meta.checksum_sha256 });
+  recordInstallOrWarn({
+    owner,
+    slug: skill,
+    version: meta.version,
+    kind: "mcp",
+    checksum_sha256: meta.checksum_sha256,
+    provenance: { title: provenance.title, url: provenance.url },
+  });
   console.log(`Updated ${key} to ${meta.version}`);
   warnIfSecretsWereWritten(serverConfig, secretNames);
 }
@@ -996,7 +1096,9 @@ export async function downloadVerifiedArchive(owner: string, skill: string, meta
 // version's content on an update, nothing on a fresh install.
 async function installPinnedFile(kind: PinnedFileKind, owner: string, skill: string, meta: VersionMeta, buffer: Buffer): Promise<void> {
   const key = `${owner}/${skill}`;
-  const content = await extractSingleFileContent(buffer, KINDS[kind].rootDoc);
+  // ahood#1553 step 4: DOC.md/PROJECT.md/LOOP.md are markdown, so (unlike
+  // the mcp kind's server.json) the header is stamped inline.
+  const content = await extractSingleFileContent(buffer, KINDS[kind].rootDoc, provenanceMetaFor(owner, skill, meta));
   const destPath = pinnedFilePath(kind, owner, skill);
   const previous = existsSync(destPath) ? readFileSync(destPath) : undefined;
   writeFileAtomic(destPath, content);
@@ -1115,7 +1217,8 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
   const buffer = await downloadVerifiedArchive(owner, skill, meta);
 
   if (meta.kind === "agent") {
-    const content = await extractSingleFileContent(buffer, "AGENT.md");
+    // ahood#1553 step 4: AGENT.md is markdown, stamped inline like SKILL.md.
+    const content = await extractSingleFileContent(buffer, "AGENT.md", provenanceMetaFor(owner, skill, meta));
     mkdirSync(AGENTS_ROOT, { recursive: true });
     const destPath = agentPath(owner, skill);
     writeFileAtomic(destPath, content);
@@ -1160,7 +1263,9 @@ export async function add(args: string[], scope?: KindScope): Promise<void> {
   // Flat, owner@skill-joined directory name so Claude Code's own one-level-deep
   // project-skill scan actually discovers it (see skillDir's comment in spec.ts).
   const destDir = skillDir(owner, skill);
-  await extractFreshVersion(buffer, destDir);
+  // ahood#1553 step 4: only SKILL.md at the archive's top level is stamped;
+  // every other file (scripts/, nested docs, ...) is written as-is.
+  await extractFreshVersion(buffer, destDir, { fileName: "SKILL.md", meta: provenanceMetaFor(owner, skill, meta) });
   try {
     writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
       version: meta.version,

@@ -3,6 +3,8 @@
 export const PLUGIN_ID = "ahood";
 export const MCP_SERVER_NAME = "ahood";
 export const MCP_URL = "https://www.ahood.dev/api/mcp";
+export const CLIENT_HEADER_NAME = "X-Ahood-Client";
+export const CLIENT_HEADER_VALUE = "opencode-plugin/0.19.0";
 export const TOKEN_ENV = "AHOOD_TOKEN";
 export const SNAP_HOOK_ENV = "AHOOD_SNAP_HOOK";
 export const SNAP_PROMPT = "ahood snap hook (opt-in): before ending, offer the user a private ahood snap of this session. If nothing here is worth keeping (no deliverable handed over, no correction from the user), end your turn without asking. Otherwise draft it: a one-line summary plus failed / worked / fix / lesson (no names or private details) / artifact (owner/slug, if one ahood skill, agent or MCP server was involved). Leave out secrets. Show the draft and ask whether to save it. Save only on the user's explicit yes, with `ahood snap create \"<summary>\" --failed \"...\" --worked \"...\" --fix \"...\" --lesson \"...\" --artifact <owner/slug>` or the ahood MCP tool create_snap. Do not save it in this turn: wait for the answer.";

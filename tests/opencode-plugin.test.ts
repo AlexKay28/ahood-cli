@@ -167,10 +167,14 @@ describe("the plugin in opencode's context", () => {
     expect(sent.text).not.toContain("$ARGUMENTS");
   });
 
-  it("adds the ahood MCP server with the token from $AHOOD_TOKEN, read at runtime and written nowhere", async () => {
+  it("adds the ahood MCP server with the token from $AHOOD_TOKEN, read at runtime and written nowhere, and identifies this surface (ahood#1552 step 6)", async () => {
     const fake = fakeContext();
     await createPlugin({ env: { AHOOD_TOKEN: "tok_123" }, markerDir }).setup(fake.context);
-    expect(fake.mcp.get("ahood")).toEqual({ type: "remote", url: AHOOD_MCP_URL, headers: { Authorization: "Bearer tok_123" } });
+    expect(fake.mcp.get("ahood")).toEqual({
+      type: "remote",
+      url: AHOOD_MCP_URL,
+      headers: { Authorization: "Bearer tok_123", "X-Ahood-Client": `opencode-plugin/${CLI_VERSION}` },
+    });
   });
 
   it("leaves a user's own mcp.servers.ahood (e.g. setup's --store-token entry) alone", async () => {

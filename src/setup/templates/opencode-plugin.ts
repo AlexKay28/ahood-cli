@@ -35,7 +35,15 @@
 // with its arguments, the MCP server connected, and the snap prompt resumed
 // the session exactly once.
 import { CLI_VERSION } from "../../version.js";
-import { AHOOD_COMMANDS, AHOOD_MCP_TOKEN_ENV, AHOOD_MCP_URL, AHOOD_SNAP_HOOK_ENV, AHOOD_SNAP_PROMPT } from "./ahood-commands.js";
+import {
+  AHOOD_CLIENT_HEADER,
+  AHOOD_COMMANDS,
+  AHOOD_MCP_TOKEN_ENV,
+  AHOOD_MCP_URL,
+  AHOOD_SNAP_HOOK_ENV,
+  AHOOD_SNAP_PROMPT,
+  ahoodClientHeaderValue,
+} from "./ahood-commands.js";
 import { opencodeCommandTemplate } from "./opencode.js";
 
 export const OPENCODE_PLUGIN_DIR = "packages/opencode-plugin";
@@ -79,6 +87,11 @@ function generatedModule(): string {
     constant("PLUGIN_ID", OPENCODE_PLUGIN_ID),
     constant("MCP_SERVER_NAME", OPENCODE_MCP_SERVER_NAME),
     constant("MCP_URL", AHOOD_MCP_URL),
+    // ahood#1552 step 6: the extra header name/value server.ts's mcpEntry()
+    // sends alongside Authorization, baked in at the CLI's version like
+    // every other generated constant here.
+    constant("CLIENT_HEADER_NAME", AHOOD_CLIENT_HEADER),
+    constant("CLIENT_HEADER_VALUE", ahoodClientHeaderValue("opencode-plugin")),
     constant("TOKEN_ENV", AHOOD_MCP_TOKEN_ENV),
     constant("SNAP_HOOK_ENV", AHOOD_SNAP_HOOK_ENV),
     constant("SNAP_PROMPT", AHOOD_SNAP_PROMPT),

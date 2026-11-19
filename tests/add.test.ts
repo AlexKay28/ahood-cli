@@ -5,10 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { pack } from "tar-stream";
-import { add, extractTarGz, downloadVerifiedArchive, hashMcpServerConfig, matchesMcpConfigHash, readMcpConfig, resolveMcpServerConfig } from "../src/commands/add.js";
+import { add, extractTarGz, extractSingleFileContent, downloadVerifiedArchive, hashMcpServerConfig, matchesMcpConfigHash, readMcpConfig, resolveMcpServerConfig } from "../src/commands/add.js";
 import { LOCKFILE_PATH, agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { ApiError } from "../src/http.js";
 import { writeLockfileEntry } from "../src/lockfile.js";
+import { buildProvenanceHeader } from "../src/provenance-header.js";
 
 vi.mock("../src/secret-prompt.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/secret-prompt.js")>();
@@ -20,6 +21,17 @@ const API_URL = "http://ahood.test";
 const OWNER = "alice";
 const SKILL = "demo-skill";
 const VERSION = "1.0.0";
+
+// ahood#1553 step 4: install stamps SKILL.md/AGENT.md with the provenance
+// header -- stubApi's metadata responses below never set `name`, so the
+// title always falls back to the slug. Built from the real module rather
+// than hand-typed, so these tests track its actual shape.
+function withHeader(content: string, opts: { owner?: string; slug?: string; version?: string } = {}): string {
+  const owner = opts.owner ?? OWNER;
+  const slug = opts.slug ?? SKILL;
+  const version = opts.version ?? VERSION;
+  return buildProvenanceHeader(content, { title: slug, owner, slug, version, url: `https://www.ahood.dev/${owner}/${slug}` });
+}
 
 // A real gzipped tar, built the same way `publish` builds one -- the checksum
 // test has to fail on the CHECKSUM, not on an unparseable archive, or it would
@@ -165,7 +177,7 @@ describe("add", () => {
     await add([`${OWNER}/${SKILL}`]);
 
     // Owner-namespaced (flat, @-joined): alice/demo-skill and bob/demo-skill must not collide.
-    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# demo\n");
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(withHeader("# demo\n"));
     expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
       [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: sha256(archive) },
     });
@@ -227,7 +239,7 @@ describe("add", () => {
     stubApi(v2, sha256(v2), [{ path: "SKILL.md" }], "2.0.0");
     await add([`${OWNER}/${SKILL}@2.0.0`]);
 
-    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# v2\n");
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(withHeader("# v2\n", { version: "2.0.0" }));
     expect(existsSync(join(dir, skillDir(OWNER, SKILL), "old-removed-file.md"))).toBe(false);
   });
 
@@ -249,7 +261,7 @@ describe("add", () => {
 
     await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(/does not match the one already pinned/);
     // Original install must be untouched.
-    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# demo\n");
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(withHeader("# demo\n"));
   });
 
   it("catches a checksum conflict that lands DURING the download, after the early unlocked pre-check already saw none (#101)", async () => {
@@ -350,7 +362,7 @@ describe("add", () => {
 
     const dest = join(dir, agentPath(OWNER, SKILL));
     expect(existsSync(dest)).toBe(true);
-    expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
+    expect(readFileSync(dest, "utf-8")).toBe(withHeader("# reviewer agent\n"));
     // A single flat file, not a directory -- distinct from the skills' own
     // flat, @-joined .claude/skills/<owner>@<skill>/ layout.
     expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
@@ -365,7 +377,7 @@ describe("add", () => {
 
     await add([`${OWNER}/${SKILL}`]);
 
-    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe("# demo\n");
+    expect(readFileSync(join(dir, skillDir(OWNER, SKILL), "SKILL.md"), "utf-8")).toBe(withHeader("# demo\n"));
     expect(existsSync(join(dir, ".claude", "agents"))).toBe(false);
   });
 
@@ -411,7 +423,7 @@ describe("add", () => {
 
     const dest = join(dir, agentPath(OWNER, SKILL));
     expect(existsSync(dest)).toBe(true);
-    expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
+    expect(readFileSync(dest, "utf-8")).toBe(withHeader("# reviewer agent\n"));
     expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
   });
 
@@ -430,7 +442,7 @@ describe("add", () => {
 
     const dest = join(dir, agentPath(OWNER, SKILL));
     expect(existsSync(dest)).toBe(true);
-    expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
+    expect(readFileSync(dest, "utf-8")).toBe(withHeader("# reviewer agent\n"));
     expect(existsSync(join(dir, skillDir(OWNER, SKILL)))).toBe(false);
     expect(JSON.parse(readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8"))).toEqual({
       [`${OWNER}/${SKILL}`]: { version: VERSION, checksum_sha256: sha256(archive) },
@@ -449,7 +461,7 @@ describe("add", () => {
 
     const dest = join(dir, agentPath(OWNER, SKILL));
     expect(existsSync(dest)).toBe(true);
-    expect(readFileSync(dest, "utf-8")).toBe("# reviewer agent\n");
+    expect(readFileSync(dest, "utf-8")).toBe(withHeader("# reviewer agent\n"));
   });
 
   it("refuses an agent archive with two entries at the same canonical name instead of picking one (AlexKay28/ahood#792)", async () => {
@@ -1576,5 +1588,38 @@ describe("readMcpConfig", () => {
 
     writeFileSync(join(dir, MCP_CONFIG_PATH), '{"mcpServers": []}');
     expect(() => readMcpConfig()).toThrow(/"mcpServers" key exists but is not a JSON object/);
+  });
+});
+
+// ahood#1553/#1562: mirrors web's lib/artifact-kinds.ts hasJsonRootDoc --
+// a provenance header must never be stamped onto a JSON root doc (the mcp
+// kind's server.json), since a markdown blockquote would break JSON.parse
+// for every reader. This CLI's install path never actually passes a
+// provenance meta for server.json (installMcpEntry/resolveMcpServerConfig
+// never do), but extractTarGz/extractSingleFileContent assert it too, so a
+// future caller that tried would fail loudly instead of silently
+// corrupting the file.
+describe("JSON-root-doc guard (ahood#1553/#1562)", () => {
+  const META = { title: "t", owner: "alice", slug: "s", version: "1.0.0", url: "https://www.ahood.dev/alice/s" };
+
+  it("extractSingleFileContent refuses to stamp a .json entry", async () => {
+    const archive = await tarGz({ "server.json": '{"name":"x"}\n' });
+    await expect(extractSingleFileContent(archive, "server.json", META)).rejects.toThrow(
+      /Refusing to stamp a provenance header onto server\.json/,
+    );
+  });
+
+  it("extractSingleFileContent still returns server.json raw when no provenance meta is passed (the real mcp install path)", async () => {
+    const archive = await tarGz({ "server.json": '{"name":"x"}\n' });
+    const content = await extractSingleFileContent(archive, "server.json");
+    expect(content.toString("utf-8")).toBe('{"name":"x"}\n');
+  });
+
+  it("extractTarGz refuses to stamp a .json root doc", async () => {
+    const archive = await tarGz({ "server.json": '{"name":"x"}\n' });
+    const out = mkdtempSync(join(tmpdir(), "ahood-add-json-guard-"));
+    await expect(
+      extractTarGz(archive, out, { fileName: "server.json", meta: META }),
+    ).rejects.toThrow(/Refusing to stamp a provenance header onto server\.json/);
   });
 });
