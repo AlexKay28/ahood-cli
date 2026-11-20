@@ -9,6 +9,15 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 `preversion` hook (and the release workflow) refuse a version without one
 (`scripts/check-changelog.mjs`).
 
+## 0.21.0 (2026-11-20)
+
+- opencode: the `@ahood/opencode-plugin` now shows the same session-start notice as the Claude Code
+  plugin. When a session starts it runs `ahood status` in the background and, if anything is out of
+  date, adds one message naming it. It runs at most once per session, never for subagent sessions,
+  and stays silent on any error. Set `AHOOD_NO_UPDATE_NOTIFIER=1` to turn it off.
+- Codex has no session-start hook. There, the ahood MCP server's own instructions ask the agent to
+  call `ahood_status` once at the start of a task.
+
 ## 0.20.1 (2026-11-19)
 
 - The header on an installed skill now shows the skill's registry title (for example
