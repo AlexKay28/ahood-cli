@@ -19,6 +19,16 @@
 //     version under $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>.
 //   - .mcp.json: `{ mcpServers: { <name>: { type: "http", url,
 //     bearer_token_env_var } } }` -- unlike Claude Code's, it is wrapped.
+//
+// ahood#1565 item 1: Codex has no session-lifecycle hook mechanism -- a
+// plugin.json here has no field for one, and codex-cli's plugin docs expose
+// no equivalent of a Claude Code SessionStart hook or an opencode
+// `context.event.subscribe()`. Its counterpart is the MCP protocol's own
+// server-supplied `instructions` field on the `ahood` MCP server
+// (https://www.ahood.dev/api/mcp, wired below): Codex (like any MCP client)
+// surfaces it automatically at connect time, no plugin code needed -- it's
+// already shipped server-side (ahood#1552/#1554), not something this repo
+// renders. Nothing to add here; this is intentionally a no-op surface.
 import { CLI_VERSION } from "../../version.js";
 import { AHOOD_CLIENT_HEADER, AHOOD_MCP_TOKEN_ENV, AHOOD_MCP_URL, ahoodClientHeaderValue } from "./ahood-commands.js";
 import { CODEX_MARKETPLACE_NAME, CODEX_PLUGIN_NAME, codexPluginSkill } from "./codex.js";
