@@ -1,17 +1,18 @@
 // ahood#1009: the opencode plugin in packages/opencode-plugin -- its generated
 // files are exactly what src/setup/templates/opencode-plugin.ts renders, it
 // says what every other shell says, and against a stand-in for opencode's
-// plugin context it registers the /ahood commands, the ahood MCP server and
-// the opt-in snap prompt. The last block runs it in the real opencode.
+// plugin context it registers the /ahood commands, the ahood MCP server, the
+// opt-in snap prompt and the session notice (ahood#1565 item 1). The last
+// block runs it in the real opencode.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AHOOD_COMMANDS, AHOOD_MCP_URL, AHOOD_SNAP_PROMPT } from "../src/setup/templates/ahood-commands.js";
 import { OPENCODE_PLUGIN_DIR, OPENCODE_PLUGIN_PACKAGE, opencodePluginFiles } from "../src/setup/templates/opencode-plugin.js";
 import { CLI_VERSION } from "../src/version.js";
-import { COMMANDS, SNAP_PROMPT } from "../packages/opencode-plugin/src/generated.js";
+import { COMMANDS, NOTICE_OPT_OUT_ENV, SNAP_PROMPT } from "../packages/opencode-plugin/src/generated.js";
 import { createPlugin, renderTemplate } from "../packages/opencode-plugin/src/server.js";
 import type { CommandDefinition, OpencodeEvent, PluginContext, RemoteMcpConfig } from "../packages/opencode-plugin/src/opencode-api.js";
 
@@ -138,6 +139,27 @@ function fakeContext(opts: { mcp?: Record<string, unknown>; children?: string[] 
 }
 
 const ended = (sessionID: string): OpencodeEvent => ({ type: "session.execution.succeeded", data: { sessionID } });
+const created = (sessionID: string, parentID?: string): OpencodeEvent => ({ type: "session.created", data: { sessionID, parentID } });
+
+// A tiny fake `npx` on PATH stands in for the real `status --json` network
+// call runStatusCheck() makes (ahood-cli #237's Claude Code hook test does
+// the same) -- so these tests exercise the handler's own parsing/claiming
+// logic against a controlled response, never the real registry.
+function stubNpx(statusStub?: { exit: number; stdout: string }): { env: Record<string, string>; cleanup: () => void } {
+  const binDir = mkdtempSync(join(tmpdir(), "ahood-oc-npx-"));
+  const npxStub = join(binDir, "npx");
+  writeFileSync(
+    npxStub,
+    statusStub
+      ? `#!/bin/sh\necho '${statusStub.stdout.replace(/'/g, "'\\''")}'\nexit ${statusStub.exit}\n`
+      : `#!/bin/sh\nexit 1\n`,
+  );
+  chmodSync(npxStub, 0o755);
+  return {
+    env: { PATH: `${binDir}:${process.env.PATH ?? ""}` },
+    cleanup: () => rmSync(binDir, { recursive: true, force: true }),
+  };
+}
 
 describe("the plugin in opencode's context", () => {
   let markerDir: string;
@@ -184,10 +206,10 @@ describe("the plugin in opencode's context", () => {
     expect(fake.mcp.get("ahood")).toBe(mine);
   });
 
-  it("snap hook off (no AHOOD_SNAP_HOOK=1): does not even listen", async () => {
+  it("snap hook off and the session notice opted out: does not even listen", async () => {
     for (const value of [undefined, "0", "true"]) {
       const fake = fakeContext();
-      const cleanup = await createPlugin({ env: { AHOOD_SNAP_HOOK: value }, markerDir }).setup(fake.context);
+      const cleanup = await createPlugin({ env: { AHOOD_SNAP_HOOK: value, [NOTICE_OPT_OUT_ENV]: "1" }, markerDir }).setup(fake.context);
       expect(fake.subscribed()).toBe(false);
       expect(cleanup).toBeUndefined();
     }
@@ -222,6 +244,101 @@ describe("the plugin in opencode's context", () => {
     await fake.emit(ended("ses_a"));
     expect(fake.synthetic).toEqual([]);
     await (cleanup as () => void)();
+  });
+
+  // ahood#1565 item 1: the session notice -- on by default (no AHOOD_SNAP_HOOK
+  // needed), fires on `session.created` (opencode's earliest event for a
+  // session), once per session, failure-silent, and off for
+  // AHOOD_NO_UPDATE_NOTIFIER=1 (the CLI's own passive-notifier opt-out).
+  describe("session notice", () => {
+    it("queues the highest-severity notice once per session, never for a subagent session", async () => {
+      const stub = stubNpx({
+        exit: 0,
+        stdout: JSON.stringify({
+          notices: [
+            { severity: "info", message: "low" },
+            { severity: "required", message: "upgrade now" },
+          ],
+        }),
+      });
+      try {
+        const fake = fakeContext();
+        const cleanup = await createPlugin({ env: { ...stub.env }, markerDir }).setup(fake.context);
+        expect(fake.subscribed()).toBe(true);
+        await fake.emit(created("ses_sub", "ses_parent")); // subagent: skipped, no session.get needed
+        await fake.emit(created("ses_a"));
+        await fake.emit(created("ses_a")); // same session again: already claimed
+        expect(fake.synthetic).toHaveLength(1);
+        expect(fake.synthetic[0]).toMatchObject({ sessionID: "ses_a" });
+        expect(fake.synthetic[0].text).toBe(
+          "ahood: Notice (required): upgrade now. Tell the user in one line and suggest `/ahood sync` (and `npx @ahood/cli@latest setup` for the CLI); never run them yourself.",
+        );
+        await (cleanup as () => void)();
+      } finally {
+        stub.cleanup();
+      }
+    });
+
+    it("nothing when the server returns no notices", async () => {
+      const stub = stubNpx({ exit: 0, stdout: JSON.stringify({ notices: [] }) });
+      try {
+        const fake = fakeContext();
+        const cleanup = await createPlugin({ env: { ...stub.env }, markerDir }).setup(fake.context);
+        await fake.emit(created("ses_a"));
+        expect(fake.synthetic).toEqual([]);
+        await (cleanup as () => void)();
+      } finally {
+        stub.cleanup();
+      }
+    });
+
+    it("command failure (non-zero exit, no npx on PATH, malformed JSON): silent, never throws", async () => {
+      for (const stub of [stubNpx({ exit: 1, stdout: "" }), stubNpx({ exit: 0, stdout: "not json" }), stubNpx(undefined)]) {
+        try {
+          const fake = fakeContext();
+          const cleanup = await createPlugin({ env: { ...stub.env }, markerDir: mkdtempSync(join(tmpdir(), "ahood-oc-plugin-")) }).setup(
+            fake.context,
+          );
+          await fake.emit(created("ses_a"));
+          expect(fake.synthetic).toEqual([]);
+          await (cleanup as () => void)();
+        } finally {
+          stub.cleanup();
+        }
+      }
+    });
+
+    it("AHOOD_NO_UPDATE_NOTIFIER=1: opted out, nothing queued even with notices waiting", async () => {
+      const stub = stubNpx({ exit: 0, stdout: JSON.stringify({ notices: [{ severity: "action", message: "x" }] }) });
+      try {
+        const fake = fakeContext();
+        const cleanup = await createPlugin({ env: { ...stub.env, [NOTICE_OPT_OUT_ENV]: "1", AHOOD_SNAP_HOOK: "1" }, markerDir }).setup(
+          fake.context,
+        );
+        // the snap hook is on, so the subscription still exists -- only the notice is opted out.
+        expect(fake.subscribed()).toBe(true);
+        await fake.emit(created("ses_a"));
+        expect(fake.synthetic).toEqual([]);
+        await (cleanup as () => void)();
+      } finally {
+        stub.cleanup();
+      }
+    });
+
+    it("no marker can be written: asks nothing", async () => {
+      const blocked = join(markerDir, "file");
+      writeFileSync(blocked, "");
+      const stub = stubNpx({ exit: 0, stdout: JSON.stringify({ notices: [{ severity: "info", message: "x" }] }) });
+      try {
+        const fake = fakeContext();
+        const cleanup = await createPlugin({ env: { ...stub.env }, markerDir: join(blocked, "sub") }).setup(fake.context);
+        await fake.emit(created("ses_a"));
+        expect(fake.synthetic).toEqual([]);
+        await (cleanup as () => void)();
+      } finally {
+        stub.cleanup();
+      }
+    });
   });
 });
 

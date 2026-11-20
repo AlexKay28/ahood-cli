@@ -3,8 +3,8 @@
 ahood in [opencode](https://opencode.ai) (v2). The plugin connects opencode to
 [ahood](https://www.ahood.dev)'s hosted MCP server, so an agent can search, fetch, read and
 publish skills, agents, MCP servers and docs (the tools documented at
-[ahood.dev/docs#mcp](https://www.ahood.dev/docs#mcp)). It also adds the `/ahood` commands and an
-opt-in snap prompt.
+[ahood.dev/docs#mcp](https://www.ahood.dev/docs#mcp)). It also adds the `/ahood` commands, a
+session-start notice and an opt-in snap prompt.
 
 ## Install
 
@@ -46,6 +46,17 @@ versions.
 | `/ahood-sync` | `ahood sync --dry-run`, a diff per update, then `ahood sync <owner>/<slug> --yes` only for the updates you approve in chat |
 | `/ahood-review` | `ahood review --json`, each proposal with its diff and evidence, then `ahood review approve\|reject <id>` only on your decision |
 | `/ahood-snap` | Drafts a structured, private snap of the session, shows it, and runs `ahood snap create ...` only if you say yes |
+
+## Session-start notice
+
+On by default. When a new top-level session starts, the plugin runs `npx -y @ahood/cli@<version>
+status --json` once (the same command and flags the Claude Code plugin's `SessionStart` hook
+runs) and, only if the server returned a notice (for example that your client is out of date),
+asks the agent to relay it to you in one line and suggest `/ahood-sync` -- never running anything
+itself. At most once per session; never on a subagent session; failure-silent (no token, no
+network, a slow response, a bad answer -- none of it ever surfaces or delays the session). Set
+`AHOOD_NO_UPDATE_NOTIFIER=1` in opencode's environment to turn it off (the same opt-out as the
+CLI's own passive update notifier).
 
 ## Optional: snap prompt at the end of a task
 

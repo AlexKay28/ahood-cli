@@ -30,11 +30,36 @@
 //     queues a message that resumes the session -- what opencode's subagent
 //     completion notice does -- the counterpart of a Claude Code Stop hook's
 //     {"decision":"block","reason"}.
-// All three were exercised end to end with the real opencode v2.1.2 server
-// (a local-path plugin, a mock model provider): the command reached the model
-// with its arguments, the MCP server connected, and the snap prompt resumed
-// the session exactly once.
-import { CLI_VERSION } from "../../version.js";
+//   - Session notice (ahood#1565 item 1): context.event.subscribe() also sees
+//     `session.created` -- the earliest event opencode fires for a session,
+//     confirmed 2026-11-20 against @opencode/plugin@2.1.2's own
+//     dist/promise/generated/types.d.ts (`SessionCreated`: `data.sessionID`,
+//     `data.parentID`, emitted once, never repeated the way
+//     `session.execution.*` is per turn) -- fired once per session, never a
+//     child/subagent one (data.parentID set). It shells out to the pinned
+//     CLI's `status --json`, the same command and flags the Claude Code
+//     plugin's SessionStart hook runs (ahood-cli #237), with the same
+//     short execFile timeout, and never on the hot path: the call is async,
+//     off the event handler, so it can never block the session. Only if the
+//     server returned a `notices[]` entry does it queue one synthetic
+//     message, at most once per session (a marker file, like the snap
+//     prompt's). Respects AHOOD_NO_UPDATE_NOTIFIER=1, the one opt-out this
+//     family of passive ahood notices already shares (the CLI's own passive
+//     update notifier, src/update-notifier.ts) -- the Claude Code hook
+//     itself checks no env switch today, so there is nothing else to mirror.
+//     Failure-silent throughout: no token, no network, a timeout, a
+//     non-zero exit, a malformed response -- none of these may surface as
+//     an error or a delay.
+// The first three were exercised end to end with the real opencode v2.1.2
+// server (a local-path plugin, a mock model provider): the command reached
+// the model with its arguments, the MCP server connected, and the snap
+// prompt resumed the session exactly once. The session notice's event name
+// and data shape are the real @opencode/plugin@2.1.2 package's own shipped
+// types (`npm pack` + dist/promise/generated/types.d.ts, not a guess); its
+// handler is exercised by the fake-context unit tests below, not a live
+// model run.
+import { CLI_NAME, CLI_VERSION } from "../../version.js";
+import { NO_UPDATE_NOTIFIER_ENV } from "../../update-notifier.js";
 import {
   AHOOD_CLIENT_HEADER,
   AHOOD_COMMANDS,
@@ -95,6 +120,13 @@ function generatedModule(): string {
     constant("TOKEN_ENV", AHOOD_MCP_TOKEN_ENV),
     constant("SNAP_HOOK_ENV", AHOOD_SNAP_HOOK_ENV),
     constant("SNAP_PROMPT", AHOOD_SNAP_PROMPT),
+    // ahood#1565 item 1: the session notice's argv, pinned to this plugin's
+    // CLI version exactly like SESSION_START_ARGV in claude-plugin.ts's
+    // claudePluginSessionStartHook(), and its budget/opt-out env, shared
+    // with the CLI's own passive update notifier (src/update-notifier.ts).
+    constant("STATUS_ARGV", ["npx", "-y", `${CLI_NAME}@${CLI_VERSION}`, "status", "--json"]),
+    constant("STATUS_BUDGET_MS", 3000),
+    constant("NOTICE_OPT_OUT_ENV", NO_UPDATE_NOTIFIER_ENV),
     "",
     "/** The /ahood commands; `template` is the prompt, with $ARGUMENTS standing for what the user typed after the name. */",
     `export const COMMANDS: ReadonlyArray<{ name: string; description: string; template: string }> = ${JSON.stringify(commands, null, 2)};`,

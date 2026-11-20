@@ -42,7 +42,11 @@ export interface Registration {
 /** The members of an opencode event this plugin reads (V2Event in @opencode/client). */
 export interface OpencodeEvent {
   readonly type: string;
-  readonly data?: { readonly sessionID?: string };
+  // `parentID` is only ever present on `session.created` (SessionCreated in
+  // @opencode/client's generated types.d.ts) -- the sub-agent sessions the
+  // other events (`session.execution.*`) carry are told apart with
+  // `session.get` instead, since those events don't repeat it.
+  readonly data?: { readonly sessionID?: string; readonly parentID?: string };
 }
 
 export interface PluginContext {

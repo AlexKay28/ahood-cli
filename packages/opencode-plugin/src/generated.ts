@@ -8,6 +8,9 @@ export const CLIENT_HEADER_VALUE = "opencode-plugin/0.20.1";
 export const TOKEN_ENV = "AHOOD_TOKEN";
 export const SNAP_HOOK_ENV = "AHOOD_SNAP_HOOK";
 export const SNAP_PROMPT = "ahood snap hook (opt-in): before ending, offer the user a private ahood snap of this session. If nothing here is worth keeping (no deliverable handed over, no correction from the user), end your turn without asking. Otherwise draft it: a one-line summary plus failed / worked / fix / lesson (no names or private details) / artifact (owner/slug, if one ahood skill, agent or MCP server was involved). Leave out secrets. Show the draft and ask whether to save it. Save only on the user's explicit yes, with `ahood snap create \"<summary>\" --failed \"...\" --worked \"...\" --fix \"...\" --lesson \"...\" --artifact <owner/slug>` or the ahood MCP tool create_snap. Do not save it in this turn: wait for the answer.";
+export const STATUS_ARGV = ["npx","-y","@ahood/cli@0.20.1","status","--json"];
+export const STATUS_BUDGET_MS = 3000;
+export const NOTICE_OPT_OUT_ENV = "AHOOD_NO_UPDATE_NOTIFIER";
 
 /** The /ahood commands; `template` is the prompt, with $ARGUMENTS standing for what the user typed after the name. */
 export const COMMANDS: ReadonlyArray<{ name: string; description: string; template: string }> = [
