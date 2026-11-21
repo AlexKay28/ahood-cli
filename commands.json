@@ -358,9 +358,9 @@
           ]
         },
         {
-          "usage": "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project|loop|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "usage": "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project|loop|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public|private] [--json]",
           "summary": "Publish a new version of a skill, agent, mcp server manifest, doc, project guide, loop, or prompt from a folder containing SKILL.md, AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md, creating the skill first if it doesn't already exist.",
-          "desc": "Publish a new version of a skill, agent, mcp server manifest, doc, project guide, loop, or prompt from a folder containing SKILL.md, AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md. If the artifact doesn't exist yet, this creates it first -- pass --name to set its display name, and --kind agent, --kind mcp, --kind doc, --kind project, --kind loop, or --kind prompt if publishing an AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md (auto-detected from the folder contents when only one of SKILL.md/AGENT.md/server.json/DOC.md/PROJECT.md/LOOP.md/PROMPT.md is present). A PROMPT.md is checked locally before anything is uploaded: an undeclared {{key}}, or a declared input the body never uses, is refused with an error naming the key. --name is required when creating (it has no update path -- use a new publish with the right --name once, or rename isn't supported); --tagline/--tags/--license/--homepage/--repository apply whether this creates the artifact or publishes a new version of one that already exists. Processing happens server-side after upload; this command polls and reports the final published/failed status. The legacy form `ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted. Every flag also accepts the --flag=value form, needed when a value itself starts with --.",
+          "desc": "Publish a new version of a skill, agent, mcp server manifest, doc, project guide, loop, or prompt from a folder containing SKILL.md, AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md. If the artifact doesn't exist yet, this creates it first -- pass --name to set its display name, and --kind agent, --kind mcp, --kind doc, --kind project, --kind loop, or --kind prompt if publishing an AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md (auto-detected from the folder contents when only one of SKILL.md/AGENT.md/server.json/DOC.md/PROJECT.md/LOOP.md/PROMPT.md is present). A PROMPT.md is checked locally before anything is uploaded: an undeclared {{key}}, or a declared input the body never uses, is refused with an error naming the key. --name is required when creating (it has no update path -- use a new publish with the right --name once, or rename isn't supported); --tagline/--tags/--license/--homepage/--repository apply whether this creates the artifact or publishes a new version of one that already exists. Processing happens server-side after upload; this command polls and reports the final published/failed status. The legacy form `ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted. A new artifact is private until made public: in a terminal publish asks, otherwise it stays private and prints the `ahood skill edit <owner>/<skill> --visibility public` command. Every flag also accepts the --flag=value form, needed when a value itself starts with --.",
           "flags": [
             "--kind <kind>                 skill, agent, mcp, doc, project, loop, or prompt. Auto-detected from the folder's root doc when omitted.",
             "--name <text>                 Required only when creating the artifact on this publish.",
@@ -370,6 +370,7 @@
             "--homepage <url>              The artifact's homepage URL. Updated even on a re-publish of an existing artifact.",
             "--repository <url>            The artifact's source repository URL. Updated even on a re-publish of an existing artifact.",
             "--changelog <text>            What changed in this version, shown by `ahood skill versions`.",
+            "--visibility public|private   Who can find it. New artifacts are created private; on a terminal, publish asks whether to make a new one public (default no). Pass this to skip the question (scripts, CI). On a re-publish it changes visibility only when given.",
             "--json                        Suppress human progress lines; print one {version,status,...} JSON object on completion (or {error} on failure)."
           ],
           "examples": [
@@ -533,13 +534,14 @@
           ]
         },
         {
-          "usage": "ahood agent publish <owner>/<agent>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "usage": "ahood agent publish <owner>/<agent>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public|private] [--json]",
           "summary": "Publish a new version of an agent from a folder containing AGENT.md, creating it first if it doesn't exist yet.",
           "desc": "Publish a new version from a folder containing AGENT.md; the kind is implied, and a contradictory --kind is refused. If the entry already exists as another kind, this stops before anything is packed or uploaded. If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`.",
           "flags": [
             "--path <dir>                  Folder to publish (default: the current directory).",
             "--name <text>                 Required only when creating the entry on this publish.",
             "--changelog <text>            What changed in this version.",
+            "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
             "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
           ],
           "examples": [
@@ -701,13 +703,14 @@
           ]
         },
         {
-          "usage": "ahood mcp publish <owner>/<server>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "usage": "ahood mcp publish <owner>/<server>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public|private] [--json]",
           "summary": "Publish a new version of an MCP server manifest from a folder containing server.json, creating it first if it doesn't exist yet.",
           "desc": "Publish a new version from a folder containing server.json; the kind is implied, and a contradictory --kind is refused. If the entry already exists as another kind, this stops before anything is packed or uploaded. If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`.",
           "flags": [
             "--path <dir>                  Folder to publish (default: the current directory).",
             "--name <text>                 Required only when creating the entry on this publish.",
             "--changelog <text>            What changed in this version.",
+            "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
             "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
           ],
           "examples": [
@@ -869,13 +872,14 @@
           ]
         },
         {
-          "usage": "ahood doc publish <owner>/<doc>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "usage": "ahood doc publish <owner>/<doc>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public|private] [--json]",
           "summary": "Publish a new version of a doc from a folder containing DOC.md, creating it first if it doesn't exist yet.",
           "desc": "Publish a new version from a folder containing DOC.md; the kind is implied, and a contradictory --kind is refused. If the entry already exists as another kind, this stops before anything is packed or uploaded. If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`.",
           "flags": [
             "--path <dir>                  Folder to publish (default: the current directory).",
             "--name <text>                 Required only when creating the entry on this publish.",
             "--changelog <text>            What changed in this version.",
+            "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
             "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
           ],
           "examples": [
@@ -1054,13 +1058,14 @@
           ]
         },
         {
-          "usage": "ahood project publish <owner>/<slug>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "usage": "ahood project publish <owner>/<slug>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public|private] [--json]",
           "summary": "Publish a new version of a project guide from a folder containing PROJECT.md, creating it first if it doesn't exist yet.",
           "desc": "Publish a new version from a folder containing PROJECT.md; the kind is implied, and a contradictory --kind is refused. If the entry already exists as another kind, this stops before anything is packed or uploaded. If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`.",
           "flags": [
             "--path <dir>                  Folder to publish (default: the current directory).",
             "--name <text>                 Required only when creating the entry on this publish.",
             "--changelog <text>            What changed in this version.",
+            "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
             "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
           ],
           "examples": [
@@ -1222,13 +1227,14 @@
           ]
         },
         {
-          "usage": "ahood loop publish <owner>/<loop>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "usage": "ahood loop publish <owner>/<loop>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public|private] [--json]",
           "summary": "Publish a new version of a loop from a folder containing LOOP.md, creating it first if it doesn't exist yet.",
           "desc": "Publish a new version from a folder containing LOOP.md; the kind is implied, and a contradictory --kind is refused. If the entry already exists as another kind, this stops before anything is packed or uploaded. If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`.",
           "flags": [
             "--path <dir>                  Folder to publish (default: the current directory).",
             "--name <text>                 Required only when creating the entry on this publish.",
             "--changelog <text>            What changed in this version.",
+            "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
             "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
           ],
           "examples": [
@@ -1373,13 +1379,14 @@
           ]
         },
         {
-          "usage": "ahood prompt publish <owner>/<prompt>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+          "usage": "ahood prompt publish <owner>/<prompt>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public|private] [--json]",
           "summary": "Publish a new version of a prompt from a folder containing PROMPT.md, creating it first if it doesn't exist yet.",
           "desc": "Publish a new version from a folder containing PROMPT.md; the kind is implied, and a contradictory --kind is refused. If the entry already exists as another kind, this stops before anything is packed or uploaded. If it doesn't exist yet, it is created first -- pass --name for that. Otherwise the same flags and --json output as `ahood skill publish`. PROMPT.md is checked locally first: an undeclared {{key}}, a declared input the body never uses, or a body over 32 KB is refused before anything is uploaded, with an error naming the key.",
           "flags": [
             "--path <dir>                  Folder to publish (default: the current directory).",
             "--name <text>                 Required only when creating the entry on this publish.",
             "--changelog <text>            What changed in this version.",
+            "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
             "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
           ],
           "examples": [

@@ -3,6 +3,9 @@ import { LEGACY_TOKEN_ENV, resolveToken, resolveTokenWithSource, TOKEN_ENV } fro
 import { sanitizeForTerminal } from "./terminal-safe.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
 
+export const NO_ACCOUNT_MESSAGE =
+  "This needs a free ahood account. Run `ahood login` (or `npx @ahood/cli@latest setup` to connect your agent too).";
+
 export class ApiError extends Error {
   // The parsed JSON error body, when there was one and it parsed as an
   // object -- not just the `.error` string already folded into `message`.
@@ -195,10 +198,15 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
       // reads, same as the 429 branch above.
       await res.text().catch(() => "");
       const source = resolveTokenWithSource()?.source;
+      // ahood#1612: with no token at all nothing "expired" -- a brand-new
+      // user running `ahood find` was told their login had expired. Say
+      // what is true: the command needs an account. Still a 401, so exit 4.
       const message =
-        source === TOKEN_ENV || source === LEGACY_TOKEN_ENV
-          ? "AHOOD_TOKEN was rejected (expired or revoked)."
-          : "Your ahood login has expired or was revoked. Run `ahood login` again.";
+        source === undefined
+          ? NO_ACCOUNT_MESSAGE
+          : source === TOKEN_ENV || source === LEGACY_TOKEN_ENV
+            ? "AHOOD_TOKEN was rejected (expired or revoked)."
+            : "Your ahood login has expired or was revoked. Run `ahood login` again.";
       throw new ApiError(401, message);
     }
 

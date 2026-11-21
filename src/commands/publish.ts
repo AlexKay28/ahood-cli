@@ -4,6 +4,7 @@ import { pack } from "tar-stream";
 import { createGzip } from "node:zlib";
 import { apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
 import { flagValue } from "../flags.js";
+import { confirmYesNo, isInteractive } from "../confirm.js";
 import { parseOwnerSkill, SEMVER_RE, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { assertKind, CLI_KINDS, isCliKind, KINDS, strictKind, type CliKind, type KindScope } from "../kinds.js";
@@ -28,6 +29,7 @@ async function assertPublishTargetKind(scope: KindScope, owner: string, skill: s
   assertKind(scope, `${owner}/${skill}`, detail.kind, "publish", "publish a new version of");
 }
 
+type Visibility = "public" | "private";
 type InitResponse = { upload_url: string; storage_path: string; version_id: string };
 type CreateResponse = { id: string; slug: string; owner: string };
 type VersionStatusResponse = { version: string; status: string; failure_reason?: string | null };
@@ -58,7 +60,7 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
 }
 
 const USAGE =
-  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project|loop|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]\n" +
+  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project|loop|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public|private] [--json]\n" +
   "   or: ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
@@ -285,6 +287,7 @@ function parsePublishArgs(args: string[]): {
   repository?: string;
   kind?: string;
   changelog?: string;
+  visibility?: Visibility;
 } {
   const pathFlag = flagValue(args, "--path");
   let owner = flagValue(args, "--owner");
@@ -298,6 +301,10 @@ function parsePublishArgs(args: string[]): {
   const repository = flagValue(args, "--repository");
   const kind = flagValue(args, "--kind");
   const changelog = flagValue(args, "--changelog");
+  const visibility = flagValue(args, "--visibility");
+  if (visibility !== undefined && visibility !== "public" && visibility !== "private") {
+    throw new UsageError(`--visibility must be "public" or "private" (got "${visibility}").\n${USAGE}`);
+  }
   let legacyPath: string | undefined;
 
   // ahood#990: the `<path> --owner <owner> --slug <skill> --version <x.y.z>`
@@ -349,7 +356,30 @@ function parsePublishArgs(args: string[]): {
     repository,
     kind,
     changelog,
+    visibility: visibility as Visibility | undefined,
   };
+}
+
+type CreateOpts = {
+  name?: string;
+  tagline?: string;
+  tags?: string;
+  license?: string;
+  homepage?: string;
+  repository?: string;
+  kind?: string;
+  visibility?: Visibility;
+};
+
+// ahood#1612: the server creates every new artifact private, and authors
+// missed that they then had to run `ahood skill edit --visibility public`
+// (zero installs). Asked only at the moment of CREATING (never on a new
+// version of an existing artifact), only when --visibility was not given and
+// a person can answer: not --json, not piped. Anything else stays private.
+async function chooseVisibility(owner: string, skill: string, opts: CreateOpts, jsonOutput: boolean): Promise<Visibility> {
+  if (opts.visibility !== undefined) return opts.visibility;
+  if (jsonOutput || !isInteractive()) return "private";
+  return (await confirmYesNo(`Make ${owner}/${skill} public so others can find and install it? [y/N] `)) ? "public" : "private";
 }
 
 // Creates the skill under the caller's own account when versions/init 404s
@@ -361,7 +391,7 @@ function parsePublishArgs(args: string[]): {
 async function createSkillForPublish(
   owner: string,
   skill: string,
-  opts: { name?: string; tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string; kind?: string },
+  opts: CreateOpts,
   jsonOutput: boolean,
 ): Promise<CreateResponse> {
   if (!opts.name) {
@@ -405,9 +435,9 @@ async function initVersion(
   version: string,
   packageSizeBytes: number,
   changelog: string | undefined,
-  createOpts: { name?: string; tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string; kind?: string },
+  createOpts: CreateOpts,
   jsonOutput: boolean,
-): Promise<{ init: InitResponse; created?: CreateResponse }> {
+): Promise<{ init: InitResponse; created?: CreateResponse; visibility?: Visibility }> {
   const path = `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/init`;
   // changelog_md matches the field name versions.ts's SkillVersion type already
   // reads on the GET side (ahood-cli#87) -- only sent when --changelog was
@@ -422,10 +452,15 @@ async function initVersion(
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) throw error;
     const created = await createSkillForPublish(owner, skill, createOpts, jsonOutput);
+    // The create request does not carry visibility (the server creates
+    // private; edit's PATCH is the one way to change it), so the choice is
+    // applied after the publish succeeds -- a failed upload must not leave a
+    // public, empty artifact behind.
+    const visibility = await chooseVisibility(owner, skill, createOpts, jsonOutput);
     // Retry exactly once. If this ALSO 404s (e.g. a race, or the create
     // silently didn't take), let that error propagate rather than looping.
     const init = await apiJson<InitResponse>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body });
-    return { init, created };
+    return { init, created, visibility };
   }
 }
 
@@ -454,7 +489,7 @@ type UpdateResponse = { slug: string; tagline: string | null; tags_warning?: str
 async function updateExistingSkillMetadata(
   owner: string,
   skill: string,
-  opts: { tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string },
+  opts: { tagline?: string; tags?: string; license?: string; homepage?: string; repository?: string; visibility?: Visibility },
   jsonOutput: boolean,
 ): Promise<void> {
   const body: Record<string, unknown> = {};
@@ -463,6 +498,9 @@ async function updateExistingSkillMetadata(
   if (opts.license !== undefined) body.license = opts.license;
   if (opts.homepage !== undefined) body.homepage = opts.homepage;
   if (opts.repository !== undefined) body.repository = opts.repository;
+  // Only an explicit --visibility reaches an existing artifact; a re-publish
+  // never prompts and never changes visibility on its own (ahood#1612).
+  if (opts.visibility !== undefined) body.visibility = opts.visibility;
   if (Object.keys(body).length === 0) return;
 
   const updated = await apiJson<UpdateResponse>(
@@ -521,7 +559,7 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
   const jsonOutput = args.includes("--json");
   try {
     const parsed = parsePublishArgs(args);
-    const { owner, skill, version, path, name, tagline, tags, license, homepage, repository, changelog } = parsed;
+    const { owner, skill, version, path, name, tagline, tags, license, homepage, repository, changelog, visibility: visibilityFlag } = parsed;
     // A kind-scoped publish implies its kind. The dispatcher has already
     // refused a contradictory --kind before this runs, so the flag (when the
     // legacy `ahood skill publish` passes one through) and the scope can't
@@ -548,13 +586,13 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
 
     const archive = await tarGzDirectory(path, KINDS[resolvedKind ?? "skill"].rootDoc);
 
-    const { init, created } = await initVersion(
+    const { init, created, visibility: createdVisibility } = await initVersion(
       owner,
       skill,
       version,
       archive.length,
       changelog,
-      { name, tagline, tags, license, homepage, repository, kind: resolvedKind },
+      { name, tagline, tags, license, homepage, repository, kind: resolvedKind, visibility: visibilityFlag },
       jsonOutput,
     );
 
@@ -564,7 +602,7 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
     // already existed, and the metadata flags still need to reach the server
     // -- see updateExistingSkillMetadata's comment.
     if (!created) {
-      await updateExistingSkillMetadata(owner, skill, { tagline, tags, license, homepage, repository }, jsonOutput);
+      await updateExistingSkillMetadata(owner, skill, { tagline, tags, license, homepage, repository, visibility: visibilityFlag }, jsonOutput);
     }
 
     // TS's lib.dom BodyInit (in scope here since tsconfig has no explicit
@@ -610,6 +648,24 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
       throw new Error(`Publish failed: ${result.failure_reason ?? "unknown reason"}`);
     }
 
+    // ahood#1612: apply the create-time choice now that the first version is
+    // in. A private result in a non-interactive run prints the exact command
+    // that makes it public; the hint is human-only (--json stays one object).
+    let visibilityNote: string | undefined;
+    if (created) {
+      const ref = `${created.owner}/${created.slug}`;
+      if (createdVisibility === "public") {
+        await apiJson(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ visibility: "public" }),
+        });
+        visibilityNote = `${ref} is public.`;
+      } else if (visibilityFlag === undefined) {
+        visibilityNote = `${ref} is private. To let others find and install it: ahood skill edit ${ref} --visibility public`;
+      }
+    }
+
     if (jsonOutput) {
       const output: { version: string; status: string; failure_reason?: string; created?: CreateResponse } = {
         version: result.version,
@@ -620,6 +676,7 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
       console.log(JSON.stringify(output));
     } else {
       console.log(`Published ${owner}/${skill}@${result.version} (${result.status})`);
+      if (visibilityNote) console.log(visibilityNote);
     }
   } catch (error) {
     if (jsonOutput) {

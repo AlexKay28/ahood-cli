@@ -374,7 +374,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage:
-      "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project|loop|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]",
+      "ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project|loop|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public|private] [--json]",
     summary:
       "Publish a new version of a skill, agent, mcp server manifest, doc, project guide, loop, or prompt from a folder containing SKILL.md, AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md, creating the skill first if it doesn't already exist.",
     desc:
@@ -387,6 +387,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "artifact or publishes a new version of one that already exists. " +
       "Processing happens server-side after upload; this command polls and reports the final published/failed status. " +
       "The legacy form `ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z>` is still accepted. " +
+      "A new artifact is private until made public: in a terminal publish asks, otherwise it stays private and prints the `ahood skill edit <owner>/<skill> --visibility public` command. " +
       "Every flag also accepts the --flag=value form, needed when a value itself starts with --.",
     flags: [
       "--kind <kind>                 skill, agent, mcp, doc, project, loop, or prompt. Auto-detected from the folder's root doc when omitted.",
@@ -397,6 +398,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "--homepage <url>              The artifact's homepage URL. Updated even on a re-publish of an existing artifact.",
       "--repository <url>            The artifact's source repository URL. Updated even on a re-publish of an existing artifact.",
       "--changelog <text>            What changed in this version, shown by `ahood skill versions`.",
+      "--visibility public|private   Who can find it. New artifacts are created private; on a terminal, publish asks whether to make a new one public (default no). Pass this to skip the question (scripts, CI). On a re-publish it changes visibility only when given.",
       "--json                        Suppress human progress lines; print one {version,status,...} JSON object on completion (or {error} on failure).",
     ],
     examples: [
@@ -548,7 +550,7 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
       examples: [`${p} init ${ex.split("/")[1]}`, `${p} init`],
     },
     {
-      usage: `${p} publish <owner>/${n}@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--json]`,
+      usage: `${p} publish <owner>/${n}@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public|private] [--json]`,
       summary: `Publish a new version of ${a} ${label} from a folder containing ${doc}, creating it first if it doesn't exist yet.`,
       desc:
         `Publish a new version from a folder containing ${doc}; the kind is implied, and a contradictory --kind is refused. ` +
@@ -558,6 +560,7 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
         "--path <dir>                  Folder to publish (default: the current directory).",
         "--name <text>                 Required only when creating the entry on this publish.",
         "--changelog <text>            What changed in this version.",
+        "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
         "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure).",
       ],
       examples: [`${p} publish ${ex}@1.0.0 --name "${info.example.name}"`],

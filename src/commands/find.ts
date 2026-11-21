@@ -7,7 +7,7 @@ import { flagValue, unrecognizedArgs } from "../flags.js";
 import { CLI_KINDS, isCliKind, KINDS, type CliKind } from "../kinds.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
-import { SEARCH_SORTS, searchSkills, type SearchRow, type SearchSort } from "./search.js";
+import { SEARCH_SORTS, searchSkillsWithWebFallback, type SearchRow, type SearchSort } from "./search.js";
 
 const USAGE = `Usage: ahood find [<query>] [--kind ${CLI_KINDS.join("|")}] [--sort ${SEARCH_SORTS.join("|")}] [--limit <n>] [--json]`;
 
@@ -73,7 +73,7 @@ export async function find(args: string[]): Promise<void> {
   // order -- allowed, but only when asked for by a sort or a kind.
   if (query === "" && kind === undefined && sort === undefined) throw new UsageError(USAGE);
 
-  const results = (await searchSkills(query, limit, kind, sort)).map(toFindResult);
+  const results = (await searchSkillsWithWebFallback(query, args.includes("--json"), limit, kind, sort)).map(toFindResult);
 
   if (args.includes("--json")) {
     console.log(JSON.stringify(results));

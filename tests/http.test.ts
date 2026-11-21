@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apiFetch, apiJson, ApiError, NetworkError, sanitizeErrorMessage } from "../src/http.js";
+import { exitCodeFor } from "../src/exit-code.js";
 import { writeCredentials } from "../src/credentials.js";
 import { CLI_NAME, CLI_VERSION } from "../src/version.js";
 
@@ -263,6 +264,25 @@ describe("401 handling (ahood-cli#1320 contract §4)", () => {
     expect((caught as ApiError).status).toBe(401);
     expect((caught as ApiError).message).toBe("Your ahood login has expired or was revoked. Run `ahood login` again.");
     expect((caught as ApiError).message).not.toMatch(/token expired/);
+  });
+
+  // ahood#1612: a user who never logged in is not "expired".
+  it("tells a caller with no credentials at all that the command needs a free account, still exit 4", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 })));
+
+    let caught: unknown;
+    try {
+      await apiJson("/x");
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(401);
+    expect((caught as ApiError).message).toBe(
+      "This needs a free ahood account. Run `ahood login` (or `npx @ahood/cli@latest setup` to connect your agent too).",
+    );
+    expect((caught as ApiError).message).not.toMatch(/expired/);
+    expect(exitCodeFor(caught)).toBe(4);
   });
 });
 
