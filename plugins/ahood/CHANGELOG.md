@@ -9,6 +9,16 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 `preversion` hook (and the release workflow) refuse a version without one
 (`scripts/check-changelog.mjs`).
 
+## 0.22.0 (2026-11-21)
+
+- A first-time user without an ahood account now hears that a command needs a free account
+  (`ahood login`, or `npx @ahood/cli@latest setup` to connect your agent too), instead of being told
+  their login "expired or was revoked". `ahood find` and `ahood skill search` also print the same
+  search on the web, so you can still look before signing up.
+- `ahood skill publish` takes `--visibility public|private`. When it creates a new artifact in a
+  terminal without the flag, it asks whether to make it public. Otherwise the artifact stays private
+  and publish prints the exact `ahood skill edit … --visibility public` command.
+
 ## 0.21.0 (2026-11-20)
 
 - opencode: the `@ahood/opencode-plugin` now shows the same session-start notice as the Claude Code
