@@ -15,7 +15,7 @@ import { buildProvenanceHeader } from "../src/provenance-header.js";
 // handlers as `ahood doc`; the differences pinned here are the fixed install
 // target (.claude/project.md, one per repository), never touching
 // CLAUDE.md/AGENTS.md, `init`'s git-remote prefill, and bare `ahood project`.
-vi.mock("../src/confirm.js", () => ({ confirm: vi.fn(async () => true) }));
+vi.mock("../src/confirm.js", () => ({ confirm: vi.fn(async () => true), isInteractive: () => false, confirmYesNo: vi.fn(async () => false) }));
 import { API_URL, entry, fakeRegistry, json, mutations, backendAcceptsDocMd } from "./helpers/fake-registry.js";
 
 const GUIDE = "---\nname: x\ndescription: d\n---\nbody\n";

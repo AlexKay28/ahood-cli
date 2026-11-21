@@ -1,4 +1,6 @@
-import { apiJson } from "../http.js";
+import { getApiUrl } from "../config.js";
+import { resolveToken } from "../credentials.js";
+import { apiJson, ApiError, NO_ACCOUNT_MESSAGE } from "../http.js";
 import { flagValue, parseSearchQuery } from "../flags.js";
 import { UsageError } from "../usage-error.js";
 import { KINDS, strictKind, type CliKind, type KindScope } from "../kinds.js";
@@ -43,6 +45,28 @@ export async function searchSkills(query: string, limit?: number, kind?: CliKind
   return skills ?? [];
 }
 
+// ahood#1612: a search that failed only because the caller has no account
+// still leaves the user wanting results -- point at the same search on the
+// web. Human output only: --json callers get the unchanged {error} shape and
+// exit code 4 (the ApiError status is kept).
+export async function searchSkillsWithWebFallback(
+  query: string,
+  json: boolean,
+  limit?: number,
+  kind?: CliKind,
+  sort?: SearchSort,
+): Promise<SearchRow[]> {
+  try {
+    return await searchSkills(query, limit, kind, sort);
+  } catch (error) {
+    if (!json && error instanceof ApiError && error.status === 401 && error.message === NO_ACCOUNT_MESSAGE && !resolveToken()) {
+      const url = `${getApiUrl()}/browse/search?q=${encodeURIComponent(query)}`;
+      throw new ApiError(401, `${error.message}\nYou can still search on the web: ${url}`, error.body);
+    }
+    throw error;
+  }
+}
+
 export async function search(args: string[], scope?: KindScope): Promise<void> {
   const kind = strictKind(scope);
   const jsonOutput = args.includes("--json");
@@ -53,7 +77,7 @@ export async function search(args: string[], scope?: KindScope): Promise<void> {
   }
   const limit = limitStr !== undefined ? Number(limitStr) : undefined;
 
-  const skills = await searchSkills(query, limit, kind);
+  const skills = await searchSkillsWithWebFallback(query, jsonOutput, limit, kind);
 
   if (jsonOutput) {
     console.log(JSON.stringify(skills));

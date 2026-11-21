@@ -21,7 +21,7 @@ import { buildProvenanceHeader } from "../src/provenance-header.js";
 // BEFORE its first side effect. The fake registry below records every request
 // (method + URL), so "no side effect" is checked as "no non-GET request and no
 // download", and the temp project directory is checked for untouched files.
-vi.mock("../src/confirm.js", () => ({ confirm: vi.fn(async () => true) }));
+vi.mock("../src/confirm.js", () => ({ confirm: vi.fn(async () => true), isInteractive: () => false, confirmYesNo: vi.fn(async () => false) }));
 vi.mock("../src/secret-prompt.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/secret-prompt.js")>();
   return { ...actual, promptSecret: vi.fn(async () => "prompted") };

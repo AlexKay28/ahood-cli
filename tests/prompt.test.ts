@@ -14,7 +14,7 @@ import { UsageError } from "../src/usage-error.js";
 import { exitCodeFor } from "../src/exit-code.js";
 import { API_URL, entry, fakeRegistry, json, mutations, type Call } from "./helpers/fake-registry.js";
 
-vi.mock("../src/confirm.js", () => ({ confirm: vi.fn(async () => true) }));
+vi.mock("../src/confirm.js", () => ({ confirm: vi.fn(async () => true), isInteractive: () => false, confirmYesNo: vi.fn(async () => false) }));
 
 // The issue's example, which is also the server fixture's.
 const PROMPT_MD = `---
