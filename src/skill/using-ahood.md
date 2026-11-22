@@ -56,6 +56,19 @@ automatic evolution only for artifacts you have enabled after giving consent, an
 deleted automatically about 3 days after creation. Tell the user this when they ask where a
 snap goes.
 
+## After you use an artifact
+
+Once you have actually used a skill, agent, prompt or other artifact for a task, rate it: vote with
+the MCP tool `vote_skill` (or `ahood <kind> vote <owner>/<slug> up|down --note "..."`). Vote **up**
+if it worked and **down** if it was wrong or misleading, and always give a concrete `note` (what
+you did, what happened, which step was wrong). Votes feed the registry's ranking, so a vague one
+is worth little.
+
+- Never vote on something you only searched for or skimmed; vote after `read_skill`, an install
+  or a real use. The registry refuses a vote on something you have not used.
+- Never vote on your own artifacts.
+- Set `AHOOD_AGENT=1` when you run the CLI so the vote is recorded as an agent's.
+
 ## Keep installed artifacts current
 
 - `ahood status --json` shows installed versus latest versions, pins, and pending evolution

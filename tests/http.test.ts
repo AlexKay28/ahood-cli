@@ -64,6 +64,42 @@ describe("X-Ahood-Client header", () => {
   });
 });
 
+// ahood#1640: opt-in only -- no heuristics, just AHOOD_AGENT=1.
+describe("X-Ahood-Agent header", () => {
+  useStubbedApi();
+
+  async function sentHeaders(): Promise<Headers> {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await apiFetch("/x");
+    const [, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    return new Headers(requestInit.headers);
+  }
+
+  it("is sent as 1 only when AHOOD_AGENT=1", async () => {
+    const original = process.env.AHOOD_AGENT;
+    try {
+      process.env.AHOOD_AGENT = "1";
+      expect((await sentHeaders()).get("X-Ahood-Agent")).toBe("1");
+      delete process.env.AHOOD_AGENT;
+      expect((await sentHeaders()).has("X-Ahood-Agent")).toBe(false);
+      process.env.AHOOD_AGENT = "true";
+      expect((await sentHeaders()).has("X-Ahood-Agent")).toBe(false);
+    } finally {
+      if (original === undefined) delete process.env.AHOOD_AGENT;
+      else process.env.AHOOD_AGENT = original;
+    }
+  });
+
+  it("carries a per-request header passed through apiJson's init", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await apiJson("/x", { headers: { "X-Ahood-Usage": "view" } });
+    const [, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(requestInit.headers).get("X-Ahood-Usage")).toBe("view");
+  });
+});
+
 describe("apiJson error sanitization", () => {
   useStubbedApi();
 

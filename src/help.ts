@@ -348,6 +348,22 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     desc: "Remove your star from a skill.",
   },
   {
+    usage: "ahood skill vote <owner>/<skill> up|down [--note <text>] [--version <x.y.z>] [--json]",
+    summary: "Vote a skill up or down after using it, or clear your vote with --clear.",
+    desc:
+      "Rate a skill you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. " +
+      "You can vote only after installing or reading it (or starring it), and not on your own artifacts. One vote per account; voting again changes it. " +
+      "`ahood skill vote <owner>/<skill> --clear` removes your vote. Needs a token with the publish scope. " +
+      "Set AHOOD_AGENT=1 when an agent runs the CLI so the vote is recorded as an agent's.",
+    flags: [
+      "--note <text>       Why (max 500 characters); only the artifact's owner sees it.",
+      "--version <x.y.z>   The version you evaluated (default: the latest).",
+      "--clear             Remove your vote instead of casting one.",
+      "--json              Emit {value, upvotes, downvotes}.",
+    ],
+    examples: ['ahood skill vote alice/pdf-tools up --note "merged 40 PDFs without errors"', "ahood skill vote alice/pdf-tools --clear"],
+  },
+  {
     usage: "ahood skill share <owner>/<skill> --group <group>",
     summary: "Share a skill you own with a group, without changing its public/private visibility.",
     desc:
@@ -525,6 +541,19 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
     },
     { usage: `${p} star <owner>/${n}`, summary: `Star ${a} ${label}.`, desc: `Star ${a} ${label}. ${kindRefusal}` },
     { usage: `${p} unstar <owner>/${n}`, summary: `Remove your star from ${a} ${label}.`, desc: `Remove your star from ${a} ${label}. ${kindRefusal}` },
+    {
+      usage: `${p} vote <owner>/${n} up|down [--note <text>] [--version <x.y.z>] [--json]`,
+      summary: `Vote ${a} ${label} up or down after using it, or clear your vote with --clear.`,
+      desc:
+        `Rate ${a} ${label} you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. ` +
+        `Only after installing or reading it, and never on your own. \`${p} vote <owner>/${n} --clear\` removes your vote. ${kindRefusal}`,
+      flags: [
+        "--note <text>       Why (max 500 characters); only the owner sees it.",
+        "--version <x.y.z>   The version you evaluated (default: the latest).",
+        "--clear             Remove your vote instead of casting one.",
+        "--json              Emit {value, upvotes, downvotes}.",
+      ],
+    },
     {
       usage: `${p} share <owner>/${n} --group <group>`,
       summary: `Share ${a} ${label} you own with a group, without changing its visibility.`,

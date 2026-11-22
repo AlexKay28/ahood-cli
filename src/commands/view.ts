@@ -13,6 +13,15 @@ const USAGE = "Usage: ahood skill view <owner>/<skill> [--json] [--web]";
 // present (resolveSkillByOwnerSlug's base column set), the rest is the
 // route's explicit selectColumns list plus the owner/is_starred fields it
 // adds after the query.
+export type SkillStats = {
+  views: number;
+  reads: number;
+  downloads: number;
+  stars: number;
+  upvotes: number;
+  downvotes: number;
+};
+
 type SkillDetail = {
   slug: string;
   name: string;
@@ -29,6 +38,9 @@ type SkillDetail = {
   owner: string;
   kind?: string;
   is_starred: boolean | null;
+  // ahood#1640: both optional -- an older registry sends neither.
+  stats?: SkillStats;
+  my_vote?: 1 | -1 | null;
   skill_versions: {
     version: string;
     checksum_sha256: string;
@@ -54,8 +66,16 @@ function openBrowser(url: string): void {
   }
 }
 
+// ahood#1640: tells the registry this GET is an inspection, so it counts as a
+// view. Without the header a GET records nothing.
 export async function viewSkill(owner: string, skill: string): Promise<SkillDetail> {
-  return apiJson<SkillDetail>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`);
+  return apiJson<SkillDetail>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`, {
+    headers: { "X-Ahood-Usage": "view" },
+  });
+}
+
+export function formatStats(stats: SkillStats): string {
+  return `views ${stats.views} · reads ${stats.reads} · installs ${stats.downloads} · stars ${stats.stars} · ▲${stats.upvotes} ▼${stats.downvotes}`;
 }
 
 export async function view(args: string[], scope?: KindScope): Promise<void> {
@@ -108,5 +128,7 @@ export async function view(args: string[], scope?: KindScope): Promise<void> {
   field("created:", detail.created_at);
   field("updated:", detail.updated_at);
   if (detail.is_starred !== null) field("starred:", detail.is_starred ? "yes" : "no");
+  if (detail.stats) field("usage:", formatStats(detail.stats));
+  if (detail.my_vote === 1 || detail.my_vote === -1) field("your vote:", detail.my_vote === 1 ? "up" : "down");
   console.log(url);
 }

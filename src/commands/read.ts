@@ -4,7 +4,8 @@ import { buildProvenanceHeader, type ProvenanceHeaderMeta } from "../provenance-
 import { parseOwnerSkill } from "../spec.js";
 import { sanitizeDocumentForTerminal, sanitizeForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
-import { ensureRemoteKind, type KindScope } from "../kinds.js";
+import { ensureRemoteKind, strictKind, type KindScope } from "../kinds.js";
+import { printRateHint } from "../rate-hint.js";
 
 const USAGE = "Usage: ahood skill read <owner>/<skill> [--json]";
 
@@ -46,6 +47,8 @@ export type ReadSkillMdResult = {
 export async function readSkillMd(owner: string, skill: string): Promise<ReadSkillMdResult> {
   const detail = await apiJson<SkillReadDetail>(
     `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`,
+    // ahood#1640: this GET is consuming the content, so it counts as a read.
+    { headers: { "X-Ahood-Usage": "read" } },
   );
 
   if (!detail.skill_versions) {
@@ -142,6 +145,7 @@ export async function read(args: string[], scope?: KindScope): Promise<void> {
   // the same single safety net as everything else this command prints).
   if (process.stdout.isTTY) {
     process.stdout.write(sanitizeDocumentForTerminal(buildProvenanceHeader(content, provenance)));
+    printRateHint(strictKind(scope) ?? "skill", owner, skill);
     return;
   }
 

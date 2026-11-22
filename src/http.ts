@@ -76,6 +76,11 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   // the CLI included, not just the three plugins (update-notifier.ts / the
   // plugin templates send their own `<surface>/<version>` for those).
   headers.set("X-Ahood-Client", `cli/${CLI_VERSION}`);
+  // ahood#1640: opt-in only. The registry classifies a vote as coming from an
+  // agent when this header is 1. There is deliberately no detection heuristic
+  // here (no TTY sniffing, no CI/agent-env guessing): whoever runs the CLI
+  // from an agent says so with AHOOD_AGENT=1.
+  if (process.env.AHOOD_AGENT === "1") headers.set("X-Ahood-Agent", "1");
   try {
     return await fetch(`${getApiUrl()}${path}`, {
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),

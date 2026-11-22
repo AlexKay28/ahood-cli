@@ -212,6 +212,29 @@ describe("add", () => {
     });
   });
 
+  // ahood#1640: a completed install on a terminal ends with one dim line
+  // pointing at `vote`; piped output never gets it.
+  it("prints the rate-it hint after a successful install on a TTY, and not when piped (ahood#1640)", async () => {
+    const archive = await tarGz({ "SKILL.md": "# demo\n" });
+    const originalIsTTY = process.stdout.isTTY;
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      stubApi(archive, sha256(archive));
+      process.stdout.isTTY = false;
+      await add([`${OWNER}/${SKILL}`]);
+      expect(errSpy).not.toHaveBeenCalled();
+
+      stubApi(archive, sha256(archive));
+      process.stdout.isTTY = true;
+      await add([`${OWNER}/${SKILL}`]);
+      const hint = errSpy.mock.calls.map((c) => String(c[0])).find((l) => l.includes("Rate it after use"));
+      expect(hint).toContain(`ahood skill vote ${OWNER}/${SKILL} up|down`);
+    } finally {
+      process.stdout.isTTY = originalIsTTY;
+      errSpy.mockRestore();
+    }
+  });
+
   // ahood#1569: `ahood skill add` and `ahood skill read` must stamp the exact
   // same title -- both go through provenanceMetaFor, fed from the same
   // GET /api/v1/skills/{owner}/{skill} response, so a registry `name` that

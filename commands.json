@@ -327,6 +327,21 @@
           "desc": "Remove your star from a skill."
         },
         {
+          "usage": "ahood skill vote <owner>/<skill> up|down [--note <text>] [--version <x.y.z>] [--json]",
+          "summary": "Vote a skill up or down after using it, or clear your vote with --clear.",
+          "desc": "Rate a skill you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. You can vote only after installing or reading it (or starring it), and not on your own artifacts. One vote per account; voting again changes it. `ahood skill vote <owner>/<skill> --clear` removes your vote. Needs a token with the publish scope. Set AHOOD_AGENT=1 when an agent runs the CLI so the vote is recorded as an agent's.",
+          "flags": [
+            "--note <text>       Why (max 500 characters); only the artifact's owner sees it.",
+            "--version <x.y.z>   The version you evaluated (default: the latest).",
+            "--clear             Remove your vote instead of casting one.",
+            "--json              Emit {value, upvotes, downvotes}."
+          ],
+          "examples": [
+            "ahood skill vote alice/pdf-tools up --note \"merged 40 PDFs without errors\"",
+            "ahood skill vote alice/pdf-tools --clear"
+          ]
+        },
+        {
           "usage": "ahood skill share <owner>/<skill> --group <group>",
           "summary": "Share a skill you own with a group, without changing its public/private visibility.",
           "desc": "Share a skill you own with a group. Sharing is additive -- it doesn't change the skill's own public/private visibility, it just makes it visible to everyone in the group too. You must own the skill and already be a member of the target group.",
@@ -509,6 +524,17 @@
           "desc": "Remove your star from an agent. Refused, before anything else happens, when the target is not an agent."
         },
         {
+          "usage": "ahood agent vote <owner>/<agent> up|down [--note <text>] [--version <x.y.z>] [--json]",
+          "summary": "Vote an agent up or down after using it, or clear your vote with --clear.",
+          "desc": "Rate an agent you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. Only after installing or reading it, and never on your own. `ahood agent vote <owner>/<agent> --clear` removes your vote. Refused, before anything else happens, when the target is not an agent.",
+          "flags": [
+            "--note <text>       Why (max 500 characters); only the owner sees it.",
+            "--version <x.y.z>   The version you evaluated (default: the latest).",
+            "--clear             Remove your vote instead of casting one.",
+            "--json              Emit {value, upvotes, downvotes}."
+          ]
+        },
+        {
           "usage": "ahood agent share <owner>/<agent> --group <group>",
           "summary": "Share an agent you own with a group, without changing its visibility.",
           "desc": "Share an agent you own with a group you belong to. Refused, before anything else happens, when the target is not an agent.",
@@ -678,6 +704,17 @@
           "desc": "Remove your star from an MCP server manifest. Refused, before anything else happens, when the target is not an MCP server manifest."
         },
         {
+          "usage": "ahood mcp vote <owner>/<server> up|down [--note <text>] [--version <x.y.z>] [--json]",
+          "summary": "Vote an MCP server manifest up or down after using it, or clear your vote with --clear.",
+          "desc": "Rate an MCP server manifest you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. Only after installing or reading it, and never on your own. `ahood mcp vote <owner>/<server> --clear` removes your vote. Refused, before anything else happens, when the target is not an MCP server manifest.",
+          "flags": [
+            "--note <text>       Why (max 500 characters); only the owner sees it.",
+            "--version <x.y.z>   The version you evaluated (default: the latest).",
+            "--clear             Remove your vote instead of casting one.",
+            "--json              Emit {value, upvotes, downvotes}."
+          ]
+        },
+        {
           "usage": "ahood mcp share <owner>/<server> --group <group>",
           "summary": "Share an MCP server manifest you own with a group, without changing its visibility.",
           "desc": "Share an MCP server manifest you own with a group you belong to. Refused, before anything else happens, when the target is not an MCP server manifest.",
@@ -845,6 +882,17 @@
           "usage": "ahood doc unstar <owner>/<doc>",
           "summary": "Remove your star from a doc.",
           "desc": "Remove your star from a doc. Refused, before anything else happens, when the target is not a doc."
+        },
+        {
+          "usage": "ahood doc vote <owner>/<doc> up|down [--note <text>] [--version <x.y.z>] [--json]",
+          "summary": "Vote a doc up or down after using it, or clear your vote with --clear.",
+          "desc": "Rate a doc you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. Only after installing or reading it, and never on your own. `ahood doc vote <owner>/<doc> --clear` removes your vote. Refused, before anything else happens, when the target is not a doc.",
+          "flags": [
+            "--note <text>       Why (max 500 characters); only the owner sees it.",
+            "--version <x.y.z>   The version you evaluated (default: the latest).",
+            "--clear             Remove your vote instead of casting one.",
+            "--json              Emit {value, upvotes, downvotes}."
+          ]
         },
         {
           "usage": "ahood doc share <owner>/<doc> --group <group>",
@@ -1029,6 +1077,17 @@
           "desc": "Remove your star from a project guide. Refused, before anything else happens, when the target is not a project guide."
         },
         {
+          "usage": "ahood project vote <owner>/<slug> up|down [--note <text>] [--version <x.y.z>] [--json]",
+          "summary": "Vote a project guide up or down after using it, or clear your vote with --clear.",
+          "desc": "Rate a project guide you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. Only after installing or reading it, and never on your own. `ahood project vote <owner>/<slug> --clear` removes your vote. Refused, before anything else happens, when the target is not a project guide.",
+          "flags": [
+            "--note <text>       Why (max 500 characters); only the owner sees it.",
+            "--version <x.y.z>   The version you evaluated (default: the latest).",
+            "--clear             Remove your vote instead of casting one.",
+            "--json              Emit {value, upvotes, downvotes}."
+          ]
+        },
+        {
           "usage": "ahood project share <owner>/<slug> --group <group>",
           "summary": "Share a project guide you own with a group, without changing its visibility.",
           "desc": "Share a project guide you own with a group you belong to. Refused, before anything else happens, when the target is not a project guide.",
@@ -1202,6 +1261,17 @@
           "desc": "Remove your star from a loop. Refused, before anything else happens, when the target is not a loop."
         },
         {
+          "usage": "ahood loop vote <owner>/<loop> up|down [--note <text>] [--version <x.y.z>] [--json]",
+          "summary": "Vote a loop up or down after using it, or clear your vote with --clear.",
+          "desc": "Rate a loop you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. Only after installing or reading it, and never on your own. `ahood loop vote <owner>/<loop> --clear` removes your vote. Refused, before anything else happens, when the target is not a loop.",
+          "flags": [
+            "--note <text>       Why (max 500 characters); only the owner sees it.",
+            "--version <x.y.z>   The version you evaluated (default: the latest).",
+            "--clear             Remove your vote instead of casting one.",
+            "--json              Emit {value, upvotes, downvotes}."
+          ]
+        },
+        {
           "usage": "ahood loop share <owner>/<loop> --group <group>",
           "summary": "Share a loop you own with a group, without changing its visibility.",
           "desc": "Share a loop you own with a group you belong to. Refused, before anything else happens, when the target is not a loop.",
@@ -1352,6 +1422,17 @@
           "usage": "ahood prompt unstar <owner>/<prompt>",
           "summary": "Remove your star from a prompt.",
           "desc": "Remove your star from a prompt. Refused, before anything else happens, when the target is not a prompt."
+        },
+        {
+          "usage": "ahood prompt vote <owner>/<prompt> up|down [--note <text>] [--version <x.y.z>] [--json]",
+          "summary": "Vote a prompt up or down after using it, or clear your vote with --clear.",
+          "desc": "Rate a prompt you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. Only after installing or reading it, and never on your own. `ahood prompt vote <owner>/<prompt> --clear` removes your vote. Refused, before anything else happens, when the target is not a prompt.",
+          "flags": [
+            "--note <text>       Why (max 500 characters); only the owner sees it.",
+            "--version <x.y.z>   The version you evaluated (default: the latest).",
+            "--clear             Remove your vote instead of casting one.",
+            "--json              Emit {value, upvotes, downvotes}."
+          ]
         },
         {
           "usage": "ahood prompt share <owner>/<prompt> --group <group>",

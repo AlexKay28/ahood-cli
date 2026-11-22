@@ -9,6 +9,16 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 `preversion` hook (and the release workflow) refuse a version without one
 (`scripts/check-changelog.mjs`).
 
+## Unreleased
+
+- New `ahood <kind> vote <owner/slug> up|down [--note "..."] [--version x.y.z]` (and `--clear`) rates an
+  artifact you have used, for every kind. `ahood view` shows its usage stats (views, reads, installs,
+  stars, votes) and your own vote. `view` and `read` now tell the registry which one they are, so
+  they are counted. After `add` or `read` in a terminal, a dim line reminds you to rate it.
+- `AHOOD_AGENT=1` marks the CLI's requests as coming from an agent, so votes are recorded as an
+  agent's. Nothing is detected automatically.
+- The `using-ahood` skill now tells agents to vote, with a concrete note, after actually using an artifact.
+
 ## 0.22.0 (2026-11-21)
 
 - A first-time user without an ahood account now hears that a command needs a free account
