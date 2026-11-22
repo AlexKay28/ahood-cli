@@ -19,7 +19,7 @@ function tally(r: VoteResponse): string {
 
 // POST/DELETE /api/v1/skills/{owner}/{skill}/vote. A vote is one live row per
 // account: voting again flips or replaces it, --clear deletes it. The server
-// gates voting on use (a download, a read or a star) and refuses your own
+// gates voting on use (a download or a read) and refuses your own
 // artifacts; both come back as 403 with a `code`, which is turned into advice
 // here rather than shown as the bare server sentence.
 export async function vote(args: string[], scope?: KindScope): Promise<void> {
