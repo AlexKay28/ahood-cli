@@ -34,7 +34,7 @@ const USAGE = "Usage: ahood skill search <query> [--json] [--limit <n>]";
 
 // `kind` narrows the search server-side (GET /api/v1/skills?kind=, which the
 // backend validates against its ALLOWED_KINDS). Omitted -- the legacy
-// `ahood skill search` and the MCP skill_search tool -- the request is
+// `ahood skill search` -- the request is
 // byte-for-byte what it always was: every kind. `ahood find` (ahood#1019) is
 // the other caller: it may send no query at all (a plain browse, e.g. by
 // downloads) and a `sort`; `q` is left out only when the query is empty,
