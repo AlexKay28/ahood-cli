@@ -13,6 +13,7 @@ import { edit } from "./commands/edit.js";
 import { unpublish } from "./commands/unpublish.js";
 import { listSkills } from "./commands/list.js";
 import { star, unstar } from "./commands/star.js";
+import { vote } from "./commands/vote.js";
 import { share, unshare } from "./commands/share.js";
 import { view } from "./commands/view.js";
 import { read } from "./commands/read.js";
@@ -90,6 +91,7 @@ const SKILL_COMMANDS: Record<string, RegistryHandler> = {
   unpublish,
   star,
   unstar,
+  vote,
   share,
   unshare,
   init,

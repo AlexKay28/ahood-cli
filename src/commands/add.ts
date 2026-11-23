@@ -19,6 +19,7 @@ import { recordInstallOrWarn } from "../installed.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
 import { assertCanonicalEntryPaths, tarEntryPath } from "../archive-entries.js";
 import { UsageError } from "../usage-error.js";
+import { printRateHint } from "../rate-hint.js";
 import { assertKind, describeKind, isPinnedFileKind, KINDS, strictKind, type CliKind, type KindScope, type PinnedFileKind } from "../kinds.js";
 import { buildProvenanceHeader, type ProvenanceHeaderMeta } from "../provenance-header.js";
 
@@ -1204,6 +1205,13 @@ function assertPinnedFileIsOurs(kind: PinnedFileKind, owner: string, skill: stri
 }
 
 export async function add(args: string[], scope?: KindScope): Promise<void> {
+  await addArtifact(args, scope);
+  // ahood#1640: reached only after a completed install (every failure throws).
+  const { owner, skill } = parseOwnerSkillVersion(args[0] ?? "", USAGE);
+  printRateHint(strictKind(scope) ?? "skill", owner, skill);
+}
+
+async function addArtifact(args: string[], scope?: KindScope): Promise<void> {
   const spec = args[0];
   if (!spec) throw new UsageError(USAGE);
   const { owner, skill, version: requestedVersion } = parseOwnerSkillVersion(spec, USAGE);
