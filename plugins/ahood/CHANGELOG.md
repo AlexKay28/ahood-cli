@@ -9,7 +9,7 @@ Releasing: add the `## <version>` section here and commit it **before** `npm ver
 `preversion` hook (and the release workflow) refuse a version without one
 (`scripts/check-changelog.mjs`).
 
-## Unreleased
+## 0.23.0 (2026-11-23)
 
 - New `ahood <kind> vote <owner/slug> up|down [--note "..."] [--version x.y.z]` (and `--clear`) rates an
   artifact you have used, for every kind. `ahood view` shows its usage stats (views, reads, installs,
