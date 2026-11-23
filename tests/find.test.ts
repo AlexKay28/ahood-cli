@@ -98,4 +98,11 @@ describe("ahood find", () => {
     await search(["paddle"]);
     expect(String(fetchMock.mock.calls[0][0])).toBe(`${API_URL}/api/v1/skills?q=paddle`);
   });
+
+  it("shows the closest weak matches under a header when nothing is strong (ahood#1649)", async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ skills: [], closest: [ROWS[0]] }), { status: 200 }));
+    await find(["paddle"]);
+    expect(out[0]).toBe('No strong match for "paddle" \u2014 closest:');
+    expect(out[1]).toContain("alice/paddle-webhooks");
+  });
 });

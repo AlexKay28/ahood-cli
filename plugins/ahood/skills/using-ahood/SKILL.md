@@ -26,6 +26,8 @@ plugin's release, so no global install is needed.
   one with `get_skill` or `fetch_skill`, its history with `list_skill_versions`. From the CLI:
   `ahood find "<query>" --kind skill --limit 5 --json` searches any kind with stars and downloads
   (`ahood find --sort downloads --kind mcp` lists the most installed, no query needed).
+  When `skills` is empty, nothing relevant was found: `closest` lists weak matches to show the
+  user, never to install unasked.
 - To use an artifact once without installing it: `ahood try <owner>/<slug>` prints it (an alias
   of `ahood skill read` that works for any kind).
 - Install with the CLI so the install is recorded and pinned: `ahood skill add <owner>/<slug>`
