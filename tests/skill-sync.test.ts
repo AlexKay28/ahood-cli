@@ -79,7 +79,7 @@ describe("renderPluginSkill()", () => {
 
 describe("search confidence guidance (ahood#1649)", () => {
   it("the self-skill and its generated copies tell agents what an empty skills list means", () => {
-    const sentence = "When `skills` is empty, nothing relevant was found";
+    const sentence = "an empty `skills` means nothing relevant was found";
     expect(canonicalBody()).toContain(sentence);
     for (const { path } of targets()) expect(readFileSync(join(ROOT, path), "utf8").replace(/\s+/g, " ")).toContain(sentence);
   });
