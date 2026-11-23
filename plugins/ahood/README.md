@@ -53,7 +53,7 @@ secrets: `.mcp.json` names the `AHOOD_TOKEN` variable, never a token.
 | `/ahood-project` | `ahood project --json`: this repository's project guide from ahood, or an offer to write and publish one |
 | `/ahood-star <owner/slug>` | Stars it with `ahood skill star` after your yes |
 | `/ahood-publish` | Finds the artifact in this directory by its root file, shows the diff against the published version, and runs `ahood skill publish` only after your yes |
-| `/ahood-stats` | `ahood stats --json`: your artifacts' downloads and stars, totals, recent activity and evolution counts |
+| `/ahood-stats` | `ahood stats --json`: your artifacts' downloads, stars, views, reads and votes, totals, recent activity and evolution counts |
 | `/ahood-sync` | `ahood sync --dry-run`, a diff per update, then `ahood sync <owner>/<slug> --yes` only for the updates you approve in chat |
 | `/ahood-review` | `ahood review --json`, each proposal with its unified diff and evidence, then `ahood review approve\|reject <id>` only on your decision |
 | `/ahood-snap` | Drafts a structured, private snap of the session, shows it, and runs `ahood snap create ...` only if you say yes |

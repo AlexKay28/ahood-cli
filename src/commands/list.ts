@@ -19,6 +19,11 @@ type OwnSkill = {
   kind?: string;
   downloads_count: number;
   stars_count: number;
+  // ahood#1658, additive: absent on a registry that predates them.
+  views_count?: number;
+  reads_count?: number;
+  upvotes_count?: number;
+  downvotes_count?: number;
   profiles: { username: string } | null;
 };
 

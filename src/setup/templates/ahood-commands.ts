@@ -209,8 +209,9 @@ const AHOOD_VERB_COMMANDS: AhoodCommand[] = [
       "",
       "1. Say what will happen: \"This stars <owner/slug> on ahood under your account.\" Ask for an explicit yes.",
       "2. On yes, run " + ahoodCli("skill star <owner/slug>") + ". To undo it later: " + ahoodCli("skill unstar <owner/slug>") + ".",
-      "3. If the user also wants to leave a note: ahood has no public feedback field yet, so offer `/ahood-snap` with " +
-        "`--artifact <owner/slug>` (private to the user).",
+      "3. If the user also wants to leave a note: to send the ahood team a note, offer " +
+        ahoodCli('feedback "<message>" --artifact <owner/slug>') + " (only on the user's explicit yes; never include secrets). " +
+        "For a private note to themselves, offer `/ahood-snap` with `--artifact <owner/slug>`.",
       "",
       CLI_NOTE,
     ].join("\n"),

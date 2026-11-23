@@ -9,7 +9,10 @@ const API_URL = "http://ahood.test";
 
 const MINE = [
   { slug: "small", name: "Small", tagline: null, visibility: "private", kind: "loop", downloads_count: 2, stars_count: 0, profiles: { username: "me" } },
-  { slug: "big", name: "Big", tagline: null, visibility: "public", kind: "skill", downloads_count: 40, stars_count: 5, profiles: { username: "me" } },
+  {
+    slug: "big", name: "Big", tagline: null, visibility: "public", kind: "skill", downloads_count: 40, stars_count: 5,
+    views_count: 100, reads_count: 30, upvotes_count: 7, downvotes_count: 2, profiles: { username: "me" },
+  },
 ];
 const ACTIVITY = {
   entries: [{ id: 1, createdAt: "2026-10-30T09:00:00.000Z", text: "Published me/big 1.2.0\u001b]0;x\u0007", href: "/me/big", category: "publish" }],
@@ -62,10 +65,11 @@ describe("ahood stats", () => {
     expect(paths.some((p) => p.includes("/enhancements/analytics"))).toBe(false);
     expect(JSON.parse(out[0])).toEqual({
       owner: "me",
-      totals: { artifacts: 2, downloads: 42, stars: 5 },
+      totals: { artifacts: 2, downloads: 42, stars: 5, views: 100, reads: 30, upvotes: 7, downvotes: 2, net_score: 5 },
       artifacts: [
-        { ref: "me/big", kind: "skill", visibility: "public", downloads: 40, stars: 5 },
-        { ref: "me/small", kind: "loop", visibility: "private", downloads: 2, stars: 0 },
+        { ref: "me/big", kind: "skill", visibility: "public", downloads: 40, stars: 5, views: 100, reads: 30, upvotes: 7, downvotes: 2, net_score: 5 },
+        // A row without the #1658 counts (older registry) reads as zeros.
+        { ref: "me/small", kind: "loop", visibility: "private", downloads: 2, stars: 0, views: 0, reads: 0, upvotes: 0, downvotes: 0, net_score: 0 },
       ],
       activity: ACTIVITY.entries,
       evolution: { evolving_count: 1, candidates_waiting: 2 },
@@ -77,7 +81,8 @@ describe("ahood stats", () => {
     await stats([]);
     const text = out.join("\n");
     expect(text).toContain("me: 2 artifact(s), 42 downloads, 5 stars");
-    expect(text).toContain("  me/big  [skill, public]  40 downloads, 5 stars");
+    expect(text).toContain("  me/big  [skill, public]  40 downloads, 5 stars, 100 views, 30 reads, +7/-2 (net 5)");
+    expect(text).toContain("100 views, 30 reads, 7 upvotes, 2 downvotes, net score 5");
     expect(text).toContain("  2026-10-30  Published me/big 1.2.0 ]0;x ");
     expect(text).not.toContain("\u001b");
     expect(text).toContain("Self-evolution: 1 artifact(s) evolving, 2 proposal(s) waiting for review (`ahood review`).");
