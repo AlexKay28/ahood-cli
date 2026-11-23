@@ -1,13 +1,14 @@
 // `ahood find` (ahood#1019): discovery across every kind, the front door the
 // /ahood-find and /ahood-trending commands call. Not a second search: the
-// request is search.ts's searchSkills (GET /api/v1/skills), with the kind and
+// request is search.ts's searchSkillsDetailed (via searchSkillsWithWebFallback;
+// GET /api/v1/skills), with the kind and
 // sort the browse route already honours; this file only parses flags and
 // prints one line per result with the fields a chooser needs.
 import { flagValue, unrecognizedArgs } from "../flags.js";
 import { CLI_KINDS, isCliKind, KINDS, type CliKind } from "../kinds.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
-import { SEARCH_SORTS, searchSkillsWithWebFallback, type SearchRow, type SearchSort } from "./search.js";
+import { noStrongMatchHeader, SEARCH_SORTS, searchSkillsWithWebFallback, type SearchRow, type SearchSort } from "./search.js";
 
 const USAGE = `Usage: ahood find [<query>] [--kind ${CLI_KINDS.join("|")}] [--sort ${SEARCH_SORTS.join("|")}] [--limit <n>] [--json]`;
 
@@ -73,10 +74,19 @@ export async function find(args: string[]): Promise<void> {
   // order -- allowed, but only when asked for by a sort or a kind.
   if (query === "" && kind === undefined && sort === undefined) throw new UsageError(USAGE);
 
-  const results = (await searchSkillsWithWebFallback(query, args.includes("--json"), limit, kind, sort)).map(toFindResult);
+  const outcome = await searchSkillsWithWebFallback(query, args.includes("--json"), limit, kind, sort);
+  const results = outcome.skills.map(toFindResult);
 
   if (args.includes("--json")) {
     console.log(JSON.stringify(results));
+    return;
+  }
+  if (results.length === 0 && outcome.closest.length > 0) {
+    // ahood#1649: nothing strong -- show the weak matches, never as results.
+    console.log(noStrongMatchHeader(query));
+    for (const r of outcome.closest.map(toFindResult)) console.log(formatLine(r));
+    console.log("");
+    console.log("Read one without installing: `ahood try <owner>/<slug>`.");
     return;
   }
   if (results.length === 0) {

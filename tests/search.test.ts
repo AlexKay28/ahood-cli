@@ -126,4 +126,39 @@ describe("search", () => {
 
     expect(logSpy).toHaveBeenCalledWith("(unknown)/demo - Demo (3 downloads)");
   });
+
+  describe("closest (ahood#1649)", () => {
+    const row = (slug: string) => ({ slug, name: slug.toUpperCase(), tagline: null, downloads_count: 1, profiles: { username: "u" } });
+    const run = async (body: unknown, args: string[]) => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })));
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      await search(args);
+      return logSpy.mock.calls.map((c) => String(c[0]));
+    };
+
+    it("prints the no-strong-match header then the closest rows when skills is empty", async () => {
+      const lines = await run({ skills: [], closest: [row("a"), row("b")] }, ["foo"]);
+      expect(lines).toEqual(['No strong match for "foo" \u2014 closest:', "u/a - A (1 downloads)", "u/b - B (1 downloads)"]);
+    });
+
+    it("ignores closest when strong matches exist", async () => {
+      const lines = await run({ skills: [row("x")], closest: [row("y")] }, ["foo"]);
+      expect(lines).toEqual(["u/x - X (1 downloads)"]);
+    });
+
+    it("an old server with no closest key still says No skills found.", async () => {
+      expect(await run({ skills: [] }, ["foo"])).toEqual(["No skills found."]);
+    });
+
+    it("--json prints only the skills array", async () => {
+      const lines = await run({ skills: [row("x")], closest: [row("y")] }, ["foo", "--json"]);
+      expect(JSON.parse(lines[0])).toEqual([row("x")]);
+    });
+
+    it("searchSkillsDetailed returns closest, defaulting to []", async () => {
+      const { searchSkillsDetailed } = await import("../src/commands/search.js");
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ skills: [] }), { status: 200 })));
+      expect(await searchSkillsDetailed("foo")).toEqual({ skills: [], closest: [] });
+    });
+  });
 });

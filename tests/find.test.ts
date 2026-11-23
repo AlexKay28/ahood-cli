@@ -98,4 +98,29 @@ describe("ahood find", () => {
     await search(["paddle"]);
     expect(String(fetchMock.mock.calls[0][0])).toBe(`${API_URL}/api/v1/skills?q=paddle`);
   });
+
+  it("shows the closest weak matches under a header when nothing is strong (ahood#1649)", async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ skills: [], closest: [ROWS[0]] }), { status: 200 }));
+    await find(["paddle"]);
+    expect(out[0]).toBe('No strong match for "paddle" \u2014 closest:');
+    expect(out[1]).toContain("alice/paddle-webhooks");
+    expect(out.at(-1)).toBe("Read one without installing: `ahood try <owner>/<slug>`.");
+    expect(out.join("\n")).not.toContain("Install:");
+  });
+
+  it("--json prints only the strong results when closest is present (ahood#1649)", async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ skills: [ROWS[0]], closest: [ROWS[1]] }), { status: 200 }));
+    await find(["paddle", "--json"]);
+    const parsed = JSON.parse(out[0]);
+    expect(parsed.map((r: { slug: string }) => r.slug)).toEqual(["paddle-webhooks"]);
+  });
+
+  it("ignores closest when strong rows exist (ahood#1649)", async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ skills: [ROWS[0]], closest: [ROWS[1]] }), { status: 200 }));
+    await find(["paddle"]);
+    const text = out.join("\n");
+    expect(text).toContain("alice/paddle-webhooks");
+    expect(text).not.toContain("orphan");
+    expect(text).not.toContain("No strong match");
+  });
 });
