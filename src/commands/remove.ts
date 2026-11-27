@@ -7,7 +7,7 @@ import {
   SKILLS_ROOT, AGENTS_ROOT, DOCS_ROOT, LOOPS_ROOT,
 } from "../spec.js";
 import { readMcpConfig, matchesMcpConfigHash } from "./add.js";
-import { UsageError } from "../usage-error.js";
+import { parseArgs, YES_FLAGS } from "../flags.js";
 import { forgetInstallOrWarn } from "../installed.js";
 import {
   assertKind,
@@ -61,10 +61,11 @@ function removeIfEmptyKindRoot(path: string): void {
 }
 
 export async function remove(args: string[], scope?: KindScope): Promise<void> {
-  const spec = args[0];
-  if (!spec) throw new UsageError(USAGE);
-  const yes = args.includes("--yes");
-  const { owner, skill } = parseOwnerSkill(spec, USAGE);
+  // Any order (ahood-cli#260): `remove --yes a/b` used to exit 2 -- it read
+  // args[0] as the spec -- while `unpublish --yes a/b` went through.
+  const parsed = parseArgs(args, { usage: USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
+  const yes = parsed.has(...YES_FLAGS);
+  const { owner, skill } = parseOwnerSkill(parsed.positionals[0], USAGE);
   const key = `${owner}/${skill}`;
 
   // Flat owner@skill directory (see skillDir's comment in spec.ts) -- no

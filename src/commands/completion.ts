@@ -13,6 +13,7 @@ import {
   type CommandHelp,
 } from "../help.js";
 import { UsageError } from "../usage-error.js";
+import { parseArgs } from "../flags.js";
 
 const USAGE = "Usage: ahood completion <bash|zsh|fish>";
 
@@ -111,7 +112,7 @@ function fishCompletion(): string {
 // the primary way users discover the available subcommands without reading
 // docs, which this CLI otherwise has no mechanism for at all.
 export async function completion(args: string[]): Promise<void> {
-  const shell = args[0];
+  const shell = parseArgs(args, { usage: USAGE, min: 1, max: 1 }).positionals[0];
   switch (shell) {
     case "bash":
       console.log(bashCompletion());
