@@ -1,4 +1,5 @@
 import { ApiError, NetworkError } from "./http.js";
+import { NotInstalledError } from "./not-installed-error.js";
 import { UsageError } from "./usage-error.js";
 
 // A hung/black-holed connection throws undici's generic TypeError("fetch
@@ -14,6 +15,11 @@ export function exitCodeFor(error: unknown): number {
   // regardless of whether the check ran locally or round-tripped to the
   // server (ahood-cli#80).
   if (error instanceof UsageError) return 2;
+  // "Not found" is the same answer whether the registry or this machine was
+  // asked: a script that named something absent gets 5 either way, instead of
+  // the 0/1/2 the local case used to scatter across update/remove/pin
+  // (ahood-cli#255).
+  if (error instanceof NotInstalledError) return 5;
   if (error instanceof ApiError) {
     if (error.status === 401 || error.status === 403) return 4;
     if (error.status === 404) return 5;

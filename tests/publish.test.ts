@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { extract as tarExtract } from "tar-stream";
 import { publish } from "../src/commands/publish.js";
+import { exitCodeFor } from "../src/exit-code.js";
 import { buildProvenanceHeader } from "../src/provenance-header.js";
 
 const API_URL = "http://ahood.test";
@@ -455,10 +456,29 @@ describe("publish", () => {
       }),
     );
 
-    await expect(publish(["alice/demo@1.0.0", "--path", dir])).rejects.toThrow(
-      /doesn't exist yet -- pass --name/,
-    );
+    const error = await publish(["alice/demo@1.0.0", "--path", dir]).catch((e: unknown) => e);
+    expect((error as Error).message).toMatch(/doesn't exist yet -- pass --name/);
+    // A missing flag is exit 2, not the general 1 it used to be (ahood-cli#255).
+    expect(exitCodeFor(error)).toBe(2);
     expect(uploadCalled).not.toHaveBeenCalled();
+  });
+
+  it("exits 2 when the folder has no root doc, with or without --kind, before any request (ahood-cli#255)", async () => {
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`unexpected fetch: ${String(input)}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    writeFileSync(join(dir, "notes.txt"), "not a root doc");
+
+    const inferred = await publish(["alice/demo@1.0.0", "--path", dir]).catch((e: unknown) => e);
+    expect((inferred as Error).message).toMatch(/^No SKILL\.md.* found at /);
+    expect(exitCodeFor(inferred)).toBe(2);
+
+    const explicit = await publish(["alice/demo@1.0.0", "--path", dir, "--kind", "agent"]).catch((e: unknown) => e);
+    expect((explicit as Error).message).toMatch(/^No AGENT\.md found at /);
+    expect(exitCodeFor(explicit)).toBe(2);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("publishes an agent when the folder contains only AGENT.md, inferring --kind automatically", async () => {
@@ -610,7 +630,9 @@ describe("publish", () => {
     writeFileSync(join(dir, "SKILL.md"), "# demo");
     writeFileSync(join(dir, "AGENT.md"), "# demo agent");
     writeFileSync(join(dir, "server.json"), JSON.stringify({ name: "n", description: "d", remotes: [{ url: "https://x.test" }] }));
-    await expect(publish([`alice/demo@1.0.0`, "--path", dir])).rejects.toThrow(/Multiple root files found/);
+    const error = await publish([`alice/demo@1.0.0`, "--path", dir]).catch((e: unknown) => e);
+    expect((error as Error).message).toMatch(/Multiple root files found/);
+    expect(exitCodeFor(error)).toBe(2);
   });
 
   it("publishes successfully when --kind mcp is passed explicitly and server.json is present, even alongside SKILL.md", async () => {

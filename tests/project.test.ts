@@ -157,7 +157,8 @@ describe("ahood project (ahood-cli#185)", () => {
       mkdirSync(".claude");
       writeFileSync(PROJECT_GUIDE_PATH, "mine");
       fakeRegistry({});
-      await dispatchSkill(["remove", "alice/acme", "--yes"]);
+      // Not installed is a thrown, exit-5 refusal since ahood-cli#255.
+      await expect(dispatchSkill(["remove", "alice/acme", "--yes"])).rejects.toThrow(/was not installed/);
       expect(readFileSync(PROJECT_GUIDE_PATH, "utf8")).toBe("mine");
     });
 

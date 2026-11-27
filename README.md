@@ -618,8 +618,10 @@ Stable across releases, safe to branch on in a script:
 | `1` | General error |
 | `2` | Usage or validation error (bad arguments, or the server rejected the request as invalid) |
 | `4` | Authentication required or rejected (not logged in, or the token was refused) |
-| `5` | Not found |
+| `5` | Not found: the registry has no such artifact, or a command that acts on an install (`remove`, `pin`/`unpin`, `update <owner>/<skill>`) named one that is not installed here |
 | `6` | Network/transport error, or an upstream server (5xx) error |
+
+"Not installed" is `5` wherever a command is told to act on a named install: `ahood skill remove`, `ahood pin`/`ahood unpin`, and `ahood skill update <owner>/<skill>`. `update` still updates the other targets named alongside it; if one of those fails for another reason as well, the run exits `1`. A no-argument `update` never exits `5` -- it only ever considers what is installed.
 
 ## Compatibility
 

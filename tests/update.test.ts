@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -122,28 +122,50 @@ describe("update", () => {
     process.exitCode = 0;
   });
 
-  it("skips an explicitly-named skill that isn't installed, without calling add() or writing anything", async () => {
+  it("fails an explicitly-named skill that isn't installed with exit 5, without calling add() or writing anything (ahood-cli#255)", async () => {
     const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
       throw new Error(`unexpected fetch: ${String(input)}`);
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const lockfilePath = join(dir, ".claude", "skills.lock.json");
 
     await update(["alice/never-installed"]);
 
-    expect(warnSpy).toHaveBeenCalledWith("Skipping alice/never-installed: not currently installed.");
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/^alice\/never-installed is not installed -- nothing to update\./));
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(existsSync(join(dir, skillDir("alice", "never-installed")))).toBe(false);
     // No lockfile was ever written -- `update` on a target that was never
     // installed must not create one, let alone pin an entry into it.
     expect(existsSync(lockfilePath)).toBe(false);
-    expect(process.exitCode).not.toBe(1);
+    // Used to be 0: `update <typo>` read as a successful update of nothing.
+    expect(process.exitCode).toBe(5);
     process.exitCode = 0;
   });
 
-  it("updates only the explicitly-named skills that are installed, and skips the rest with a warning", async () => {
+  it("still skips, with exit 0, an entry that vanished from the lockfile during a no-args update (ahood-cli#255)", async () => {
+    // The implicit case nobody named: a key the lockfile listed whose entry
+    // is gone by the time the loop reaches it. A null value is the on-disk
+    // shape that reproduces it without a real concurrent `remove`.
+    mkdirSync(join(dir, ".claude"), { recursive: true });
+    writeFileSync(join(dir, ".claude", "skills.lock.json"), JSON.stringify({ "alice/vanished": null }));
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`unexpected fetch: ${String(input)}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await update([]);
+
+    expect(warnSpy).toHaveBeenCalledWith("Skipping alice/vanished: not currently installed.");
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("updates the explicitly-named skills that are installed, and still exits 5 for the one that isn't (ahood-cli#255)", async () => {
     const goodArchive = await tarGz({ "SKILL.md": "# good\n" });
     const goodChecksum = sha256(goodArchive);
 
@@ -169,13 +191,14 @@ describe("update", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     await update(["alice/good", "bob/never-installed"]);
 
+    // Not an abort: the installed one in the same batch is still updated.
     expect(readFileSync(join(dir, skillDir("alice", "good"), "SKILL.md"), "utf-8")).toBe(GOOD_V1_1);
-    expect(warnSpy).toHaveBeenCalledWith("Skipping bob/never-installed: not currently installed.");
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/^bob\/never-installed is not installed -- nothing to update\./));
     expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("bob/never-installed"))).toBe(false);
-    expect(process.exitCode).not.toBe(1);
+    expect(process.exitCode).toBe(5);
     process.exitCode = 0;
   });
 

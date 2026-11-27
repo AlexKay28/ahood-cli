@@ -409,7 +409,9 @@ async function createSkillForPublish(
   jsonOutput: boolean,
 ): Promise<CreateResponse> {
   if (!opts.name) {
-    throw new Error(
+    // A missing flag is a usage error (exit 2), not a general one: the fix is
+    // to change the command line (ahood-cli#255).
+    throw new UsageError(
       `${owner}/${skill} doesn't exist yet -- pass --name to create it as part of this publish (e.g. --name "My Skill").`,
     );
   }
@@ -530,24 +532,26 @@ async function updateExistingSkillMetadata(
 // its root doc. With none, exactly one root doc must be present; SKILL.md
 // alone returns undefined, the pre-kind behaviour (the server defaults to
 // skill). Inference: agent/mcp (ahood-cli#172), doc (#182), project (#185),
-// loop (ahood#858), prompt (#206).
+// loop (ahood#858), prompt (#206). Every refusal here is a UsageError: the
+// path argument (or --kind) points at the wrong thing, caught before any
+// request, which is exit 2 rather than the general 1 (ahood-cli#255).
 function resolvePublishKind(path: string, kind: CliKind | undefined, via: string): CliKind | undefined {
   if (kind !== undefined) {
     const rootDocPath = join(path, KINDS[kind].rootDoc);
     if (!existsSync(rootDocPath)) {
-      throw new Error(`No ${KINDS[kind].rootDoc} found at ${rootDocPath} -- ${via} must point at a folder containing ${KINDS[kind].rootDoc}.`);
+      throw new UsageError(`No ${KINDS[kind].rootDoc} found at ${rootDocPath} -- ${via} must point at a folder containing ${KINDS[kind].rootDoc}.`);
     }
     return kind;
   }
   const present = CLI_KINDS.filter((k) => existsSync(join(path, KINDS[k].rootDoc)));
   const rootDocs = CLI_KINDS.map((k) => KINDS[k].rootDoc);
   if (present.length > 1) {
-    throw new Error(
+    throw new UsageError(
       `Multiple root files found at ${path} (${present.map((k) => KINDS[k].rootDoc).join(", ")}) -- pass ${orList(CLI_KINDS.map((k) => `--kind ${k}`))} to disambiguate.`,
     );
   }
   if (present.length === 0) {
-    throw new Error(`No ${orList(rootDocs)} found at ${path} -- publish must point at a ${orList(CLI_KINDS)} folder's root.`);
+    throw new UsageError(`No ${orList(rootDocs)} found at ${path} -- publish must point at a ${orList(CLI_KINDS)} folder's root.`);
   }
   return present[0] === "skill" ? undefined : present[0];
 }

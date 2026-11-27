@@ -2,6 +2,8 @@ import { LOCKFILE_PATH, parseOwnerSkill } from "../spec.js";
 import { readLockfile } from "../lockfile.js";
 import { add, fetchVersionMeta, readMcpConfig, updateMcpEntry } from "./add.js";
 import { UsageError } from "../usage-error.js";
+import { NotInstalledError } from "../not-installed-error.js";
+import { exitCodeFor } from "../exit-code.js";
 import { parseArgs } from "../flags.js";
 import { assertKind, isCliKind, isPinnedFileKind, KINDS, localInstalledKind, strictKind, type KindScope } from "../kinds.js";
 
@@ -190,15 +192,24 @@ export async function update(args: string[], scope?: KindScope): Promise<void> {
   }
 
   const failures: string[] = [];
+  const notInstalled: string[] = [];
   let inScope = 0;
   for (const ownerSlashSkill of skillKeys) {
     if (!lockfile[ownerSlashSkill]) {
-      // Reachable two ways: an explicitly-named skill that was never
-      // installed (`ahood skill add` is the right command for that -- `update`
-      // must not silently install and pin it), or -- when targets came from
-      // the lockfile itself -- the lockfile changing out from under us
-      // mid-loop. Either way: skip, don't abort.
-      console.warn(`Skipping ${ownerSlashSkill}: not currently installed.`);
+      // Reachable two ways. When targets came from the lockfile itself, the
+      // entry vanished out from under us mid-loop: nobody asked for it by
+      // name, so skip it quietly. When it was named on the command line it
+      // was never installed (`ahood skill add` is the right command for that
+      // -- `update` must not silently install and pin it), and that used to
+      // be the same quiet skip with exit 0, so `update <typo>` looked like a
+      // successful update of nothing (ahood-cli#255). Still not an abort:
+      // the rest of the batch updates, and the exit code reports it below.
+      if (implicit) {
+        console.warn(`Skipping ${ownerSlashSkill}: not currently installed.`);
+      } else {
+        console.error(`${ownerSlashSkill} is not installed -- nothing to update. Install it with \`ahood skill add ${ownerSlashSkill}\`.`);
+        notInstalled.push(ownerSlashSkill);
+      }
       continue;
     }
     try {
@@ -265,5 +276,11 @@ export async function update(args: string[], scope?: KindScope): Promise<void> {
   if (failures.length > 0) {
     console.error(`${failures.length} of ${skillKeys.length} skill(s) failed to update: ${failures.join(", ")}`);
     process.exitCode = 1;
+  } else if (notInstalled.length > 0) {
+    // Only when nothing else failed: a batch that also hit a real update
+    // failure keeps the general 1 above, since 5 would claim every problem
+    // was a not-installed name. Derived from exitCodeFor so this path can
+    // never drift from what remove/pin exit with (ahood-cli#255).
+    process.exitCode = exitCodeFor(new NotInstalledError());
   }
 }
