@@ -310,6 +310,8 @@ Yanked alice/pdf-tools@1.5.0. Existing lockfile pins still resolve; new installs
 export AHOOD_TOKEN=ahd_your_token_here
 ahood skill publish alice/pdf-tools@1.5.1 --path ./pdf-tools --json
 ```
+
+No prompt waits forever without a terminal. A confirmation (`remove`, `unpublish`, `token revoke`, ...) reads an answer piped on stdin, so `echo yes | ahood skill remove alice/pdf-tools` still works; if stdin is closed, or stays silent for 3 seconds, the command exits `2` and tells you to pass `--yes`. An MCP server's secret works the same way: export the variable it names. An optional one that is not set is skipped with a notice.
 </details>
 
 <details>

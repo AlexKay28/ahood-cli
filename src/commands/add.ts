@@ -14,7 +14,7 @@ import {
   LockfileChecksumConflictError,
   type LockEntry,
 } from "../lockfile.js";
-import { promptSecret } from "../secret-prompt.js";
+import { promptSecret, PromptUnansweredError } from "../secret-prompt.js";
 import { recordInstallOrWarn } from "../installed.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
 import { assertCanonicalEntryPaths, tarEntryPath } from "../archive-entries.js";
@@ -731,9 +731,29 @@ export async function resolveMcpServerConfig(
         `${sanitizeForTerminal(variable.name)} is required by ${sanitizeForTerminal(manifest.name)} but is not set, and there is no terminal to prompt on -- export ${sanitizeForTerminal(variable.name)} and re-run.`,
       );
     }
-    env[variable.name] = await promptSecret(
-      `${sanitizeForTerminal(variable.name)} (${sanitizeForTerminal(variable.description)}): `,
-    );
+    try {
+      env[variable.name] = await promptSecret(
+        `${sanitizeForTerminal(variable.name)} (${sanitizeForTerminal(variable.description)}): `,
+      );
+    } catch (error) {
+      // Nobody answered: stdin closed, or a pipe that stayed open and silent
+      // until the prompt gave up (ahood-cli#257).
+      if (!(error instanceof PromptUnansweredError)) throw error;
+      // "Prompt was not answered" alone leaves an unattended caller nothing
+      // to act on: the variable to export is the whole remedy, and only this
+      // loop knows its name. Exit 2, like the prompt's own error.
+      if (variable.is_required) {
+        throw new UsageError(
+          `${sanitizeForTerminal(variable.name)} is required by ${sanitizeForTerminal(manifest.name)} but is not set, and the prompt for it was not answered (${error.reason}) -- export ${sanitizeForTerminal(variable.name)} and re-run.`,
+        );
+      }
+      // Same name-only notice the update path prints (ahood-cli#126):
+      // aborting an unattended `add` over a value the manifest itself calls
+      // optional helped nobody.
+      console.warn(
+        `${sanitizeForTerminal(variable.name)} is optional and is not set -- installing ${sanitizeForTerminal(manifest.name)} without it.`,
+      );
+    }
   }
 
   const serverConfig = buildMcpServerConfig(manifest, env);
