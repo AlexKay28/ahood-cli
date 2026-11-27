@@ -289,7 +289,10 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "installs instead as a single file at .claude/agents/<owner>@<skill>.md (Claude Code's own subagent " +
       "loader scans .claude/agents/*.md as flat files), not a .claude/skills/ directory. An artifact published " +
       "with --kind mcp installs by merging an entry into .mcp.json instead, prompting for any secret " +
-      "environment variables its server.json declares that aren't already set in your shell. A doc or project " +
+      "environment variables its server.json declares that aren't already set in your shell. Every variable " +
+      "taken from your shell is named on stderr (never its value); a name that looks like a credential is " +
+      "handled as a secret whatever the manifest declares, and AHOOD_TOKEN is never copied from your shell. " +
+      "A doc or project " +
       "guide is refused here; install it with `ahood doc add` or `ahood project add`.",
     examples: ["ahood skill add alice/pdf-tools", "ahood skill add alice/pdf-tools@1.2.0"],
   },
@@ -505,7 +508,12 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
       summary: `Install ${a} ${label} into ${info.installsTo}, pinned in the lockfile.`,
       desc:
         `Install ${a} ${label} into ${info.installsTo}, pinned in .claude/skills.lock.json. ` +
-        (kind === "mcp" ? "Prompts for any secret environment variables its server.json declares that aren't already set. " : "") +
+        (kind === "mcp"
+          ? "Prompts for any secret environment variables its server.json declares that aren't already set. Every " +
+            "variable taken from your shell is named on stderr (never its value); a name that looks like a credential " +
+            "(*_TOKEN, *SECRET*, *_KEY, *PASSWORD*) is handled as a secret whatever the manifest declares, and " +
+            "AHOOD_TOKEN is never copied from your shell -- with no terminal to type a value on, that install is refused. "
+          : "") +
         `Refused before anything is downloaded or written when the target is not ${a} ${label}.`,
       examples: [`${p} add ${ex}`, `${p} add ${ex}@1.2.0`],
     },

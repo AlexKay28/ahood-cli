@@ -393,6 +393,101 @@ describe("mcp lifecycle: add -> update -> remove", () => {
     });
   });
 
+  // ahood-cli#259 on the update path: a new version can ADD a variable, and
+  // update re-resolves through the same code, unattended, for every pin.
+  it("refuses an update whose new version asks for AHOOD_TOKEN, leaving the working entry and the token untouched (ahood-cli#259)", async () => {
+    const output = await installV1ThenServeV2([
+      { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      { name: "AHOOD_TOKEN", description: "token", is_required: false, is_secret: false },
+    ]);
+    process.env.AHOOD_TOKEN = "ahood-registry-token-value";
+
+    try {
+      await update([]);
+    } finally {
+      delete process.env.AHOOD_TOKEN;
+    }
+
+    expect(output.join("\n")).toMatch(/AHOOD_TOKEN, which is ahood's own credential -- refusing to copy it/);
+    expect(output.join("\n")).not.toContain("ahood-registry-token-value");
+    expect(process.exitCode).toBe(1);
+    const raw = readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8");
+    expect(raw).not.toContain("ahood-registry-token-value");
+    expect(JSON.parse(raw).mcpServers[SKILL].args).toEqual(["-y", "@example/weather-mcp@1.0.0"]);
+  });
+
+  it("names every variable an update takes from the environment, never its value, and treats a credential-looking non-secret as a secret (ahood-cli#259)", async () => {
+    const output = await installV1ThenServeV2([
+      { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      { name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false },
+      { name: "GH_TOKEN", description: "GitHub token", is_required: false, is_secret: false },
+    ]);
+    process.env.WEATHER_REGION = "region-value-not-printed";
+    process.env.GH_TOKEN = "gh-value-not-printed";
+
+    try {
+      await update([]);
+    } finally {
+      delete process.env.WEATHER_REGION;
+      delete process.env.GH_TOKEN;
+    }
+
+    const joined = output.join("\n");
+    // WEATHER_API_KEY was carried forward from disk, not read from the shell.
+    expect(joined).toContain(`Read from your environment for ${MCP_CONFIG_PATH} (values not shown): WEATHER_REGION, GH_TOKEN`);
+    expect(joined).toMatch(/GH_TOKEN is declared non-secret by weather, but its name looks like a credential/);
+    expect(joined).not.toContain("region-value-not-printed");
+    expect(joined).not.toContain("gh-value-not-printed");
+    expect(JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).mcpServers[SKILL].env).toEqual({
+      WEATHER_API_KEY: "sk-live-lifecycle-secret",
+      WEATHER_REGION: "region-value-not-printed",
+      GH_TOKEN: "gh-value-not-printed",
+    });
+
+    // Being handled as a secret also means it is carried forward: a later
+    // unattended update without GH_TOKEN exported keeps the value instead of
+    // silently dropping it the way the non-secret path would.
+    writeFileSync(
+      join(dir, ".claude", "skills.lock.json"),
+      readFileSync(join(dir, ".claude", "skills.lock.json"), "utf-8").replace('"2.0.0"', '"1.9.0"'),
+    );
+    process.env.WEATHER_REGION = "region-value-not-printed";
+    try {
+      await update([]);
+    } finally {
+      delete process.env.WEATHER_REGION;
+    }
+    expect(output.filter((line) => line === `Updated ${OWNER}/${SKILL} to 2.0.0`)).toHaveLength(2);
+    expect(JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).mcpServers[SKILL].env.GH_TOKEN).toBe("gh-value-not-printed");
+  });
+
+  it("recreates a deleted .mcp.json at 0600 on a self-healing update that only took a non-secret from the environment (ahood-cli#259)", async () => {
+    await installV1ThenServeV2([{ name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false }]);
+    rmSync(join(dir, MCP_CONFIG_PATH));
+    process.env.WEATHER_REGION = "eu-west-1";
+    try {
+      await update([]);
+    } finally {
+      delete process.env.WEATHER_REGION;
+    }
+
+    expect(JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).mcpServers[SKILL].env).toEqual({ WEATHER_REGION: "eu-west-1" });
+    expect((statSync(join(dir, MCP_CONFIG_PATH)).mode & 0o777).toString(8)).toBe("600");
+  });
+
+  it("refuses an update whose new version declares an invalid env var name, leaving the working entry in place (ahood-cli#259)", async () => {
+    const output = await installV1ThenServeV2([
+      { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+      { name: "PATH=/tmp/evil", description: "d", is_required: false, is_secret: false },
+    ]);
+
+    await update([]);
+
+    expect(output.join("\n")).toMatch(/invalid name/);
+    expect(process.exitCode).toBe(1);
+    expect(JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).mcpServers[SKILL].args).toEqual(["-y", "@example/weather-mcp@1.0.0"]);
+  });
+
   // The env var stays ahead of the carried-forward value, so exporting it is
   // still the way to rotate a credential during an update.
   it("prefers an exported env var over the secret already on disk", async () => {

@@ -18,6 +18,8 @@ import {
 } from "../src/commands/add.js";
 import { LOCKFILE_PATH, agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { ApiError } from "../src/http.js";
+import { UsageError } from "../src/usage-error.js";
+import { exitCodeFor } from "../src/exit-code.js";
 import { writeLockfileEntry } from "../src/lockfile.js";
 import { buildProvenanceHeader } from "../src/provenance-header.js";
 
@@ -1319,27 +1321,176 @@ describe("add", () => {
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("chmod 600"));
   });
 
+  // An optional variable left unset, so nothing at all lands in `env`: since
+  // ahood-cli#259 a value read from the shell counts for the mode too (see
+  // the env-sourced block below), so "set in the shell" no longer shows this.
   it("leaves a brand-new .mcp.json at the umask default when no secret was written (ahood-cli#158)", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const archive = await tarGz({
       "server.json": mcpManifestWithEnvVars([
-        { name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false },
+        { name: "WEATHER_REGION", description: "Region", is_required: false, is_secret: false },
       ]),
     });
     stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
-    process.env.WEATHER_REGION = "eu-west-1";
+    delete process.env.WEATHER_REGION;
 
-    try {
-      await add([`${OWNER}/${SKILL}`]);
-    } finally {
-      delete process.env.WEATHER_REGION;
-    }
+    await add([`${OWNER}/${SKILL}`]);
 
     const reference = join(dir, "reference.json");
     writeFileSync(reference, "{}\n");
     expect(statSync(join(dir, MCP_CONFIG_PATH)).mode & 0o777).toBe(statSync(reference).mode & 0o777);
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("secret values in plaintext"));
     expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("chmod 600"));
+  });
+
+  // ahood-cli#259: an `is_secret: false` variable was copied from the shell
+  // into .mcp.json with no prompt, no notice and the umask's mode -- and the
+  // publisher picks the name, so a manifest only had to say AHOOD_TOKEN.
+  describe("values taken from the environment (ahood-cli#259)", () => {
+    const originalLegacyToken = process.env.AHOOD_API_TOKEN;
+    const originalStdinIsTTY = process.stdin.isTTY;
+    const SECRET_VALUE = "env-value-that-must-never-be-printed";
+    let output: string[];
+
+    beforeEach(() => {
+      output = [];
+      vi.spyOn(console, "log").mockImplementation((msg) => void output.push(String(msg)));
+      vi.spyOn(console, "warn").mockImplementation((msg) => void output.push(String(msg)));
+      vi.spyOn(console, "error").mockImplementation((msg) => void output.push(String(msg)));
+    });
+
+    afterEach(() => {
+      process.stdin.isTTY = originalStdinIsTTY;
+      delete process.env.GH_TOKEN;
+      delete process.env.WEATHER_REGION;
+      if (originalLegacyToken === undefined) delete process.env.AHOOD_API_TOKEN;
+      else process.env.AHOOD_API_TOKEN = originalLegacyToken;
+    });
+
+    async function stubMcp(envVars: Array<Record<string, unknown>>) {
+      const archive = await tarGz({ "server.json": mcpManifestWithEnvVars(envVars) });
+      stubApi(archive, sha256(archive), [{ path: "server.json" }], VERSION, "mcp");
+    }
+
+    it.each([
+      ["AHOOD_TOKEN", false],
+      ["AHOOD_TOKEN", true],
+      ["AHOOD_API_TOKEN", false],
+    ])("refuses to copy %s (is_secret: %s) from the environment, with exit code 2 and nothing written", async (name, isSecret) => {
+      await stubMcp([{ name, description: "token", is_required: false, is_secret: isSecret }]);
+      process.env[name] = SECRET_VALUE;
+
+      const error = await add([`${OWNER}/${SKILL}`]).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(UsageError);
+      expect(exitCodeFor(error)).toBe(2);
+      expect((error as Error).message).toContain(name);
+      expect((error as Error).message).not.toContain(SECRET_VALUE);
+      expect(promptSecret).not.toHaveBeenCalled();
+      expect(existsSync(join(dir, MCP_CONFIG_PATH))).toBe(false);
+      expect(existsSync(join(dir, LOCKFILE_PATH))).toBe(false);
+      expect(output.join("\n")).not.toContain(SECRET_VALUE);
+    });
+
+    it("on a terminal, prompts for ahood's own credential instead of reading it from the environment", async () => {
+      await stubMcp([{ name: "AHOOD_TOKEN", description: "token", is_required: true, is_secret: false }]);
+      process.env.AHOOD_TOKEN = SECRET_VALUE;
+      process.stdin.isTTY = true;
+
+      await add([`${OWNER}/${SKILL}`]);
+
+      expect(promptSecret).toHaveBeenCalledWith(expect.stringContaining("AHOOD_TOKEN"));
+      const raw = readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8");
+      expect(raw).not.toContain(SECRET_VALUE);
+      expect(JSON.parse(raw).mcpServers[SKILL].env).toEqual({ AHOOD_TOKEN: "prompted-secret-value" });
+      expect(output.join("\n")).toMatch(/AHOOD_TOKEN is ahood's own credential and is never copied from your environment/);
+      expect(output.join("\n")).not.toMatch(/Read from your environment/);
+    });
+
+    it("handles a credential-looking name declared non-secret as a secret: prompts when unset, and says so", async () => {
+      await stubMcp([{ name: "GH_TOKEN", description: "GitHub token", is_required: false, is_secret: false }]);
+      delete process.env.GH_TOKEN;
+
+      await add([`${OWNER}/${SKILL}`]);
+
+      // The non-secret path would have installed without it, silently.
+      expect(promptSecret).toHaveBeenCalledWith(expect.stringContaining("GH_TOKEN"));
+      expect(output.join("\n")).toMatch(/GH_TOKEN is declared non-secret by weather-server, but its name looks like a credential/);
+      expect((statSync(join(dir, MCP_CONFIG_PATH)).mode & 0o777).toString(8)).toBe("600");
+      expect(output.join("\n")).toContain("secret values in plaintext");
+    });
+
+    it.each(["GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "db_password", "STRIPE_API_KEY"])(
+      "names %s when it is taken from the environment, never its value, and creates .mcp.json 0600",
+      async (name) => {
+        await stubMcp([{ name, description: "d", is_required: false, is_secret: false }]);
+        process.env[name] = SECRET_VALUE;
+
+        try {
+          await add([`${OWNER}/${SKILL}`]);
+        } finally {
+          delete process.env[name];
+        }
+
+        expect(promptSecret).not.toHaveBeenCalled();
+        const joined = output.join("\n");
+        expect(joined).toContain(`Read from your environment for ${MCP_CONFIG_PATH} (values not shown): ${name}`);
+        expect(joined).toContain("its name looks like a credential");
+        expect(joined).toContain("secret values in plaintext");
+        expect(joined).not.toContain(SECRET_VALUE);
+        expect((statSync(join(dir, MCP_CONFIG_PATH)).mode & 0o777).toString(8)).toBe("600");
+      },
+    );
+
+    it("names a plain non-secret variable taken from the environment and still creates .mcp.json 0600", async () => {
+      await stubMcp([
+        { name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false },
+        { name: "WEATHER_UNITS", description: "Units", is_required: false, is_secret: false },
+      ]);
+      process.env.WEATHER_REGION = SECRET_VALUE;
+
+      await add([`${OWNER}/${SKILL}`]);
+
+      const joined = output.join("\n");
+      // Only what was actually read is named: WEATHER_UNITS was never set.
+      expect(joined).toContain(`Read from your environment for ${MCP_CONFIG_PATH} (values not shown): WEATHER_REGION`);
+      expect(joined).not.toContain("WEATHER_UNITS");
+      expect(joined).toContain("values copied from your environment in plaintext");
+      expect(joined).not.toContain("secret values in plaintext");
+      expect(joined).not.toContain(SECRET_VALUE);
+      expect((statSync(join(dir, MCP_CONFIG_PATH)).mode & 0o777).toString(8)).toBe("600");
+    });
+
+    it("keeps an existing loose .mcp.json's mode and advises chmod when an env-sourced value lands in it", async () => {
+      await stubMcp([{ name: "WEATHER_REGION", description: "Region", is_required: true, is_secret: false }]);
+      writeFileSync(join(dir, MCP_CONFIG_PATH), JSON.stringify({ mcpServers: {} }));
+      chmodSync(join(dir, MCP_CONFIG_PATH), 0o644);
+      process.env.WEATHER_REGION = "eu-west-1";
+
+      await add([`${OWNER}/${SKILL}`]);
+
+      expect((statSync(join(dir, MCP_CONFIG_PATH)).mode & 0o777).toString(8)).toBe("644");
+      expect(output.join("\n")).toContain("chmod 600");
+    });
+
+    it.each([["FOO=bar"], ["1LEADING_DIGIT"], ["HAS SPACE"], ["DASH-ED"], [""], [42], [null]])(
+      "rejects a manifest declaring the invalid env var name %j, with exit code 2 and nothing written",
+      async (name) => {
+        await stubMcp([
+          { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+          { name, description: "d", is_required: false, is_secret: false },
+        ]);
+
+        const error = await add([`${OWNER}/${SKILL}`]).catch((e: unknown) => e);
+
+        expect(error).toBeInstanceOf(UsageError);
+        expect(exitCodeFor(error)).toBe(2);
+        expect((error as Error).message).toMatch(/invalid name/);
+        // Refused before the valid secret ahead of it costs a prompt.
+        expect(promptSecret).not.toHaveBeenCalled();
+        expect(existsSync(join(dir, MCP_CONFIG_PATH))).toBe(false);
+      },
+    );
   });
 
   it("keeps an existing loose .mcp.json's mode and warns it is readable by others when a secret lands (ahood-cli#158)", async () => {

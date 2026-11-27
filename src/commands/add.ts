@@ -19,6 +19,7 @@ import { recordInstallOrWarn } from "../installed.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
 import { assertCanonicalEntryPaths, tarEntryPath } from "../archive-entries.js";
 import { UsageError } from "../usage-error.js";
+import { TOKEN_ENV, LEGACY_TOKEN_ENV } from "../credentials.js";
 import { printRateHint } from "../rate-hint.js";
 import { assertKind, describeKind, isPinnedFileKind, KINDS, strictKind, type CliKind, type KindScope, type PinnedFileKind } from "../kinds.js";
 import { buildProvenanceHeader, type ProvenanceHeaderMeta } from "../provenance-header.js";
@@ -602,10 +603,15 @@ function assertNoCollision(fileContents: Record<string, unknown>, owner: string,
 // non-secret configuration now (ahood-cli#120): callers that need to know
 // whether what they just wrote to disk is actually a credential can no longer
 // infer it from `env` being non-empty.
+//
+// `envSourcedNames` is the other half of that (ahood-cli#259): every name
+// whose value was read out of this process's environment, secret or not. The
+// publisher picks those names, so "the manifest called it non-secret" says
+// nothing about what the shell actually held under it.
 export async function resolveMcpServerConfig(
   buffer: Buffer,
   options: { existingEnv?: Record<string, string>; allowNonTtyPrompt?: boolean } = {},
-): Promise<{ manifest: ServerManifest; serverConfig: Record<string, unknown>; secretNames: string[] }> {
+): Promise<{ manifest: ServerManifest; serverConfig: Record<string, unknown>; secretNames: string[]; envSourcedNames: string[] }> {
   const { existingEnv, allowNonTtyPrompt = true } = options;
   const content = await extractSingleFileContent(buffer, "server.json");
   // Guarded the same way readMcpConfig guards .mcp.json: an unguarded parse
@@ -647,6 +653,44 @@ export async function resolveMcpServerConfig(
 
   const envVars = manifest.packages?.[0]?.environment_variables ?? [];
   const env: Record<string, string> = {};
+  const envSourcedNames: string[] = [];
+
+  // A variable's name is a lookup key into this process's environment and
+  // then a key in .mcp.json's `env`, and it is chosen by whoever published
+  // the manifest (ahood-cli#259). Checked ahead of both passes below, and as
+  // a UsageError like every other "this input is not acceptable" refusal, so
+  // nothing has been read, prompted for or written when it fires. The typeof
+  // guard is not redundant: the `as ServerManifest` cast above promises
+  // nothing about what the archive actually holds.
+  for (const variable of envVars) {
+    if (typeof variable?.name !== "string" || !ENV_VAR_NAME_RE.test(variable.name)) {
+      throw new UsageError(
+        `${sanitizeForTerminal(manifest.name)} declares an environment variable with an invalid name (${sanitizeForTerminal(JSON.stringify(variable?.name ?? null))}) -- names must match ${ENV_VAR_NAME_RE.source}. This published version is malformed and cannot be installed.`,
+      );
+    }
+  }
+
+  // ahood's own token is what authenticates THIS command, so it is in the
+  // environment of exactly the unattended runs (CI, an agent shell) where
+  // nobody is watching -- and a manifest only has to name it to have it
+  // copied into the project-shared .mcp.json (ahood-cli#259). Never read
+  // from the environment, whatever `is_secret` says. A value the user types
+  // at the prompt, or one already in ahood's own verified entry on update, is
+  // their explicit choice and still works; with no terminal there is no such
+  // route, so the install is refused here, before any prompt or write.
+  for (const variable of envVars) {
+    if (!isAhoodCredentialName(variable.name) || !process.env[variable.name]) continue;
+    if (existingEnv?.[variable.name]) continue;
+    if (process.stdin.isTTY) {
+      console.warn(
+        `${sanitizeForTerminal(variable.name)} is ahood's own credential and is never copied from your environment into ${MCP_CONFIG_PATH} -- type a value for ${sanitizeForTerminal(manifest.name)} at the prompt instead.`,
+      );
+      continue;
+    }
+    throw new UsageError(
+      `${sanitizeForTerminal(manifest.name)} asks for ${sanitizeForTerminal(variable.name)}, which is ahood's own credential -- refusing to copy it from your environment into ${MCP_CONFIG_PATH}. Re-run in a terminal to type a value for it instead.`,
+    );
+  }
 
   // Non-secret variables used to be skipped outright, so a server declaring
   // one installed into a config that could not start it, with no diagnostic
@@ -661,12 +705,13 @@ export async function resolveMcpServerConfig(
   // for a missing required variable must not first cost the user a secret
   // prompt.
   for (const variable of envVars) {
-    if (variable.is_secret) continue;
+    if (handledAsSecret(variable)) continue;
     // Same truthiness rule as the secret branch below: an empty-string env
     // var reads as "not set" rather than installing an empty value.
     const fromEnv = process.env[variable.name];
     if (fromEnv) {
       env[variable.name] = fromEnv;
+      envSourcedNames.push(variable.name);
       continue;
     }
     // `is_required` was parsed and validated but never consulted at install
@@ -686,9 +731,19 @@ export async function resolveMcpServerConfig(
   // an `is_required` check there would change nothing (ahood-cli#120).
   const secretNames: string[] = [];
   for (const variable of envVars) {
-    if (!variable.is_secret) continue;
+    if (!handledAsSecret(variable)) continue;
     secretNames.push(variable.name);
-    const fromEnv = process.env[variable.name];
+    // Said out loud because it changes what the user sees relative to what
+    // the manifest declared: a prompt where the non-secret path never
+    // prompts, and a plaintext warning afterwards (ahood-cli#259).
+    if (!variable.is_secret && !isAhoodCredentialName(variable.name)) {
+      console.warn(
+        `${sanitizeForTerminal(variable.name)} is declared non-secret by ${sanitizeForTerminal(manifest.name)}, but its name looks like a credential -- treating it as a secret.`,
+      );
+    }
+    // See the refusal pass above: ahood's own credential skips the
+    // environment entirely and goes straight to carry-forward / prompt.
+    const fromEnv = isAhoodCredentialName(variable.name) ? undefined : process.env[variable.name];
     // Truthiness, not `!== undefined` -- matches credentials.ts's
     // resolveToken(), the precedent this feature was explicitly modeled on
     // (per the design spec), which uses `if (process.env.AHOOD_TOKEN)`
@@ -696,6 +751,7 @@ export async function resolveMcpServerConfig(
     // source instead of silently installing an empty secret.
     if (fromEnv) {
       env[variable.name] = fromEnv;
+      envSourcedNames.push(variable.name);
       continue;
     }
     // Ordered after the env var deliberately: exporting the variable stays
@@ -736,8 +792,39 @@ export async function resolveMcpServerConfig(
     );
   }
 
+  // Names only, never values, and on stderr so `--json` stdout stays clean.
+  // Printed for secrets too: "already set in your shell" used to be resolved
+  // without a word, which is exactly how a token exported for some unrelated
+  // tool ended up in .mcp.json unnoticed (ahood-cli#259).
+  if (envSourcedNames.length > 0) {
+    console.warn(
+      `Read from your environment for ${MCP_CONFIG_PATH} (values not shown): ${envSourcedNames.map((name) => sanitizeForTerminal(name)).join(", ")}`,
+    );
+  }
+
   const serverConfig = buildMcpServerConfig(manifest, env);
-  return { manifest, serverConfig, secretNames };
+  return { manifest, serverConfig, secretNames, envSourcedNames };
+}
+
+const ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+// Upper-cased before comparing because Windows resolves process.env lookups
+// case-insensitively: there `ahood_token` reads the same variable.
+function isAhoodCredentialName(name: string): boolean {
+  const upper = name.toUpperCase();
+  return upper === TOKEN_ENV || upper === LEGACY_TOKEN_ENV;
+}
+
+// `is_secret` is the publisher's claim, and the non-secret path is the one
+// that copies from the shell with no prompt and no carry-forward. A name
+// shaped like a credential gets the secret path regardless of that claim
+// (ahood-cli#259). Deliberately a short, predictable list rather than a
+// heuristic: a false positive (SORT_KEY) costs one masked prompt, while a
+// miss is still named on stderr and still counted by secretsLanded.
+const CREDENTIAL_LIKE_NAME_RE = /_TOKEN$|SECRET|_KEY$|PASSWORD/i;
+
+function handledAsSecret(variable: ServerManifestEnvVar): boolean {
+  return Boolean(variable.is_secret) || isAhoodCredentialName(variable.name) || CREDENTIAL_LIKE_NAME_RE.test(variable.name);
 }
 
 // Whether the config that was (or is about to be) written to disk actually
@@ -747,6 +834,10 @@ export async function resolveMcpServerConfig(
 // consult it to request 0600 for a .mcp.json they are about to CREATE, and
 // warnIfSecretsWereWritten consults it to decide whether anything secret-
 // sensitive was written at all.
+//
+// Callers pass the declared secrets PLUS every name read from the environment
+// (ahood-cli#259): a value that came out of the shell is sensitive until
+// someone has looked at it, whatever the manifest called it.
 function secretsLanded(serverConfig: Record<string, unknown>, secretNames: string[]): boolean {
   const env = serverConfig.env as Record<string, string> | undefined;
   if (!env) return false;
@@ -768,9 +859,20 @@ function secretsLanded(serverConfig: Record<string, unknown>, secretNames: strin
 // the warning says so and suggests chmod 600, leaving the decision with the
 // user who knows their environment, instead of the CLI chmod-ing behind their
 // back.
-function warnIfSecretsWereWritten(serverConfig: Record<string, unknown>, secretNames: string[]): void {
-  if (!secretsLanded(serverConfig, secretNames)) return;
-  let warning = `WARNING: ${MCP_CONFIG_PATH} now contains one or more secret values in plaintext -- do not commit it to version control.`;
+//
+// ahood-cli#259 adds the env-sourced case with its own wording: claiming
+// "secret values" for a server whose only variable is a region name would be
+// the false alarm #120 removed, but a value copied out of the shell under a
+// publisher-chosen name still has to be looked at before the file is shared.
+function warnIfSecretsWereWritten(serverConfig: Record<string, unknown>, secretNames: string[], envSourcedNames: string[]): void {
+  let warning: string;
+  if (secretsLanded(serverConfig, secretNames)) {
+    warning = `WARNING: ${MCP_CONFIG_PATH} now contains one or more secret values in plaintext -- do not commit it to version control.`;
+  } else if (secretsLanded(serverConfig, envSourcedNames)) {
+    warning = `WARNING: ${MCP_CONFIG_PATH} now contains one or more values copied from your environment in plaintext -- check them before committing it to version control.`;
+  } else {
+    return;
+  }
   // statSync rather than lstat on purpose: a symlinked .mcp.json is written
   // THROUGH (#144), so the mode that matters is the real file's. Best-effort:
   // the write has already succeeded, so a stat that somehow fails must not
@@ -877,12 +979,12 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
   // something that's going to be refused anyway" reasoning, just for the
   // collision check specifically rather than the manifest-shape check.
   assertNoCollision(readMcpConfig(), owner, skill);
-  const { serverConfig, secretNames } = await resolveMcpServerConfig(buffer);
+  const { serverConfig, secretNames, envSourcedNames } = await resolveMcpServerConfig(buffer);
   // Whether a credential landed decides two things now (ahood-cli#158): the
   // mode a brand-new .mcp.json is created with below, and the warning after.
   // 0600 applies to creation only -- an existing file keeps its pre-existing
   // mode (#119) and gets the readability advisory in the warning instead.
-  const wroteSecrets = secretsLanded(serverConfig, secretNames);
+  const wroteSecrets = secretsLanded(serverConfig, [...secretNames, ...envSourcedNames]);
 
   // Read-modify-write under an advisory lock, mirroring lockfile.ts's own
   // writeLockfileEntry: .mcp.json sits right next to the lockfile and can
@@ -968,7 +1070,7 @@ async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, 
   console.log(`Installed ${owner}/${skill}@${meta.version} into ${MCP_CONFIG_PATH} as "${skill}"`);
   // Only the npm+npx package path ever carries secrets into `env` (headers
   // on a remote entry are static per v1's scope, per buildMcpServerConfig).
-  warnIfSecretsWereWritten(serverConfig, secretNames);
+  warnIfSecretsWereWritten(serverConfig, secretNames, envSourcedNames);
 }
 
 // Re-runs the mcp install flow for an already-installed entry, moving its
@@ -1022,12 +1124,12 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
   // (no entry on disk at all) there's nothing to carry forward and a genuine
   // prompt is correct.
   const existingEnv = readMcpEntryEnv(existingOnDisk);
-  const { serverConfig, secretNames } = await resolveMcpServerConfig(buffer, { existingEnv, allowNonTtyPrompt: false });
+  const { serverConfig, secretNames, envSourcedNames } = await resolveMcpServerConfig(buffer, { existingEnv, allowNonTtyPrompt: false });
   // Same dual use as installMcpEntry's (ahood-cli#158): the self-heal case can
   // CREATE a .mcp.json that just resolved a secret (the carried-forward env is
   // gone with a hand-deleted entry, so a genuine resolution just happened),
   // and the warning needs the same fact afterward.
-  const wroteSecrets = secretsLanded(serverConfig, secretNames);
+  const wroteSecrets = secretsLanded(serverConfig, [...secretNames, ...envSourcedNames]);
 
   // Read-modify-write under an advisory lock, mirroring installMcpEntry's
   // own pattern. Re-checks the fingerprint here too (not just above) since
@@ -1109,7 +1211,7 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
     provenance: { title: provenance.title, url: provenance.url },
   });
   console.log(`Updated ${key} to ${meta.version}`);
-  warnIfSecretsWereWritten(serverConfig, secretNames);
+  warnIfSecretsWereWritten(serverConfig, secretNames, envSourcedNames);
 }
 
 // Downloads a specific version's archive and verifies it against the
