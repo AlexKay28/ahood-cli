@@ -652,6 +652,15 @@ export async function resolveMcpServerConfig(
   buildMcpServerConfig(manifest, {});
 
   const envVars = manifest.packages?.[0]?.environment_variables ?? [];
+  // Same reasoning as the top-level-object check above (ahood-cli#121), one
+  // level down: the cast promises nothing, and a non-array here reached the
+  // loops below as a raw "envVars is not iterable" TypeError -- or, for a
+  // string, was iterated character by character (ahood-cli#259).
+  if (!Array.isArray(envVars) || envVars.some((v) => typeof v !== "object" || v === null || Array.isArray(v))) {
+    throw new UsageError(
+      `${sanitizeForTerminal(manifest.name)}'s server.json declares environment_variables that is not a list of objects -- this published version is malformed and cannot be installed.`,
+    );
+  }
   const env: Record<string, string> = {};
   const envSourcedNames: string[] = [];
 
@@ -763,6 +772,20 @@ export async function resolveMcpServerConfig(
     const carriedForward = existingEnv?.[variable.name];
     if (carriedForward) {
       env[variable.name] = carriedForward;
+      continue;
+    }
+    // Only a name this CLI moved onto the secret path itself (ahood-cli#259)
+    // -- the manifest declared it non-secret, and before that move an
+    // optional one that nothing had set simply installed without it. Sending
+    // it to the prompt instead broke exactly the unattended `add` this CLI
+    // is meant for ("Prompt was not answered (stdin closed)" over an unset
+    // SORT_KEY). On a terminal the prompt stays: someone is there to answer
+    // it. Declared secrets are deliberately not covered -- whether `add`
+    // should prompt for those with no terminal is ahood-cli#257's question.
+    if (!variable.is_secret && !variable.is_required && !process.stdin.isTTY) {
+      console.warn(
+        `${sanitizeForTerminal(variable.name)} is optional and is not set -- ${allowNonTtyPrompt ? "installing" : "updating"} ${sanitizeForTerminal(manifest.name)} without it.`,
+      );
       continue;
     }
     if (!allowNonTtyPrompt && !process.stdin.isTTY) {

@@ -1408,12 +1408,12 @@ describe("add", () => {
     });
 
     it("handles a credential-looking name declared non-secret as a secret: prompts when unset, and says so", async () => {
-      await stubMcp([{ name: "GH_TOKEN", description: "GitHub token", is_required: false, is_secret: false }]);
+      await stubMcp([{ name: "GH_TOKEN", description: "GitHub token", is_required: true, is_secret: false }]);
       delete process.env.GH_TOKEN;
 
       await add([`${OWNER}/${SKILL}`]);
 
-      // The non-secret path would have installed without it, silently.
+      // The non-secret path would have refused with "export GH_TOKEN and re-run".
       expect(promptSecret).toHaveBeenCalledWith(expect.stringContaining("GH_TOKEN"));
       expect(output.join("\n")).toMatch(/GH_TOKEN is declared non-secret by weather-server, but its name looks like a credential/);
       expect((statSync(join(dir, MCP_CONFIG_PATH)).mode & 0o777).toString(8)).toBe("600");
@@ -1472,6 +1472,64 @@ describe("add", () => {
       expect((statSync(join(dir, MCP_CONFIG_PATH)).mode & 0o777).toString(8)).toBe("644");
       expect(output.join("\n")).toContain("chmod 600");
     });
+
+    // The regression the first cut of ahood-cli#259 introduced: moving a
+    // credential-looking name onto the secret path also moved it onto that
+    // path's prompt, so an unattended `add` that used to install without an
+    // optional SORT_KEY died on "Prompt was not answered (stdin closed)".
+    it.each(["SORT_KEY", "GH_TOKEN"])(
+      "skips an optional, unset, credential-looking non-secret (%s) with a notice instead of prompting when there is no terminal",
+      async (name) => {
+        await stubMcp([{ name, description: "d", is_required: false, is_secret: false }]);
+        delete process.env[name];
+
+        await add([`${OWNER}/${SKILL}`]);
+
+        expect(promptSecret).not.toHaveBeenCalled();
+        expect(output.join("\n")).toContain(`${name} is optional and is not set -- installing weather-server without it.`);
+        expect(JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).mcpServers[SKILL]).toEqual({
+          command: "npx",
+          args: ["-y", "@example/weather-mcp-server@1.4.0"],
+        });
+      },
+    );
+
+    it("still prompts for an optional, unset, credential-looking non-secret on a terminal", async () => {
+      await stubMcp([{ name: "SORT_KEY", description: "d", is_required: false, is_secret: false }]);
+      delete process.env.SORT_KEY;
+      process.stdin.isTTY = true;
+
+      await add([`${OWNER}/${SKILL}`]);
+
+      expect(promptSecret).toHaveBeenCalledWith(expect.stringContaining("SORT_KEY"));
+    });
+
+    it("still asks for a REQUIRED, unset, credential-looking non-secret with no terminal (unchanged)", async () => {
+      await stubMcp([{ name: "SORT_KEY", description: "d", is_required: true, is_secret: false }]);
+      delete process.env.SORT_KEY;
+
+      await add([`${OWNER}/${SKILL}`]);
+
+      expect(promptSecret).toHaveBeenCalledWith(expect.stringContaining("SORT_KEY"));
+    });
+
+    // `environment_variables` is third-party JSON behind an `as` cast: a
+    // non-array reached `for...of` and surfaced as a raw "is not iterable"
+    // TypeError (or, for a string, iterated its characters), and a non-object
+    // element was only caught by accident of the name check.
+    it.each([[42], [{}], ["WEATHER_REGION"], [true], [[null]], [["WEATHER_REGION"]], [[42]], [[[]]]])(
+      "rejects a manifest whose environment_variables is %j, with exit code 2 and nothing written",
+      async (envVars) => {
+        await stubMcp(envVars as unknown as Array<Record<string, unknown>>);
+
+        const error = await add([`${OWNER}/${SKILL}`]).catch((e: unknown) => e);
+
+        expect(error).toBeInstanceOf(UsageError);
+        expect(exitCodeFor(error)).toBe(2);
+        expect((error as Error).message).toMatch(/environment_variables/);
+        expect(existsSync(join(dir, MCP_CONFIG_PATH))).toBe(false);
+      },
+    );
 
     it.each([["FOO=bar"], ["1LEADING_DIGIT"], ["HAS SPACE"], ["DASH-ED"], [""], [42], [null]])(
       "rejects a manifest declaring the invalid env var name %j, with exit code 2 and nothing written",
