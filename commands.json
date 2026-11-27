@@ -270,7 +270,7 @@
         {
           "usage": "ahood skill add <owner>/<skill>[@version]",
           "summary": "Install a skill into .claude/skills/, pinned in the lockfile.",
-          "desc": "Install a skill into .claude/skills/, pinned in the lockfile. An artifact published with --kind agent installs instead as a single file at .claude/agents/<owner>@<skill>.md (Claude Code's own subagent loader scans .claude/agents/*.md as flat files), not a .claude/skills/ directory. An artifact published with --kind mcp installs by merging an entry into .mcp.json instead, prompting for any secret environment variables its server.json declares that aren't already set in your shell. A doc or project guide is refused here; install it with `ahood doc add` or `ahood project add`.",
+          "desc": "Install a skill into .claude/skills/, pinned in the lockfile. An artifact published with --kind agent installs instead as a single file at .claude/agents/<owner>@<skill>.md (Claude Code's own subagent loader scans .claude/agents/*.md as flat files), not a .claude/skills/ directory. An artifact published with --kind mcp installs by merging an entry into .mcp.json instead, prompting for any secret environment variables its server.json declares that aren't already set in your shell. Every variable taken from your shell is named on stderr (never its value); a name that looks like a credential is handled as a secret whatever the manifest declares, and AHOOD_TOKEN is never copied from your shell. A doc or project guide is refused here; install it with `ahood doc add` or `ahood project add`.",
           "examples": [
             "ahood skill add alice/pdf-tools",
             "ahood skill add alice/pdf-tools@1.2.0"
@@ -655,7 +655,7 @@
         {
           "usage": "ahood mcp add <owner>/<server>[@version]",
           "summary": "Install an MCP server manifest into an entry in .mcp.json, pinned in the lockfile.",
-          "desc": "Install an MCP server manifest into an entry in .mcp.json, pinned in .claude/skills.lock.json. Prompts for any secret environment variables its server.json declares that aren't already set. Refused before anything is downloaded or written when the target is not an MCP server manifest.",
+          "desc": "Install an MCP server manifest into an entry in .mcp.json, pinned in .claude/skills.lock.json. Prompts for any secret environment variables its server.json declares that aren't already set. Every variable taken from your shell is named on stderr (never its value); a name that looks like a credential (*_TOKEN, *SECRET*, *_KEY, *PASSWORD*) is handled as a secret whatever the manifest declares, and AHOOD_TOKEN is never copied from your shell -- with no terminal to type a value on, that install is refused. Refused before anything is downloaded or written when the target is not an MCP server manifest.",
           "examples": [
             "ahood mcp add alice/github-server",
             "ahood mcp add alice/github-server@1.2.0"
