@@ -30,22 +30,40 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     summary: "Device-code browser login, stores a token locally.",
     desc: "Device-code browser login, stores a token locally.",
   },
-  { usage: "ahood logout", summary: "Removes the stored token.", desc: "Removes the stored token." },
+  {
+    usage: "ahood logout [--json]",
+    summary: "Removes the stored token.",
+    desc: "Removes the stored token.",
+    flags: ["--json    Emit {logged_out} instead of prose."],
+  },
   {
     usage: "ahood whoami [--json]",
     summary: "Reports whether your stored token still authenticates.",
     desc: "Reports whether your stored token still authenticates.",
-    flags: ["--json    Emit a machine-readable result instead of prose."],
+    flags: [
+      "--json    Emit {authenticated, mode, ...profile} instead of prose; a failed check adds {error, exit_code}. " +
+        "While the profile is missing it carries profile_status (provisioning|not_found); profileStatus is a deprecated alias.",
+    ],
   },
   {
-    usage: "ahood token create <name>|list [--json]|revoke <id> [--yes]",
+    usage: "ahood token create <name> [--json]|list [--json]|revoke <id> [--yes] [--json]",
     summary: "Manage personal API tokens.",
     desc:
       "Manage personal API tokens. All three subcommands require an existing browser-backed session -- a CLI " +
       "session authenticated with a bearer token can't manage tokens end-to-end; use /workspace/settings/tokens in the " +
       "browser instead.",
-    flags: ["--yes, -y    (revoke only) Skip the confirmation prompt and revoke immediately."],
-    examples: ["ahood token create ci-runner", "ahood token list --json", "ahood token revoke <id>", "ahood token revoke <id> --yes"],
+    flags: [
+      "--yes, -y    (revoke only) Skip the confirmation prompt and revoke immediately.",
+      "--json       create: emit the new token's object, raw `token` included (shown only this once). list: emit the raw " +
+        "token objects. revoke: emit {id, revoked}; needs --yes, since JSON mode never prompts.",
+    ],
+    examples: [
+      "ahood token create ci-runner",
+      "ahood token create ci-runner --json",
+      "ahood token list --json",
+      "ahood token revoke <id>",
+      "ahood token revoke <id> --yes",
+    ],
   },
   {
     usage: "ahood status [--json]",
@@ -137,7 +155,7 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
       "An alias of `ahood skill read`, under the name the /ahood plugin commands use: prints the latest version's " +
       "root document to stdout so an agent can use it once in this session, with nothing installed or written. " +
       "Works for every kind. Plain mode prints the raw content (control sequences stripped in a terminal).",
-    flags: ["--json    Emit {version, content} as a single line instead of the raw content."],
+    flags: ["--json    Emit {version, content, provenance} as a single line instead of the raw content."],
     examples: ["ahood try alice/pdf-tools", "ahood try alice/release-loop --json"],
   },
   {
@@ -153,7 +171,7 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
     examples: ["ahood stats", "ahood stats --json"],
   },
   {
-    usage: 'ahood feedback "<message>" [--kind bug|idea|search_miss|confusing|praise] [--query <q>] [--artifact <owner/slug>]',
+    usage: 'ahood feedback "<message>" [--kind bug|idea|search_miss|confusing|praise] [--query <q>] [--artifact <owner/slug>] [--json]',
     summary: "Send feedback (a bug, an idea, a search that found nothing, something confusing, praise) to the ahood team.",
     desc:
       "Sends one message to the ahood team (POST /api/v1/feedback); the CLI version is attached automatically. Works " +
@@ -165,6 +183,7 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
       "--kind <kind>        bug, idea (default), search_miss, confusing or praise.",
       "--query <q>          For search_miss: the query that found nothing useful.",
       "--artifact <ref>     The artifact the feedback is about, as owner/slug.",
+      "--json               Emit {id, kind, sent} instead of prose.",
     ],
     examples: ['ahood feedback "install failed on Windows" --kind bug', 'ahood feedback "no results" --kind search_miss --query "pdf tools"'],
   },
@@ -254,7 +273,10 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "Print a skill's full SKILL.md content (the prompt itself) without installing it via `ahood skill add`. " +
       "Plain mode prints the raw content verbatim to stdout -- no formatting, no labels -- so it's safe to pipe " +
       "into a file or another tool.",
-    flags: ["--json    Emit {version, content} as a single line instead of the raw content."],
+    flags: [
+      "--json    Emit {version, content, provenance} as a single line instead of the raw content; `content` is exactly " +
+        "what the registry stores, and `provenance` ({title, owner, slug, version, url}) says where it came from.",
+    ],
     examples: ["ahood skill read alice/pdf-tools", "ahood skill read alice/pdf-tools --json"],
   },
   {
@@ -282,7 +304,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     flags: ["--json    Emit the raw skill objects instead of formatted lines."],
   },
   {
-    usage: "ahood skill add <owner>/<skill>[@version]",
+    usage: "ahood skill add <owner>/<skill>[@version] [--json]",
     summary: "Install a skill into .claude/skills/, pinned in the lockfile.",
     desc:
       "Install a skill into .claude/skills/, pinned in the lockfile. An artifact published with --kind agent " +
@@ -291,7 +313,11 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "with --kind mcp installs by merging an entry into .mcp.json instead, prompting for any secret " +
       "environment variables its server.json declares that aren't already set in your shell. A doc or project " +
       "guide is refused here; install it with `ahood doc add` or `ahood project add`.",
-    examples: ["ahood skill add alice/pdf-tools", "ahood skill add alice/pdf-tools@1.2.0"],
+    flags: [
+      "--json    Emit {owner, skill, version, kind, installed_path}; progress lines go to stderr. Never prompts: an " +
+        "mcp server's required secret must already be exported.",
+    ],
+    examples: ["ahood skill add alice/pdf-tools", "ahood skill add alice/pdf-tools@1.2.0", "ahood skill add alice/pdf-tools --json"],
   },
   {
     usage: "ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]",
@@ -323,16 +349,19 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     examples: ["ahood skill outdated", "ahood skill outdated alice/pdf-tools --json"],
   },
   {
-    usage: "ahood skill remove <owner>/<skill> [--yes]",
+    usage: "ahood skill remove <owner>/<skill> [--yes] [--json]",
     summary: "Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed).",
     desc:
       "Uninstall and unpin (local only). Prompts for confirmation unless --yes is passed. For an mcp-kind install, " +
       "also deletes its .mcp.json entry as long as it still matches what ahood last installed there -- a hand-edited " +
       "or unverifiable entry is left in place and warned about instead of being silently touched.",
-    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
+    flags: [
+      "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+      "--json       Emit {owner, skill, removed, mcp_entry} (mcp_entry: none|removed|left|unchecked). Needs --yes: JSON mode never prompts.",
+    ],
   },
   {
-    usage: "ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+    usage: "ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]",
     summary: "Update a skill you own, changing only the flags you pass.",
     desc:
       "Update a skill you own. Only the flags you pass are changed. Every flag also accepts " +
@@ -344,11 +373,12 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "--visibility public|private   Who can see and install the skill.",
       "--homepage <url>              The skill's homepage URL.",
       "--repository <url>            The skill's source repository URL.",
+      "--json                        Emit the updated skill: {owner, skill, slug, tagline, license, visibility, tags, ...}.",
     ],
     examples: ['ahood skill edit alice/pdf-tools --tagline "Merge and split PDFs"'],
   },
   {
-    usage: "ahood skill unpublish <owner>/<skill>[@version] [--yes]",
+    usage: "ahood skill unpublish <owner>/<skill>[@version] [--yes] [--json]",
     summary:
       "Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed).",
     desc:
@@ -356,13 +386,22 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "With @version (e.g. alice/foo@1.2.3): yank that single version instead of deleting the whole skill -- " +
       "it is marked yanked, not removed. Existing lockfile pins still resolve and verify against it, but new " +
       "installs are warned off it. Prompts for a typed \"yes\" unless --yes is passed.",
-    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
+    flags: [
+      "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+      "--json       Emit {owner, skill, unpublished}, or {owner, skill, version, yanked} for a single version. Needs --yes: JSON mode never prompts.",
+    ],
   },
-  { usage: "ahood skill star <owner>/<skill>", summary: "Star a skill.", desc: "Star a skill." },
   {
-    usage: "ahood skill unstar <owner>/<skill>",
+    usage: "ahood skill star <owner>/<skill> [--json]",
+    summary: "Star a skill.",
+    desc: "Star a skill.",
+    flags: ["--json    Emit {owner, skill, starred} instead of prose."],
+  },
+  {
+    usage: "ahood skill unstar <owner>/<skill> [--json]",
     summary: "Remove your star from a skill.",
     desc: "Remove your star from a skill.",
+    flags: ["--json    Emit {owner, skill, starred} instead of prose."],
   },
   {
     usage: "ahood skill vote <owner>/<skill> up|down [--note <text>] [--version <x.y.z>] [--json]",
@@ -381,28 +420,29 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     examples: ['ahood skill vote alice/pdf-tools up --note "merged 40 PDFs without errors"', "ahood skill vote alice/pdf-tools --clear"],
   },
   {
-    usage: "ahood skill share <owner>/<skill> --group <group>",
+    usage: "ahood skill share <owner>/<skill> --group <group> [--json]",
     summary: "Share a skill you own with a group, without changing its public/private visibility.",
     desc:
       "Share a skill you own with a group. Sharing is additive -- it doesn't change the skill's own " +
       "public/private visibility, it just makes it visible to everyone in the group too. You must own the " +
       "skill and already be a member of the target group.",
-    flags: ["--group <group>   The group's slug (from `ahood group list`)."],
+    flags: ["--group <group>   The group's slug (from `ahood group list`).", "--json            Emit {owner, skill, group, shared} instead of prose."],
     examples: ["ahood skill share alice/pdf-tools --group design-team"],
   },
   {
-    usage: "ahood skill unshare <owner>/<skill> --group <group>",
+    usage: "ahood skill unshare <owner>/<skill> --group <group> [--json]",
     summary: "Stop sharing a skill you own with a group.",
     desc: "Stop sharing a skill you own with a group. Does not affect the skill's own visibility.",
-    flags: ["--group <group>   The group's slug."],
+    flags: ["--group <group>   The group's slug.", "--json            Emit {owner, skill, group, shared} instead of prose."],
     examples: ["ahood skill unshare alice/pdf-tools --group design-team"],
   },
   {
-    usage: "ahood skill init [name]",
+    usage: "ahood skill init [name] [--json]",
     summary: "Scaffold a new skill folder with a minimal, valid SKILL.md.",
     desc:
       "Scaffold a new skill folder with a minimal, valid SKILL.md. Creates ./<name>/SKILL.md if a name is given, " +
       "or ./SKILL.md in the current directory otherwise. Refuses to overwrite an existing SKILL.md at the target path.",
+    flags: ["--json    Emit {kind, name, path} instead of prose; the next-step hints go to stderr."],
     examples: ["ahood skill init pdf-tools", "ahood skill init"],
   },
   {
@@ -432,7 +472,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "--repository <url>            The artifact's source repository URL. Updated even on a re-publish of an existing artifact.",
       "--changelog <text>            What changed in this version, shown by `ahood skill versions`.",
       "--visibility public|private   Who can find it. New artifacts are created private; on a terminal, publish asks whether to make a new one public (default no). Pass this to skip the question (scripts, CI). On a re-publish it changes visibility only when given.",
-      "--json                        Suppress human progress lines; print one {version,status,...} JSON object on completion (or {error} on failure).",
+      "--json                        Suppress human progress lines; print one {version,status,...} JSON object on completion (or {error, exit_code} on failure).",
     ],
     examples: [
       "ahood skill publish alice/pdf-tools@1.1.0",
@@ -478,7 +518,7 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
       usage: `${p} read <owner>/${n} [--json]`,
       summary: `Print a published ${label}'s ${doc}, without installing it.`,
       desc: `Print the ${doc} of a published ${label} verbatim, without installing it -- read it before you add it. ${kindRefusal}`,
-      flags: ["--json    Emit {version, content} as a single line instead of the raw content."],
+      flags: ["--json    Emit {version, content, provenance} as a single line instead of the raw content."],
       examples: [`${p} read ${ex}`],
     },
     {
@@ -502,12 +542,16 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
       flags: ["--json    Emit the raw objects instead of formatted lines."],
     },
     {
-      usage: `${p} add <owner>/${n}[@version]`,
+      usage: `${p} add <owner>/${n}[@version] [--json]`,
       summary: `Install ${a} ${label} into ${info.installsTo}, pinned in the lockfile.`,
       desc:
         `Install ${a} ${label} into ${info.installsTo}, pinned in .claude/skills.lock.json. ` +
         (kind === "mcp" ? "Prompts for any secret environment variables its server.json declares that aren't already set. " : "") +
         `Refused before anything is downloaded or written when the target is not ${a} ${label}.`,
+      flags: [
+        "--json    Emit {owner, skill, version, kind, installed_path}; progress lines go to stderr." +
+          (kind === "mcp" ? " Never prompts: a required secret must already be exported." : ""),
+      ],
       examples: [`${p} add ${ex}`, `${p} add ${ex}@1.2.0`],
     },
     {
@@ -528,15 +572,18 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
       flags: ["--json    Emit structured preview objects instead of a formatted table."],
     },
     {
-      usage: `${p} remove <owner>/${n} [--yes]`,
+      usage: `${p} remove <owner>/${n} [--yes] [--json]`,
       summary: `Uninstall and unpin ${a} ${label} (local only, prompts unless --yes is passed).`,
       desc:
         `Uninstall and unpin ${a} ${label} from this project (local only). Refused, before the prompt and before anything is deleted, ` +
         `when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.`,
-      flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
+      flags: [
+        "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+        "--json       Emit {owner, skill, removed, mcp_entry}. Needs --yes: JSON mode never prompts.",
+      ],
     },
     {
-      usage: `${p} edit <owner>/${n} [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]`,
+      usage: `${p} edit <owner>/${n} [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]`,
       summary: `Update ${a} ${label} you own, changing only the flags you pass.`,
       desc: `Update ${a} ${label} you own; same flags as \`ahood skill edit\`. ${kindRefusal}`,
       flags: [
@@ -546,18 +593,32 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
         "--visibility public|private   Who can see and install it.",
         "--homepage <url>              Homepage URL.",
         "--repository <url>            Source repository URL.",
+        "--json                        Emit the updated entry: {owner, skill, slug, tagline, license, visibility, tags, ...}.",
       ],
     },
     {
-      usage: `${p} unpublish <owner>/${n}[@version] [--yes]`,
+      usage: `${p} unpublish <owner>/${n}[@version] [--yes] [--json]`,
       summary: `Delete ${a} ${label} from the registry for every consumer, or yank one version (prompts unless --yes is passed).`,
       desc:
         `Without @version: delete ${a} ${label} from the registry for every consumer. With @version: yank that version. ` +
         `Refused before the prompt when the target is not ${a} ${label}.`,
-      flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
+      flags: [
+        "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+        "--json       Emit {owner, skill, unpublished}, or {owner, skill, version, yanked} for one version. Needs --yes: JSON mode never prompts.",
+      ],
     },
-    { usage: `${p} star <owner>/${n}`, summary: `Star ${a} ${label}.`, desc: `Star ${a} ${label}. ${kindRefusal}` },
-    { usage: `${p} unstar <owner>/${n}`, summary: `Remove your star from ${a} ${label}.`, desc: `Remove your star from ${a} ${label}. ${kindRefusal}` },
+    {
+      usage: `${p} star <owner>/${n} [--json]`,
+      summary: `Star ${a} ${label}.`,
+      desc: `Star ${a} ${label}. ${kindRefusal}`,
+      flags: ["--json    Emit {owner, skill, starred} instead of prose."],
+    },
+    {
+      usage: `${p} unstar <owner>/${n} [--json]`,
+      summary: `Remove your star from ${a} ${label}.`,
+      desc: `Remove your star from ${a} ${label}. ${kindRefusal}`,
+      flags: ["--json    Emit {owner, skill, starred} instead of prose."],
+    },
     {
       usage: `${p} vote <owner>/${n} up|down [--note <text>] [--version <x.y.z>] [--json]`,
       summary: `Vote ${a} ${label} up or down after using it, or clear your vote with --clear.`,
@@ -572,19 +633,19 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
       ],
     },
     {
-      usage: `${p} share <owner>/${n} --group <group>`,
+      usage: `${p} share <owner>/${n} --group <group> [--json]`,
       summary: `Share ${a} ${label} you own with a group, without changing its visibility.`,
       desc: `Share ${a} ${label} you own with a group you belong to. ${kindRefusal}`,
-      flags: ["--group <group>   The group's slug (from `ahood group list`)."],
+      flags: ["--group <group>   The group's slug (from `ahood group list`).", "--json            Emit {owner, skill, group, shared} instead of prose."],
     },
     {
-      usage: `${p} unshare <owner>/${n} --group <group>`,
+      usage: `${p} unshare <owner>/${n} --group <group> [--json]`,
       summary: `Stop sharing ${a} ${label} you own with a group.`,
       desc: `Stop sharing ${a} ${label} you own with a group. ${kindRefusal}`,
-      flags: ["--group <group>   The group's slug."],
+      flags: ["--group <group>   The group's slug.", "--json            Emit {owner, skill, group, shared} instead of prose."],
     },
     {
-      usage: `${p} init [name]`,
+      usage: `${p} init [name] [--json]`,
       summary: `Scaffold a new ${label} folder with a minimal, valid ${doc}.`,
       desc:
         `Scaffold a minimal ${doc} that passes the registry's publish validation: ./<name>/${doc} with a name, or ./${doc} without. ` +
@@ -593,6 +654,7 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
           : "") +
         `Refuses to overwrite an existing ${doc}, or to add one to a folder that already holds another kind's root document. ` +
         "Names are slug-normalized and must stay inside the current directory.",
+      flags: ["--json    Emit {kind, name, path} instead of prose; the next-step hints go to stderr."],
       examples: [`${p} init ${ex.split("/")[1]}`, `${p} init`],
     },
     {
@@ -607,7 +669,7 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
         "--name <text>                 Required only when creating the entry on this publish.",
         "--changelog <text>            What changed in this version.",
         "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
-        "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure).",
+        "--json                        Print one {version,status,...} JSON object on completion (or {error, exit_code} on failure).",
       ],
       examples: [`${p} publish ${ex}@1.0.0 --name "${info.example.name}"`],
     },
@@ -703,7 +765,7 @@ export const PROJECT_COMMANDS_HELP: CommandHelp[] = [
     entry.usage.startsWith("ahood project init")
       ? {
           ...entry,
-          usage: "ahood project init [name] [--project <git-remote> | --no-project]",
+          usage: "ahood project init [name] [--project <git-remote> | --no-project] [--json]",
           desc:
             entry.desc +
             " The optional `project` field (the repository's git remote, which is how get_project_guide finds the guide) " +
@@ -725,10 +787,13 @@ export const MCP_COMMANDS_HELP: CommandHelp[] = registryCommandsHelp("mcp");
 // changing their public/private visibility.
 export const GROUP_COMMANDS_HELP: CommandHelp[] = [
   {
-    usage: "ahood group create <name> [--description <text>]",
+    usage: "ahood group create <name> [--description <text>] [--json]",
     summary: "Create a private group, becoming its owner.",
     desc: "Create a private group. You become its owner.",
-    flags: ["--description <text>   Optional short description."],
+    flags: [
+      "--description <text>   Optional short description.",
+      "--json                 Emit the new group's object ({id, slug, name, ...}) -- `slug` is what every other group command takes.",
+    ],
     examples: ['ahood group create "Design Team" --description "Shared skills for the design team"'],
   },
   {
@@ -743,7 +808,10 @@ export const GROUP_COMMANDS_HELP: CommandHelp[] = [
     desc:
       "List a group's details and members. Member-only -- you must belong to the group. Returns not found " +
       "(rather than a permission error) if you don't, so a group's existence isn't leaked to non-members.",
-    flags: ["--json    Emit the raw group/members objects instead of formatted lines."],
+    flags: [
+      "--json    Emit {group, members} instead of formatted lines. Each member carries user_id, avatar_url and joined_at; " +
+        "the camelCase userId, avatarUrl and joinedAt are deprecated aliases.",
+    ],
   },
   {
     usage: "ahood group invite-link <group> [--json]",
@@ -752,43 +820,53 @@ export const GROUP_COMMANDS_HELP: CommandHelp[] = [
       "Create or regenerate a shareable invite link for a group you own. Regenerating invalidates any " +
       "previously issued link. The raw token is shown only this once -- only its hash is stored server-side, " +
       "so it cannot be retrieved again later; save it (or the link) somewhere safe.",
-    flags: ["--json    Emit {token, expiresAt, url} instead of formatted lines."],
+    flags: ["--json    Emit {token, expires_at, url} instead of formatted lines (expiresAt is a deprecated alias of expires_at)."],
   },
   {
-    usage: "ahood group join <invite-url-or-token>",
+    usage: "ahood group join <invite-url-or-token> [--json]",
     summary: "Join a group using an invite link or its raw token.",
     desc:
       "Join a group using an invite link (e.g. https://www.ahood.dev/workspace/groups/join?token=...) or its bare " +
       "raw token -- either form works.",
+    flags: ["--json    Emit {joined, slug, name} instead of prose."],
     examples: [
       "ahood group join https://www.ahood.dev/workspace/groups/join?token=abc123",
       "ahood group join abc123",
     ],
   },
   {
-    usage: "ahood group remove-member <group> <username> [--yes]",
+    usage: "ahood group remove-member <group> <username> [--yes] [--json]",
     summary: "Remove a member from a group you own (prompts for confirmation unless --yes is passed).",
     desc:
       "Remove a member from a group you own. The group's owner cannot be removed this way -- delete the " +
       "group instead. Only the group's owner can remove someone other than themselves. Prompts for a typed " +
       "\"yes\" unless --yes is passed.",
-    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
+    flags: [
+      "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+      "--json       Emit {removed, slug, username}. Needs --yes: JSON mode never prompts.",
+    ],
   },
   {
-    usage: "ahood group leave <group> [--yes]",
+    usage: "ahood group leave <group> [--yes] [--json]",
     summary: "Leave a group you belong to (prompts for confirmation unless --yes is passed).",
     desc:
       "Leave a group you belong to. The group's owner cannot leave -- delete the group instead. Prompts for " +
       "a typed \"yes\" unless --yes is passed.",
-    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
+    flags: [
+      "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+      "--json       Emit {left, slug, username}. Needs --yes: JSON mode never prompts.",
+    ],
   },
   {
-    usage: "ahood group delete <group> [--yes]",
+    usage: "ahood group delete <group> [--yes] [--json]",
     summary: "Permanently delete a group you own (prompts for confirmation unless --yes is passed).",
     desc:
       "Permanently delete a group you own, removing it for every member. Prompts for a typed \"yes\" unless " +
       "--yes is passed.",
-    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
+    flags: [
+      "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+      "--json       Emit {deleted, slug}. Needs --yes: JSON mode never prompts.",
+    ],
   },
 ];
 
@@ -866,10 +944,13 @@ export const SNAP_COMMANDS_HELP: CommandHelp[] = [
     flags: ["--json    Emit the full snap object instead of the raw content."],
   },
   {
-    usage: "ahood snap remove <id> [--yes]",
+    usage: "ahood snap remove <id> [--yes] [--json]",
     summary: "Permanently delete a snap (prompts for confirmation unless --yes is passed).",
     desc: "Permanently delete a snap. Irreversible. Prompts for a typed \"yes\" unless --yes is passed.",
-    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
+    flags: [
+      "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+      "--json       Emit {id, deleted}. Needs --yes: JSON mode never prompts.",
+    ],
   },
   {
     usage: "ahood snap share <id> [--json]",
@@ -878,13 +959,16 @@ export const SNAP_COMMANDS_HELP: CommandHelp[] = [
     flags: ["--json    Emit {share_url} instead of just the bare URL."],
   },
   {
-    usage: "ahood snap unshare <id> [--yes]",
+    usage: "ahood snap unshare <id> [--yes] [--json]",
     summary: "Revoke a snap's share link (the snap itself is untouched; prompts for confirmation unless --yes is passed).",
     desc:
       "Revoke a snap's share link -- the snap itself is untouched, and re-running `ahood snap share` mints a new " +
       "link. Prompts for a typed \"yes\" unless --yes is passed, since anyone using the old link loses access " +
       "immediately.",
-    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
+    flags: [
+      "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+      "--json       Emit {id, shared}. Needs --yes: JSON mode never prompts.",
+    ],
   },
   {
     usage: "ahood snap tags <id> [tag ...] [--clear] [--json]",

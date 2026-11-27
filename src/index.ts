@@ -59,6 +59,7 @@ import {
 import { formatHelp, formatKindHelp, formatGroupHelp, formatSnapHelp, formatCommandHelp, findCommandHelp } from "./help.js";
 import { ApiError } from "./http.js";
 import { exitCodeFor } from "./exit-code.js";
+import { jsonError, jsonRequested, printJson } from "./json-output.js";
 import { CLI_NAME, CLI_VERSION } from "./version.js";
 import { maybeNotifyUpdate, performRefresh, REFRESH_COMMAND } from "./update-notifier.js";
 
@@ -214,6 +215,15 @@ function closestOf(input: string, candidates: string[]): string | undefined {
   return bestDistance <= 2 ? best : undefined;
 }
 
+// An unknown command or verb exits before any handler runs, so main()'s catch
+// never sees it -- but under --json it owes stdout the same failure document
+// as every other error (ahood-cli#251).
+function exitUnknown(lines: string[], args: string[]): never {
+  for (const line of lines) console.error(line);
+  if (jsonRequested(args)) printJson(jsonError(lines.join("\n"), 2));
+  process.exit(2);
+}
+
 function closestCommand(input: string): string | undefined {
   return closestOf(input, Object.keys(COMMANDS));
 }
@@ -267,12 +277,16 @@ async function dispatchRegistry(noun: CliKind, args: string[]): Promise<void> {
   const kindVerbs = KIND_VERBS[noun] ?? {};
   const handler = kindVerbs[sub] ?? SKILL_COMMANDS[sub];
   if (!handler) {
-    console.error(`Unknown ${noun} command: ${sub}`);
     const known = [...Object.keys(kindVerbs), ...Object.keys(SKILL_COMMANDS)];
     const suggestion = closestOf(sub, known);
-    if (suggestion) console.error(`Did you mean '${suggestion}'?`);
-    console.error(`Run \`ahood ${noun} --help\` for a list of commands.`);
-    process.exit(2);
+    exitUnknown(
+      [
+        `Unknown ${noun} command: ${sub}`,
+        ...(suggestion ? [`Did you mean '${suggestion}'?`] : []),
+        `Run \`ahood ${noun} --help\` for a list of commands.`,
+      ],
+      rest,
+    );
   }
 
   if (rest.includes("--help") || rest.includes("-h")) {
@@ -408,11 +422,15 @@ async function dispatchGroup(args: string[]): Promise<void> {
 
   const handler = GROUP_VERBS[sub];
   if (!handler) {
-    console.error(`Unknown group command: ${sub}`);
     const suggestion = closestGroupVerb(sub);
-    if (suggestion) console.error(`Did you mean '${suggestion}'?`);
-    console.error("Run `ahood group --help` for a list of commands.");
-    process.exit(2);
+    exitUnknown(
+      [
+        `Unknown group command: ${sub}`,
+        ...(suggestion ? [`Did you mean '${suggestion}'?`] : []),
+        "Run `ahood group --help` for a list of commands.",
+      ],
+      rest,
+    );
   }
 
   if (rest.includes("--help") || rest.includes("-h")) {
@@ -451,11 +469,15 @@ async function dispatchSnap(args: string[]): Promise<void> {
 
   const handler = SNAP_VERBS[sub];
   if (!handler) {
-    console.error(`Unknown snap command: ${sub}`);
     const suggestion = closestSnapVerb(sub);
-    if (suggestion) console.error(`Did you mean '${suggestion}'?`);
-    console.error("Run `ahood snap --help` for a list of commands.");
-    process.exit(2);
+    exitUnknown(
+      [
+        `Unknown snap command: ${sub}`,
+        ...(suggestion ? [`Did you mean '${suggestion}'?`] : []),
+        "Run `ahood snap --help` for a list of commands.",
+      ],
+      rest,
+    );
   }
 
   if (rest.includes("--help") || rest.includes("-h")) {
@@ -541,19 +563,19 @@ async function main() {
 
   const handler = COMMANDS[resolvedCommand];
   if (!handler) {
-    console.error(`Unknown command: ${command}`);
     // Every previously-flat skill command moved under `ahood skill <verb>`
     // in this release -- if the typo looks like one of those, point at the
     // new form specifically rather than just the generic top-level list.
     const skillSuggestion = closestSkillCommand(command);
-    if (skillSuggestion) {
-      console.error(`Did you mean 'ahood skill ${skillSuggestion}'?`);
-    } else {
-      const suggestion = closestCommand(command);
-      if (suggestion) console.error(`Did you mean '${suggestion}'?`);
-    }
-    console.error("Run `ahood help` for a list of commands.");
-    process.exit(2);
+    const suggestion = skillSuggestion ? `ahood skill ${skillSuggestion}` : closestCommand(command);
+    exitUnknown(
+      [
+        `Unknown command: ${command}`,
+        ...(suggestion ? [`Did you mean '${suggestion}'?`] : []),
+        "Run `ahood help` for a list of commands.",
+      ],
+      args,
+    );
   }
 
   // Entities with their own sub-dispatch ("skill", "group", "snap" --
@@ -581,7 +603,17 @@ async function main() {
     console.error(message);
     const hint = authHint(resolvedCommand, error);
     if (hint) console.error(hint);
-    process.exit(exitCodeFor(error));
+    const exitCode = exitCodeFor(error);
+    // The one error convention under --json (ahood-cli#251), here rather than
+    // in each handler because that is how it drifted: `publish` printed
+    // {error}, `whoami` {authenticated: null, error}, and every other command
+    // left stdout empty, so a caller parsing stdout got nothing to parse on
+    // exactly the runs it most needed to. stderr and the exit code are
+    // unchanged; stdout gains {error, exit_code}. The message is the one
+    // http.ts already ran through sanitizeErrorMessage, and JSON.stringify
+    // escapes whatever control characters are left.
+    if (jsonRequested(args)) printJson(jsonError(message, exitCode));
+    process.exit(exitCode);
   }
 }
 

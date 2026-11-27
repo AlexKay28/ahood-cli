@@ -1,6 +1,7 @@
 import { apiJson } from "../http.js";
 import { parseArgs, YES_FLAGS } from "../flags.js";
 import { confirm } from "../confirm.js";
+import { assertJsonHasConsent, printJson } from "../json-output.js";
 import { getApiUrl } from "../config.js";
 
 // Mirrors GET /api/v1/groups' and GET /api/v1/groups/{slug}'s response
@@ -25,19 +26,29 @@ type Member = {
   joinedAt: string;
 };
 
-const CREATE_USAGE = "Usage: ahood group create <name> [--description <text>]";
+// `group members --json` passes the API's rows through, and that one route
+// answers in camelCase while every other key this CLI emits is snake_case
+// (ahood-cli#251). Each row gains the snake_case names; the camelCase ones
+// stay as deprecated aliases so a script reading `userId` doesn't break.
+function withSnakeCaseKeys(m: Member): Record<string, unknown> {
+  return { user_id: m.userId, avatar_url: m.avatarUrl, joined_at: m.joinedAt, ...m };
+}
+
+const CREATE_USAGE = "Usage: ahood group create <name> [--description <text>] [--json]";
 const LIST_USAGE = "Usage: ahood group list [--json]";
 const MEMBERS_USAGE = "Usage: ahood group members <group> [--json]";
 const INVITE_LINK_USAGE = "Usage: ahood group invite-link <group> [--json]";
-const JOIN_USAGE = "Usage: ahood group join <invite-url-or-token>";
-const REMOVE_MEMBER_USAGE = "Usage: ahood group remove-member <group> <username> [--yes]";
-const LEAVE_USAGE = "Usage: ahood group leave <group> [--yes]";
-const DELETE_USAGE = "Usage: ahood group delete <group> [--yes]";
+const JOIN_USAGE = "Usage: ahood group join <invite-url-or-token> [--json]";
+const REMOVE_MEMBER_USAGE = "Usage: ahood group remove-member <group> <username> [--yes] [--json]";
+const LEAVE_USAGE = "Usage: ahood group leave <group> [--yes] [--json]";
+const DELETE_USAGE = "Usage: ahood group delete <group> [--yes] [--json]";
 
 // Creates a group (caller becomes owner). Every verb here parses through
 // parseArgs before its first request (ahood-cli#260): `group delete team
-// --dry-run --yes` used to delete the group. --json on a write verb is
-// tolerated, not implemented (ahood-cli#251).
+// --dry-run --yes` used to delete the group. Every write verb here answers
+// --json with one document (ahood-cli#251): they used to accept the flag and
+// print prose, and `create`'s slug -- needed by every later `group` call --
+// could only be scraped out of "Created group Team (team).".
 export async function createGroup(args: string[]): Promise<void> {
   const parsed = parseArgs(args, { usage: CREATE_USAGE, booleans: ["--json"], values: ["--description"], min: 1, max: 1 });
   const name = parsed.positionals[0];
@@ -52,6 +63,11 @@ export async function createGroup(args: string[]): Promise<void> {
     body: JSON.stringify(body),
   });
 
+  if (parsed.has("--json")) {
+    // The route's own row, passed through like `group list --json`'s.
+    printJson(created);
+    return;
+  }
   console.log(`Created group ${created.name} (${created.slug}).`);
 }
 
@@ -85,7 +101,7 @@ export async function groupMembers(args: string[]): Promise<void> {
   );
 
   if (jsonOutput) {
-    console.log(JSON.stringify({ group, members }));
+    console.log(JSON.stringify({ group, members: members.map(withSnakeCaseKeys) }));
     return;
   }
   console.log(`${group.slug} - ${group.name}${group.description ? `: ${group.description}` : ""}`);
@@ -116,7 +132,9 @@ export async function inviteLink(args: string[]): Promise<void> {
   const url = `${getApiUrl()}/workspace/groups/join?token=${encodeURIComponent(token)}`;
 
   if (jsonOutput) {
-    console.log(JSON.stringify({ token, expiresAt, url }));
+    // `expiresAt` is a deprecated alias of `expires_at`, kept so existing
+    // scripts don't break (ahood-cli#251).
+    console.log(JSON.stringify({ token, expires_at: expiresAt, expiresAt, url }));
     return;
   }
   console.log(url);
@@ -147,14 +165,17 @@ function extractToken(input: string): string {
 export async function joinGroup(args: string[]): Promise<void> {
   // dashIsPositional: a raw invite token is base64url, so one in 64 starts
   // with "-" and must not be refused as an unknown flag.
-  const input = parseArgs(args, { usage: JOIN_USAGE, booleans: ["--json"], min: 1, max: 1, dashIsPositional: true })
-    .positionals[0];
-  const token = extractToken(input);
+  const parsed = parseArgs(args, { usage: JOIN_USAGE, booleans: ["--json"], min: 1, max: 1, dashIsPositional: true });
+  const token = extractToken(parsed.positionals[0]);
 
   const { groupSlug, groupName } = await apiJson<{ groupSlug: string; groupName: string }>(
     `/api/v1/groups/invites/${encodeURIComponent(token)}/accept`,
     { method: "POST" },
   );
+  if (parsed.has("--json")) {
+    printJson({ joined: true, slug: groupSlug, name: groupName });
+    return;
+  }
   console.log(`Joined ${groupName} (${groupSlug}).`);
 }
 
@@ -163,6 +184,8 @@ export async function joinGroup(args: string[]): Promise<void> {
 export async function removeMember(args: string[]): Promise<void> {
   const parsed = parseArgs(args, { usage: REMOVE_MEMBER_USAGE, booleans: [...YES_FLAGS, "--json"], min: 2, max: 2 });
   const yes = parsed.has(...YES_FLAGS);
+  const jsonOutput = parsed.has("--json");
+  assertJsonHasConsent(jsonOutput, yes, REMOVE_MEMBER_USAGE);
   const [slug, username] = parsed.positionals;
 
   // Mirrors deleteGroup's confirm-before-destroy pattern (CLAUDE.md:
@@ -182,6 +205,10 @@ export async function removeMember(args: string[]): Promise<void> {
     `/api/v1/groups/${encodeURIComponent(slug)}/members/${encodeURIComponent(username)}`,
     { method: "DELETE" },
   );
+  if (jsonOutput) {
+    printJson({ removed: true, slug, username });
+    return;
+  }
   console.log(`Removed ${username} from ${slug}.`);
 }
 
@@ -200,6 +227,8 @@ async function getOwnUsername(): Promise<string> {
 export async function leaveGroup(args: string[]): Promise<void> {
   const parsed = parseArgs(args, { usage: LEAVE_USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
   const yes = parsed.has(...YES_FLAGS);
+  const jsonOutput = parsed.has("--json");
+  assertJsonHasConsent(jsonOutput, yes, LEAVE_USAGE);
   const slug = parsed.positionals[0];
 
   // Same confirm-before-destroy gate as removeMember -- an accidentally
@@ -216,6 +245,10 @@ export async function leaveGroup(args: string[]): Promise<void> {
     `/api/v1/groups/${encodeURIComponent(slug)}/members/${encodeURIComponent(username)}`,
     { method: "DELETE" },
   );
+  if (jsonOutput) {
+    printJson({ left: true, slug, username });
+    return;
+  }
   console.log(`Left ${slug}.`);
 }
 
@@ -225,6 +258,8 @@ export async function leaveGroup(args: string[]): Promise<void> {
 export async function deleteGroup(args: string[]): Promise<void> {
   const parsed = parseArgs(args, { usage: DELETE_USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
   const yes = parsed.has(...YES_FLAGS);
+  const jsonOutput = parsed.has("--json");
+  assertJsonHasConsent(jsonOutput, yes, DELETE_USAGE);
   const slug = parsed.positionals[0];
 
   const confirmed = yes
@@ -237,5 +272,9 @@ export async function deleteGroup(args: string[]): Promise<void> {
   }
 
   await apiJson<{ deleted: boolean }>(`/api/v1/groups/${encodeURIComponent(slug)}`, { method: "DELETE" });
+  if (jsonOutput) {
+    printJson({ deleted: true, slug });
+    return;
+  }
   console.log(`Deleted group ${slug}.`);
 }

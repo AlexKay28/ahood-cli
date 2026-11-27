@@ -1,5 +1,6 @@
 import { apiJson } from "../http.js";
 import { confirm } from "../confirm.js";
+import { assertJsonHasConsent, printJson } from "../json-output.js";
 import { UsageError } from "../usage-error.js";
 import { parseArgs, YES_FLAGS } from "../flags.js";
 
@@ -15,14 +16,14 @@ export async function token(args: string[]): Promise<void> {
     case "revoke":
       return tokenRevoke(rest);
     default:
-      throw new UsageError("Usage: ahood token create <name>|list [--json]|revoke <id> [--yes]");
+      throw new UsageError("Usage: ahood token create <name> [--json]|list [--json]|revoke <id> [--yes] [--json]");
   }
 }
 
 async function tokenCreate(args: string[]): Promise<void> {
   // `token create --json` used to POST a token literally named "--json"
-  // (ahood-cli#260). --json is tolerated, not implemented (ahood-cli#251).
-  const { positionals } = parseArgs(args, { usage: "Usage: ahood token create <name>", booleans: ["--json"], min: 1, max: 1 });
+  // (ahood-cli#260).
+  const { positionals, has } = parseArgs(args, { usage: "Usage: ahood token create <name> [--json]", booleans: ["--json"], min: 1, max: 1 });
   const name = positionals[0];
   // Note: this itself requires an existing session-backed token or a
   // browser login -- per docs/adr/backend/0001-backend-services.md's Phase
@@ -37,6 +38,13 @@ async function tokenCreate(args: string[]): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
+  if (has("--json")) {
+    // The route's response as-is, raw token included: this is the only time
+    // it is ever shown, and a script minting a CI token needs it on stdout
+    // without scraping it out of a sentence (ahood-cli#251).
+    printJson(result);
+    return;
+  }
   console.log(`Created token "${result.name}": ${result.token}`);
   console.log("Copy this now -- it will not be shown again.");
 }
@@ -58,14 +66,18 @@ async function tokenList(args: string[]): Promise<void> {
   }
 }
 
+const REVOKE_USAGE = "Usage: ahood token revoke <id> [--yes] [--json]";
+
 async function tokenRevoke(args: string[]): Promise<void> {
   const parsed = parseArgs(args, {
-    usage: "Usage: ahood token revoke <id> [--yes]",
+    usage: REVOKE_USAGE,
     booleans: [...YES_FLAGS, "--json"],
     min: 1,
     max: 1,
   });
   const yes = parsed.has(...YES_FLAGS);
+  const jsonOutput = parsed.has("--json");
+  assertJsonHasConsent(jsonOutput, yes, REVOKE_USAGE);
   const id = parsed.positionals[0];
 
   // --yes bypasses both the lookup and the prompt entirely, preserving the
@@ -80,6 +92,10 @@ async function tokenRevoke(args: string[]): Promise<void> {
   }
 
   await apiJson(`/api/v1/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (jsonOutput) {
+    printJson({ id, revoked: true });
+    return;
+  }
   console.log(`Revoked ${id}`);
 }
 

@@ -59,8 +59,10 @@ export function noStrongMatchHeader(query: string): string {
 
 // ahood#1612: a search that failed only because the caller has no account
 // still leaves the user wanting results -- point at the same search on the
-// web. Human output only: --json callers get the unchanged {error} shape and
-// exit code 4 (the ApiError status is kept).
+// web. Human output only: under --json the message stays the server's own, and
+// main()'s catch reports it as {error, exit_code: 4} like any other failure
+// (ahood-cli#251 -- this used to claim an "{error} shape" that only `publish`
+// ever printed; search left stdout empty). The ApiError status is kept.
 export async function searchSkillsWithWebFallback(
   query: string,
   json: boolean,

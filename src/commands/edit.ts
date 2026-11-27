@@ -3,6 +3,7 @@ import { parseArgs } from "../flags.js";
 import { parseOwnerSkill, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
+import { printJson } from "../json-output.js";
 
 type UpdateResponse = {
   slug: string;
@@ -21,7 +22,7 @@ type UpdateResponse = {
 };
 
 const USAGE =
-  "Usage: ahood skill edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]";
+  "Usage: ahood skill edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>] [--json]";
 
 // Mirrors PATCH /api/v1/skills/{owner}/{skill}'s allow-list exactly
 // (lib/skills/mutations.ts's UpdateSkillInput) -- only a field the caller
@@ -31,8 +32,7 @@ const USAGE =
 export async function edit(args: string[], scope?: KindScope): Promise<void> {
   // An undeclared flag is refused rather than dropped: `--visiblity public`
   // next to a valid --tagline used to PATCH the tagline alone and exit 0, so
-  // the skill stayed private with nothing to say so (ahood-cli#260). --json is
-  // tolerated, not implemented (ahood-cli#251).
+  // the skill stayed private with nothing to say so (ahood-cli#260).
   const parsed = parseArgs(args, {
     usage: USAGE,
     booleans: ["--json"],
@@ -83,8 +83,16 @@ export async function edit(args: string[], scope?: KindScope): Promise<void> {
     },
   );
 
-  console.log(`Updated ${owner}/${updated.slug}: tagline=${JSON.stringify(updated.tagline)}, license=${JSON.stringify(updated.license)}, visibility=${updated.visibility}, tags=[${updated.tags.join(", ")}]`);
+  // tags_warning is warned about in both modes: stderr is the human channel
+  // under --json too, and the field itself is in the document.
   if (updated.tags_warning) {
     console.warn(`WARNING: ${updated.tags_warning}`);
   }
+  if (parsed.has("--json")) {
+    // The PATCH response as the registry returned it (ahood-cli#251), plus the
+    // owner/skill the caller addressed -- the response carries only the slug.
+    printJson({ owner, skill, ...updated });
+    return;
+  }
+  console.log(`Updated ${owner}/${updated.slug}: tagline=${JSON.stringify(updated.tagline)}, license=${JSON.stringify(updated.license)}, visibility=${updated.visibility}, tags=[${updated.tags.join(", ")}]`);
 }

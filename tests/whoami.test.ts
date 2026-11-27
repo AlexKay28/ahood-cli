@@ -144,16 +144,46 @@ describe("whoami", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it("--json emits profileStatus: not_found (and exit 5) when the profile 404 isn't flagged as provisioning", async () => {
+  // ahood-cli#251: profile_status is the key, profileStatus a deprecated alias;
+  // a failed check also carries the --json error convention's {error, exit_code}
+  // and still says why on stderr.
+  it("--json emits profile_status: not_found (and exit 5) when the profile 404 isn't flagged as provisioning", async () => {
     process.env.AHOOD_TOKEN = "tok_test";
     stubApiRoutes({ "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } } });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     await whoami(["--json"]);
-    expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: true, mode: "session", profileStatus: "not_found" }));
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const doc = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(doc).toMatchObject({ authenticated: true, mode: "session", profile_status: "not_found", profileStatus: "not_found", exit_code: 5 });
+    expect(doc.error).toMatch(/no profile was found/);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/no profile was found/));
     expect(process.exitCode).toBe(5);
   });
 
-  it("--json emits profileStatus: provisioning (and exit 0) when the profile 404s with provisioning: true", async () => {
+  it("--json adds {error, exit_code} to the not-logged-in, invalid-token and unverifiable documents", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const last = () => JSON.parse(logSpy.mock.calls.at(-1)![0] as string);
+
+    delete process.env.AHOOD_TOKEN;
+    await whoami(["--json"]);
+    expect(last()).toMatchObject({ authenticated: false, exit_code: 4 });
+    expect(last().error).toMatch(/Not logged in/);
+
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApiRoutes({ "/api/v1/auth/tokens": { status: 401, body: { error: "Unauthorized" } } });
+    await whoami(["--json"]);
+    expect(last()).toMatchObject({ authenticated: false, reason: "invalid_token", exit_code: 4 });
+
+    stubApiRoutes({ "/api/v1/auth/tokens": { status: 400, body: { error: "boom" } } });
+    await whoami(["--json"]);
+    // `error` stays the bare underlying message it always was here.
+    expect(last()).toEqual({ authenticated: null, error: "boom", exit_code: 1 });
+    process.exitCode = 0;
+  });
+
+  it("--json emits profile_status: provisioning (and exit 0) when the profile 404s with provisioning: true", async () => {
     process.env.AHOOD_TOKEN = "tok_test";
     stubApiRoutes({
       "/api/v1/auth/tokens": { status: 200, body: { tokens: [] } },
@@ -161,7 +191,9 @@ describe("whoami", () => {
     });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await whoami(["--json"]);
-    expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: true, mode: "session", profileStatus: "provisioning" }));
+    expect(logSpy).toHaveBeenCalledWith(
+      JSON.stringify({ authenticated: true, mode: "session", profile_status: "provisioning", profileStatus: "provisioning" }),
+    );
     expect(process.exitCode).toBe(0);
   });
 

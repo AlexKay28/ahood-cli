@@ -33,6 +33,7 @@ Installed alice/pdf-tools@1.4.0 to .claude/skills/alice@pdf-tools
 - [Kinds: skills, agents, and MCP servers](#kinds-skills-agents-and-mcp-servers)
 - [Commands](#commands)
 - [Exit codes](#exit-codes)
+- [JSON output](#json-output)
 - [Compatibility](#compatibility)
 - [Shell completion](#shell-completion)
 - [Using ahood from an AI agent](#using-ahood-from-an-ai-agent)
@@ -194,7 +195,7 @@ checks `@ahood/opencode-plugin@<CLI version>` is published and warns if it is no
 - **Real versioning, not just a snapshot.** Every publish is a semver version with its own changelog (`ahood skill versions`), and installs are pinned by checksum in a lockfile (`.claude/skills.lock.json`) so `ahood skill update` only ever moves forward on purpose.
 - **Mistakes are recoverable.** Published the wrong version? `ahood skill unpublish owner/skill@1.2.3` yanks just that one — existing installs keep working, new ones are warned off it — without deleting the skill's whole history.
 - **Public or private, your call.** `ahood skill edit owner/skill --visibility private` scopes a skill to just you; `ahood skill list` shows both.
-- **Scriptable by design.** Every read command and most write commands support `--json`; `ahood skill publish --json` emits a single structured result object instead of progress text, and exit codes (below) are stable enough to branch on in a script.
+- **Scriptable by design.** Every read command and every write command supports `--json` (the exceptions are the interactive `login` and `setup`): one JSON document on stdout, `{error, exit_code}` on failure (see [JSON output](#json-output)), and exit codes (below) stable enough to branch on in a script.
 - **Headless-first.** Set `AHOOD_TOKEN` and skip `login` entirely — every command checks it first, which is what CI pipelines and AI agents both actually want.
 
 ## Configuration
@@ -397,9 +398,9 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | Command | What it does |
 | --- | --- |
 | `ahood login` | Device-code browser login, stores a token locally. |
-| `ahood logout` | Removes the stored token. |
+| `ahood logout [--json]` | Removes the stored token. |
 | `ahood whoami [--json]` | Reports whether your stored token still authenticates. |
-| `ahood token create <name>\|list [--json]\|revoke <id> [--yes]` | Manage personal API tokens. |
+| `ahood token create <name> [--json]\|list [--json]\|revoke <id> [--yes] [--json]` | Manage personal API tokens. |
 | `ahood status [--json]` | Show every install on this machine against the registry: updates, pins, and evolution on your own artifacts. |
 | `ahood sync [<owner>/<slug> \| <slug> ...] [--yes] [--dry-run] [--json]` | Update installs that are behind, showing each one's diff and asking y/N first. |
 | `ahood pin <owner>/<slug>[@version] [--json]` | Hold an install at one version so `ahood sync` never moves it past that. |
@@ -408,7 +409,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood find [<query>] [--kind <kind>] [--sort rank\|downloads\|stars\|recent\|updated] [--limit <n>] [--json]` | Find skills, agents, MCP servers, docs, project guides, loops and prompts in the registry. |
 | `ahood try <owner>/<slug> [--json]` | Print an artifact's root document (SKILL.md, AGENT.md, LOOP.md, ...) without installing it. |
 | `ahood stats [--json]` | Show your own artifacts with their views, reads, downloads, stars and votes, the totals, recent activity and self-evolution counts. |
-| `ahood feedback "<message>" [--kind bug\|idea\|search_miss\|confusing\|praise] [--query <q>] [--artifact <owner/slug>]` | Send feedback (a bug, an idea, a search that found nothing, something confusing, praise) to the ahood team. |
+| `ahood feedback "<message>" [--kind bug\|idea\|search_miss\|confusing\|praise] [--query <q>] [--artifact <owner/slug>] [--json]` | Send feedback (a bug, an idea, a search that found nothing, something confusing, praise) to the ahood team. |
 | `ahood setup [claude\|codex\|opencode] [--remove <harness>] [--yes] [--dry-run] [--store-token\|--no-store-token] [--no-auto-update]` | Add ahood (MCP server and /ahood commands) to Claude Code, Codex or opencode, or remove it again. |
 | `ahood doctor [--offline] [--json]` | Check each harness's ahood setup, the MCP server, your login and the CLI version. |
 | `ahood completion <bash\|zsh\|fish>` | Print a shell completion script for the command names. |
@@ -423,18 +424,18 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood skill versions <owner>/<skill> [--json]` | List a skill's published-version history -- version, changelog, size, and publish date. |
 | `ahood skill diff <owner>/<skill> <versionA> <versionB> [--json]` | Show what changed between two published versions -- a SKILL.md diff plus an added/removed/changed file summary. |
 | `ahood skill list [--json]` | List your own skills, public and private. |
-| `ahood skill add <owner>/<skill>[@version]` | Install a skill into .claude/skills/, pinned in the lockfile. |
+| `ahood skill add <owner>/<skill>[@version] [--json]` | Install a skill into .claude/skills/, pinned in the lockfile. |
 | `ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]` | Deprecated; prefer `ahood sync`, which moves the same lockfile pin(s) forward across every project on this machine. |
 | `ahood skill outdated [<owner>/<skill> ...] [--json]` | Deprecated; prefer `ahood status`, which does the same read-only staleness check across every project on this machine. |
-| `ahood skill remove <owner>/<skill> [--yes]` | Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed). |
-| `ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a skill you own, changing only the flags you pass. |
-| `ahood skill unpublish <owner>/<skill>[@version] [--yes]` | Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed). |
-| `ahood skill star <owner>/<skill>` | Star a skill. |
-| `ahood skill unstar <owner>/<skill>` | Remove your star from a skill. |
+| `ahood skill remove <owner>/<skill> [--yes] [--json]` | Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed). |
+| `ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]` | Update a skill you own, changing only the flags you pass. |
+| `ahood skill unpublish <owner>/<skill>[@version] [--yes] [--json]` | Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed). |
+| `ahood skill star <owner>/<skill> [--json]` | Star a skill. |
+| `ahood skill unstar <owner>/<skill> [--json]` | Remove your star from a skill. |
 | `ahood skill vote <owner>/<skill> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote a skill up or down after using it, or clear your vote with --clear. |
-| `ahood skill share <owner>/<skill> --group <group>` | Share a skill you own with a group, without changing its public/private visibility. |
-| `ahood skill unshare <owner>/<skill> --group <group>` | Stop sharing a skill you own with a group. |
-| `ahood skill init [name]` | Scaffold a new skill folder with a minimal, valid SKILL.md. |
+| `ahood skill share <owner>/<skill> --group <group> [--json]` | Share a skill you own with a group, without changing its public/private visibility. |
+| `ahood skill unshare <owner>/<skill> --group <group> [--json]` | Stop sharing a skill you own with a group. |
+| `ahood skill init [name] [--json]` | Scaffold a new skill folder with a minimal, valid SKILL.md. |
 | `ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill\|agent\|mcp\|doc\|project\|loop\|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public\|private] [--json]` | Publish a new version of a skill, agent, mcp server manifest, doc, project guide, loop, or prompt from a folder containing SKILL.md, AGENT.md, server.json, DOC.md, PROJECT.md, LOOP.md, or PROMPT.md, creating the skill first if it doesn't already exist. |
 
 ### Agent
@@ -447,18 +448,18 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood agent versions <owner>/<agent> [--json]` | List a agent's published-version history. |
 | `ahood agent diff <owner>/<agent> <versionA> <versionB> [--json]` | Show what changed between two published versions of an agent. |
 | `ahood agent list [--json]` | List your own agents, public and private. |
-| `ahood agent add <owner>/<agent>[@version]` | Install an agent into .claude/agents/<owner>@<agent>.md, pinned in the lockfile. |
+| `ahood agent add <owner>/<agent>[@version] [--json]` | Install an agent into .claude/agents/<owner>@<agent>.md, pinned in the lockfile. |
 | `ahood agent update [<owner>/<agent> ...] [--dry-run] [--json]` | Move agent pins forward to the latest version. |
 | `ahood agent outdated [<owner>/<agent> ...] [--json]` | Read-only staleness check for installed agents. |
-| `ahood agent remove <owner>/<agent> [--yes]` | Uninstall and unpin an agent (local only, prompts unless --yes is passed). |
-| `ahood agent edit <owner>/<agent> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update an agent you own, changing only the flags you pass. |
-| `ahood agent unpublish <owner>/<agent>[@version] [--yes]` | Delete an agent from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
-| `ahood agent star <owner>/<agent>` | Star an agent. |
-| `ahood agent unstar <owner>/<agent>` | Remove your star from an agent. |
+| `ahood agent remove <owner>/<agent> [--yes] [--json]` | Uninstall and unpin an agent (local only, prompts unless --yes is passed). |
+| `ahood agent edit <owner>/<agent> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]` | Update an agent you own, changing only the flags you pass. |
+| `ahood agent unpublish <owner>/<agent>[@version] [--yes] [--json]` | Delete an agent from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
+| `ahood agent star <owner>/<agent> [--json]` | Star an agent. |
+| `ahood agent unstar <owner>/<agent> [--json]` | Remove your star from an agent. |
 | `ahood agent vote <owner>/<agent> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote an agent up or down after using it, or clear your vote with --clear. |
-| `ahood agent share <owner>/<agent> --group <group>` | Share an agent you own with a group, without changing its visibility. |
-| `ahood agent unshare <owner>/<agent> --group <group>` | Stop sharing an agent you own with a group. |
-| `ahood agent init [name]` | Scaffold a new agent folder with a minimal, valid AGENT.md. |
+| `ahood agent share <owner>/<agent> --group <group> [--json]` | Share an agent you own with a group, without changing its visibility. |
+| `ahood agent unshare <owner>/<agent> --group <group> [--json]` | Stop sharing an agent you own with a group. |
+| `ahood agent init [name] [--json]` | Scaffold a new agent folder with a minimal, valid AGENT.md. |
 | `ahood agent publish <owner>/<agent>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public\|private] [--json]` | Publish a new version of an agent from a folder containing AGENT.md, creating it first if it doesn't exist yet. |
 
 ### MCP (server manifests)
@@ -471,18 +472,18 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood mcp versions <owner>/<server> [--json]` | List a MCP server manifest's published-version history. |
 | `ahood mcp diff <owner>/<server> <versionA> <versionB> [--json]` | Show what changed between two published versions of an MCP server manifest. |
 | `ahood mcp list [--json]` | List your own MCP server manifests, public and private. |
-| `ahood mcp add <owner>/<server>[@version]` | Install an MCP server manifest into an entry in .mcp.json, pinned in the lockfile. |
+| `ahood mcp add <owner>/<server>[@version] [--json]` | Install an MCP server manifest into an entry in .mcp.json, pinned in the lockfile. |
 | `ahood mcp update [<owner>/<server> ...] [--dry-run] [--json]` | Move MCP server manifest pins forward to the latest version. |
 | `ahood mcp outdated [<owner>/<server> ...] [--json]` | Read-only staleness check for installed MCP server manifests. |
-| `ahood mcp remove <owner>/<server> [--yes]` | Uninstall and unpin an MCP server manifest (local only, prompts unless --yes is passed). |
-| `ahood mcp edit <owner>/<server> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update an MCP server manifest you own, changing only the flags you pass. |
-| `ahood mcp unpublish <owner>/<server>[@version] [--yes]` | Delete an MCP server manifest from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
-| `ahood mcp star <owner>/<server>` | Star an MCP server manifest. |
-| `ahood mcp unstar <owner>/<server>` | Remove your star from an MCP server manifest. |
+| `ahood mcp remove <owner>/<server> [--yes] [--json]` | Uninstall and unpin an MCP server manifest (local only, prompts unless --yes is passed). |
+| `ahood mcp edit <owner>/<server> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]` | Update an MCP server manifest you own, changing only the flags you pass. |
+| `ahood mcp unpublish <owner>/<server>[@version] [--yes] [--json]` | Delete an MCP server manifest from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
+| `ahood mcp star <owner>/<server> [--json]` | Star an MCP server manifest. |
+| `ahood mcp unstar <owner>/<server> [--json]` | Remove your star from an MCP server manifest. |
 | `ahood mcp vote <owner>/<server> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote an MCP server manifest up or down after using it, or clear your vote with --clear. |
-| `ahood mcp share <owner>/<server> --group <group>` | Share an MCP server manifest you own with a group, without changing its visibility. |
-| `ahood mcp unshare <owner>/<server> --group <group>` | Stop sharing an MCP server manifest you own with a group. |
-| `ahood mcp init [name]` | Scaffold a new MCP server manifest folder with a minimal, valid server.json. |
+| `ahood mcp share <owner>/<server> --group <group> [--json]` | Share an MCP server manifest you own with a group, without changing its visibility. |
+| `ahood mcp unshare <owner>/<server> --group <group> [--json]` | Stop sharing an MCP server manifest you own with a group. |
+| `ahood mcp init [name] [--json]` | Scaffold a new MCP server manifest folder with a minimal, valid server.json. |
 | `ahood mcp publish <owner>/<server>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public\|private] [--json]` | Publish a new version of an MCP server manifest from a folder containing server.json, creating it first if it doesn't exist yet. |
 
 ### Doc
@@ -495,18 +496,18 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood doc versions <owner>/<doc> [--json]` | List a doc's published-version history. |
 | `ahood doc diff <owner>/<doc> <versionA> <versionB> [--json]` | Show what changed between two published versions of a doc. |
 | `ahood doc list [--json]` | List your own docs, public and private. |
-| `ahood doc add <owner>/<doc>[@version]` | Install a doc into .claude/docs/<owner>@<doc>.md, pinned in the lockfile. |
+| `ahood doc add <owner>/<doc>[@version] [--json]` | Install a doc into .claude/docs/<owner>@<doc>.md, pinned in the lockfile. |
 | `ahood doc update [<owner>/<doc> ...] [--dry-run] [--json]` | Move doc pins forward to the latest version. |
 | `ahood doc outdated [<owner>/<doc> ...] [--json]` | Read-only staleness check for installed docs. |
-| `ahood doc remove <owner>/<doc> [--yes]` | Uninstall and unpin a doc (local only, prompts unless --yes is passed). |
-| `ahood doc edit <owner>/<doc> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a doc you own, changing only the flags you pass. |
-| `ahood doc unpublish <owner>/<doc>[@version] [--yes]` | Delete a doc from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
-| `ahood doc star <owner>/<doc>` | Star a doc. |
-| `ahood doc unstar <owner>/<doc>` | Remove your star from a doc. |
+| `ahood doc remove <owner>/<doc> [--yes] [--json]` | Uninstall and unpin a doc (local only, prompts unless --yes is passed). |
+| `ahood doc edit <owner>/<doc> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]` | Update a doc you own, changing only the flags you pass. |
+| `ahood doc unpublish <owner>/<doc>[@version] [--yes] [--json]` | Delete a doc from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
+| `ahood doc star <owner>/<doc> [--json]` | Star a doc. |
+| `ahood doc unstar <owner>/<doc> [--json]` | Remove your star from a doc. |
 | `ahood doc vote <owner>/<doc> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote a doc up or down after using it, or clear your vote with --clear. |
-| `ahood doc share <owner>/<doc> --group <group>` | Share a doc you own with a group, without changing its visibility. |
-| `ahood doc unshare <owner>/<doc> --group <group>` | Stop sharing a doc you own with a group. |
-| `ahood doc init [name]` | Scaffold a new doc folder with a minimal, valid DOC.md. |
+| `ahood doc share <owner>/<doc> --group <group> [--json]` | Share a doc you own with a group, without changing its visibility. |
+| `ahood doc unshare <owner>/<doc> --group <group> [--json]` | Stop sharing a doc you own with a group. |
+| `ahood doc init [name] [--json]` | Scaffold a new doc folder with a minimal, valid DOC.md. |
 | `ahood doc publish <owner>/<doc>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public\|private] [--json]` | Publish a new version of a doc from a folder containing DOC.md, creating it first if it doesn't exist yet. |
 
 ### Project
@@ -520,18 +521,18 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood project versions <owner>/<slug> [--json]` | List a project guide's published-version history. |
 | `ahood project diff <owner>/<slug> <versionA> <versionB> [--json]` | Show what changed between two published versions of a project guide. |
 | `ahood project list [--json]` | List your own project guides, public and private. |
-| `ahood project add <owner>/<slug>[@version]` | Install a project guide into .claude/project.md, pinned in the lockfile. |
+| `ahood project add <owner>/<slug>[@version] [--json]` | Install a project guide into .claude/project.md, pinned in the lockfile. |
 | `ahood project update [<owner>/<slug> ...] [--dry-run] [--json]` | Move project guide pins forward to the latest version. |
 | `ahood project outdated [<owner>/<slug> ...] [--json]` | Read-only staleness check for installed project guides. |
-| `ahood project remove <owner>/<slug> [--yes]` | Uninstall and unpin a project guide (local only, prompts unless --yes is passed). |
-| `ahood project edit <owner>/<slug> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a project guide you own, changing only the flags you pass. |
-| `ahood project unpublish <owner>/<slug>[@version] [--yes]` | Delete a project guide from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
-| `ahood project star <owner>/<slug>` | Star a project guide. |
-| `ahood project unstar <owner>/<slug>` | Remove your star from a project guide. |
+| `ahood project remove <owner>/<slug> [--yes] [--json]` | Uninstall and unpin a project guide (local only, prompts unless --yes is passed). |
+| `ahood project edit <owner>/<slug> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]` | Update a project guide you own, changing only the flags you pass. |
+| `ahood project unpublish <owner>/<slug>[@version] [--yes] [--json]` | Delete a project guide from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
+| `ahood project star <owner>/<slug> [--json]` | Star a project guide. |
+| `ahood project unstar <owner>/<slug> [--json]` | Remove your star from a project guide. |
 | `ahood project vote <owner>/<slug> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote a project guide up or down after using it, or clear your vote with --clear. |
-| `ahood project share <owner>/<slug> --group <group>` | Share a project guide you own with a group, without changing its visibility. |
-| `ahood project unshare <owner>/<slug> --group <group>` | Stop sharing a project guide you own with a group. |
-| `ahood project init [name] [--project <git-remote> \| --no-project]` | Scaffold a new project guide folder with a minimal, valid PROJECT.md. |
+| `ahood project share <owner>/<slug> --group <group> [--json]` | Share a project guide you own with a group, without changing its visibility. |
+| `ahood project unshare <owner>/<slug> --group <group> [--json]` | Stop sharing a project guide you own with a group. |
+| `ahood project init [name] [--project <git-remote> \| --no-project] [--json]` | Scaffold a new project guide folder with a minimal, valid PROJECT.md. |
 | `ahood project publish <owner>/<slug>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public\|private] [--json]` | Publish a new version of a project guide from a folder containing PROJECT.md, creating it first if it doesn't exist yet. |
 
 ### Loop
@@ -544,18 +545,18 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood loop versions <owner>/<loop> [--json]` | List a loop's published-version history. |
 | `ahood loop diff <owner>/<loop> <versionA> <versionB> [--json]` | Show what changed between two published versions of a loop. |
 | `ahood loop list [--json]` | List your own loops, public and private. |
-| `ahood loop add <owner>/<loop>[@version]` | Install a loop into .claude/loops/<owner>@<loop>.md, pinned in the lockfile. |
+| `ahood loop add <owner>/<loop>[@version] [--json]` | Install a loop into .claude/loops/<owner>@<loop>.md, pinned in the lockfile. |
 | `ahood loop update [<owner>/<loop> ...] [--dry-run] [--json]` | Move loop pins forward to the latest version. |
 | `ahood loop outdated [<owner>/<loop> ...] [--json]` | Read-only staleness check for installed loops. |
-| `ahood loop remove <owner>/<loop> [--yes]` | Uninstall and unpin a loop (local only, prompts unless --yes is passed). |
-| `ahood loop edit <owner>/<loop> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a loop you own, changing only the flags you pass. |
-| `ahood loop unpublish <owner>/<loop>[@version] [--yes]` | Delete a loop from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
-| `ahood loop star <owner>/<loop>` | Star a loop. |
-| `ahood loop unstar <owner>/<loop>` | Remove your star from a loop. |
+| `ahood loop remove <owner>/<loop> [--yes] [--json]` | Uninstall and unpin a loop (local only, prompts unless --yes is passed). |
+| `ahood loop edit <owner>/<loop> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]` | Update a loop you own, changing only the flags you pass. |
+| `ahood loop unpublish <owner>/<loop>[@version] [--yes] [--json]` | Delete a loop from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
+| `ahood loop star <owner>/<loop> [--json]` | Star a loop. |
+| `ahood loop unstar <owner>/<loop> [--json]` | Remove your star from a loop. |
 | `ahood loop vote <owner>/<loop> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote a loop up or down after using it, or clear your vote with --clear. |
-| `ahood loop share <owner>/<loop> --group <group>` | Share a loop you own with a group, without changing its visibility. |
-| `ahood loop unshare <owner>/<loop> --group <group>` | Stop sharing a loop you own with a group. |
-| `ahood loop init [name]` | Scaffold a new loop folder with a minimal, valid LOOP.md. |
+| `ahood loop share <owner>/<loop> --group <group> [--json]` | Share a loop you own with a group, without changing its visibility. |
+| `ahood loop unshare <owner>/<loop> --group <group> [--json]` | Stop sharing a loop you own with a group. |
+| `ahood loop init [name] [--json]` | Scaffold a new loop folder with a minimal, valid LOOP.md. |
 | `ahood loop publish <owner>/<loop>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public\|private] [--json]` | Publish a new version of a loop from a folder containing LOOP.md, creating it first if it doesn't exist yet. |
 
 ### Prompt
@@ -569,28 +570,28 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood prompt versions <owner>/<prompt> [--json]` | List a prompt's published-version history. |
 | `ahood prompt diff <owner>/<prompt> <versionA> <versionB> [--json]` | Show what changed between two published versions of a prompt. |
 | `ahood prompt list [--json]` | List your own prompts, public and private. |
-| `ahood prompt edit <owner>/<prompt> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a prompt you own, changing only the flags you pass. |
-| `ahood prompt unpublish <owner>/<prompt>[@version] [--yes]` | Delete a prompt from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
-| `ahood prompt star <owner>/<prompt>` | Star a prompt. |
-| `ahood prompt unstar <owner>/<prompt>` | Remove your star from a prompt. |
+| `ahood prompt edit <owner>/<prompt> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]` | Update a prompt you own, changing only the flags you pass. |
+| `ahood prompt unpublish <owner>/<prompt>[@version] [--yes] [--json]` | Delete a prompt from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
+| `ahood prompt star <owner>/<prompt> [--json]` | Star a prompt. |
+| `ahood prompt unstar <owner>/<prompt> [--json]` | Remove your star from a prompt. |
 | `ahood prompt vote <owner>/<prompt> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote a prompt up or down after using it, or clear your vote with --clear. |
-| `ahood prompt share <owner>/<prompt> --group <group>` | Share a prompt you own with a group, without changing its visibility. |
-| `ahood prompt unshare <owner>/<prompt> --group <group>` | Stop sharing a prompt you own with a group. |
-| `ahood prompt init [name]` | Scaffold a new prompt folder with a minimal, valid PROMPT.md. |
+| `ahood prompt share <owner>/<prompt> --group <group> [--json]` | Share a prompt you own with a group, without changing its visibility. |
+| `ahood prompt unshare <owner>/<prompt> --group <group> [--json]` | Stop sharing a prompt you own with a group. |
+| `ahood prompt init [name] [--json]` | Scaffold a new prompt folder with a minimal, valid PROMPT.md. |
 | `ahood prompt publish <owner>/<prompt>@<version> [--path <dir>] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public\|private] [--json]` | Publish a new version of a prompt from a folder containing PROMPT.md, creating it first if it doesn't exist yet. |
 
 ### Group
 
 | Command | What it does |
 | --- | --- |
-| `ahood group create <name> [--description <text>]` | Create a private group, becoming its owner. |
+| `ahood group create <name> [--description <text>] [--json]` | Create a private group, becoming its owner. |
 | `ahood group list [--json]` | List groups you own or belong to. |
 | `ahood group members <group> [--json]` | List a group's members and their role (owner-only visible to members). |
 | `ahood group invite-link <group> [--json]` | Create (or regenerate) a shareable invite link for a group you own. |
-| `ahood group join <invite-url-or-token>` | Join a group using an invite link or its raw token. |
-| `ahood group remove-member <group> <username> [--yes]` | Remove a member from a group you own (prompts for confirmation unless --yes is passed). |
-| `ahood group leave <group> [--yes]` | Leave a group you belong to (prompts for confirmation unless --yes is passed). |
-| `ahood group delete <group> [--yes]` | Permanently delete a group you own (prompts for confirmation unless --yes is passed). |
+| `ahood group join <invite-url-or-token> [--json]` | Join a group using an invite link or its raw token. |
+| `ahood group remove-member <group> <username> [--yes] [--json]` | Remove a member from a group you own (prompts for confirmation unless --yes is passed). |
+| `ahood group leave <group> [--yes] [--json]` | Leave a group you belong to (prompts for confirmation unless --yes is passed). |
+| `ahood group delete <group> [--yes] [--json]` | Permanently delete a group you own (prompts for confirmation unless --yes is passed). |
 
 ### Snap
 
@@ -600,9 +601,9 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood snap list [--json] [--limit <n>] [--tags tag1,tag2]` | List your own snaps, most recent first. |
 | `ahood snap search <query> [--json] [--limit <n>] [--tags tag1,tag2]` | Search your own snaps by content. |
 | `ahood snap show <id> [--json]` | Print a single snap's full content. |
-| `ahood snap remove <id> [--yes]` | Permanently delete a snap (prompts for confirmation unless --yes is passed). |
+| `ahood snap remove <id> [--yes] [--json]` | Permanently delete a snap (prompts for confirmation unless --yes is passed). |
 | `ahood snap share <id> [--json]` | Mint (or return the existing) shareable link for a snap. |
-| `ahood snap unshare <id> [--yes]` | Revoke a snap's share link (the snap itself is untouched; prompts for confirmation unless --yes is passed). |
+| `ahood snap unshare <id> [--yes] [--json]` | Revoke a snap's share link (the snap itself is untouched; prompts for confirmation unless --yes is passed). |
 | `ahood snap tags <id> [tag ...] [--clear] [--json]` | Print a snap's tags, or replace them with the tags given. |
 <!-- COMMANDS_TABLE_END -->
 
@@ -620,6 +621,46 @@ Stable across releases, safe to branch on in a script:
 | `4` | Authentication required or rejected (not logged in, or the token was refused) |
 | `5` | Not found |
 | `6` | Network/transport error, or an upstream server (5xx) error |
+
+## JSON output
+
+`--json` is one contract across commands, safe to build a script or an agent on:
+
+- **stdout is exactly one JSON document**, on success and on failure, and nothing else. Progress lines, warnings and hints go to stderr.
+- **Keys are snake_case.** Three older outputs used camelCase; the snake_case key is now there too and the camelCase one stays as a deprecated alias: `expires_at` (`expiresAt`) in `group invite-link`, `profile_status` (`profileStatus`) in `whoami`, and `user_id` / `avatar_url` / `joined_at` (`userId` / `avatarUrl` / `joinedAt`) on each member in `group members`.
+- **A failure is `{"error": "<message>", "exit_code": <n>}`** on stdout. The same message still goes to stderr, and the process exits with that same code (the [exit codes](#exit-codes) above), so a script can read whichever is convenient:
+
+  ```
+  $ ahood skill view alice/nope --json
+  {"error":"Not found","exit_code":5}        # stdout; stderr has the message, $? is 5
+  ```
+
+  `ahood whoami --json` keeps the fields it always had and adds these two to a failed check, e.g. `{"authenticated":false,"reason":"invalid_token","error":"...","exit_code":4}`. Two batch commands that finish with some items failed print their normal document, not this one, and exit `1`: `ahood sync --json` (each failure is a `results` entry) and `ahood skill update --dry-run --json` (the failures are named on stderr).
+- **JSON mode never prompts.** A command that would ask for confirmation needs `--yes` with `--json` (exit `2` otherwise, before anything is sent), `add --json` reads an MCP server's secrets from the environment only, and `ahood login`, which waits on a browser, refuses `--json`; set `AHOOD_TOKEN` instead. `ahood skill update` takes `--json` only with `--dry-run`; `ahood sync --yes --json` is the JSON way to apply updates.
+
+What the write commands print:
+
+| Command | `--json` document |
+| --- | --- |
+| `<kind> add` | `{owner, skill, version, kind, installed_path}` |
+| `<kind> remove --yes` | `{owner, skill, removed, mcp_entry}`; `mcp_entry` is `none`, `removed`, `left` (still in `.mcp.json`, remove it by hand) or `unchecked` (`.mcp.json` could not be read) |
+| `<kind> edit` | the updated entry: `{owner, skill, slug, tagline, license, visibility, tags, ...}` |
+| `<kind> publish` | `{version, status}`, plus `created` when this publish created the entry |
+| `<kind> unpublish --yes` | `{owner, skill, unpublished}`, or `{owner, skill, version, yanked}` for a single version |
+| `<kind> star` / `unstar` | `{owner, skill, starred}` |
+| `<kind> share` / `unshare` | `{owner, skill, group, shared}` |
+| `<kind> vote` | `{value, upvotes, downvotes}` |
+| `<kind> init` | `{kind, name, path}` |
+| `group create` | the new group: `{id, slug, name, ...}` |
+| `group join` | `{joined, slug, name}` |
+| `group leave --yes` / `remove-member --yes` | `{left, slug, username}` / `{removed, slug, username}` |
+| `group delete --yes` | `{deleted, slug}` |
+| `snap create` | `{id, created_at}` |
+| `snap remove --yes` / `unshare --yes` | `{id, deleted}` / `{id, shared}` |
+| `token create` | the new token's object, raw `token` included (shown only this once) |
+| `token revoke --yes` | `{id, revoked}` |
+| `feedback` | `{id, kind, sent}` |
+| `logout` | `{logged_out}` |
 
 ## Compatibility
 

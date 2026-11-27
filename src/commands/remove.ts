@@ -1,6 +1,7 @@
 import { existsSync, rmdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { confirm } from "../confirm.js";
+import { assertJsonHasConsent, jsonError, printJson } from "../json-output.js";
 import { readLockfile, removeLockfileEntry, withLock, writeJsonFileAtomic, type LockEntry } from "../lockfile.js";
 import {
   LOCKFILE_PATH, parseOwnerSkill, skillDir, agentPath, docPath, pinnedFilePath, MCP_CONFIG_PATH,
@@ -46,7 +47,7 @@ async function assertInstalledKind(scope: KindScope, owner: string, skill: strin
   }
 }
 
-const USAGE = "Usage: ahood skill remove <owner>/<skill> [--yes]";
+const USAGE = "Usage: ahood skill remove <owner>/<skill> [--yes] [--json]";
 
 // Only a kind's own root (.claude/skills, agents, docs, loops) -- never
 // .claude itself -- and rmdirSync refuses a non-empty directory anyway.
@@ -65,6 +66,8 @@ export async function remove(args: string[], scope?: KindScope): Promise<void> {
   // args[0] as the spec -- while `unpublish --yes a/b` went through.
   const parsed = parseArgs(args, { usage: USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
   const yes = parsed.has(...YES_FLAGS);
+  const jsonOutput = parsed.has("--json");
+  assertJsonHasConsent(jsonOutput, yes, USAGE);
   const { owner, skill } = parseOwnerSkill(parsed.positionals[0], USAGE);
   const key = `${owner}/${skill}`;
 
@@ -94,7 +97,11 @@ export async function remove(args: string[], scope?: KindScope): Promise<void> {
     !dirExisted && !agentExisted && !pinnedFileExisted && !isPinnedFileKind(lockEntry?.kind) && hadLockfileEntry;
 
   if (!dirExisted && !agentExisted && !pinnedFileExisted && !hadLockfileEntry) {
-    console.error(`${key} was not installed -- nothing to remove.`);
+    const message = `${key} was not installed -- nothing to remove.`;
+    console.error(message);
+    // Reported here rather than thrown, so main()'s catch never writes the
+    // --json failure document for it; this branch owes it (ahood-cli#251).
+    if (jsonOutput) printJson(jsonError(message, 1));
     process.exitCode = 1;
     return;
   }
@@ -216,7 +223,12 @@ export async function remove(args: string[], scope?: KindScope): Promise<void> {
   removeLockfileEntry(LOCKFILE_PATH, key);
   forgetInstallOrWarn(owner, skill);
 
+  // What became of the .mcp.json entry, for --json (ahood-cli#251): the two
+  // warnings below are the only notice that an entry -- and the secret in it
+  // -- outlived a "removed", and a caller reading stdout must not miss it.
+  let mcpEntry: "none" | "removed" | "left" | "unchecked" = removedMcpEntry ? "removed" : "none";
   if (mcpConfigUnreadable !== undefined && (lockEntry?.mcp_config_hash !== undefined || hadNoOnDiskFootprint)) {
+    mcpEntry = "unchecked";
     // Two independent pieces of evidence, because mcp_config_hash alone is
     // not sufficient: it is absent for any mcp entry installed before that
     // field existed, and for such a legacy pin the unreadable read also
@@ -250,6 +262,7 @@ export async function remove(args: string[], scope?: KindScope): Promise<void> {
         ` Fix the file, then delete the "${skill}" entry from mcpServers by hand.`,
     );
   } else if (mcpEntryPresent && !removedMcpEntry) {
+    mcpEntry = "left";
     console.warn(
       `WARNING: ${key} still has an entry in ${MCP_CONFIG_PATH} (which may contain secrets you entered)` +
         (mcpEntryModified ? " -- it appears to have been modified since install" : "") +
@@ -257,5 +270,9 @@ export async function remove(args: string[], scope?: KindScope): Promise<void> {
     );
   }
 
+  if (jsonOutput) {
+    printJson({ owner, skill, removed: true, mcp_entry: mcpEntry });
+    return;
+  }
   console.log(removedMcpEntry ? `Removed ${key} (including its ${MCP_CONFIG_PATH} entry)` : `Removed ${key}`);
 }

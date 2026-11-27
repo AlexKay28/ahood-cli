@@ -565,138 +565,131 @@ function assertValidPromptMd(path: string): void {
 // --json mode (ahood-cli#57): a CI/script caller needs one machine-readable
 // object on stdout, not the human progress lines below scraped with a
 // regex. jsonOutput therefore gates every intermediate console.log in this
-// flow, and the whole body is wrapped in a try/catch so ANY failure --
-// validation, network, or a rejected publish -- still yields exactly one
-// JSON object (`{error}`) rather than a human message, while still
-// rethrowing so index.ts's exit-code mapping (exitCodeFor) is unaffected.
+// flow. A failure -- validation, network, or a rejected publish -- is thrown
+// like any other command's: main()'s catch (index.ts) writes the one
+// {error, exit_code} document every --json command shares. This function used
+// to print its own {error} first, which was one of the two private error
+// shapes ahood-cli#251 folded into that convention.
 export async function publish(args: string[], scope?: KindScope): Promise<void> {
   const jsonOutput = args.includes("--json");
-  try {
-    const parsed = parsePublishArgs(args);
-    const { owner, skill, version, path, name, tagline, tags, license, homepage, repository, changelog, visibility: visibilityFlag } = parsed;
-    // A kind-scoped publish implies its kind. The dispatcher has already
-    // refused a contradictory --kind before this runs, so the flag (when the
-    // legacy `ahood skill publish` passes one through) and the scope can't
-    // disagree here.
-    const scopedKind: CliKind | undefined = strictKind(scope);
-    const kind = scopedKind ?? parsed.kind;
-    const via = scopedKind ? `ahood ${scope!.noun} publish` : `publish --kind ${kind}`;
+  const parsed = parsePublishArgs(args);
+  const { owner, skill, version, path, name, tagline, tags, license, homepage, repository, changelog, visibility: visibilityFlag } = parsed;
+  // A kind-scoped publish implies its kind. The dispatcher has already
+  // refused a contradictory --kind before this runs, so the flag (when the
+  // legacy `ahood skill publish` passes one through) and the scope can't
+  // disagree here.
+  const scopedKind: CliKind | undefined = strictKind(scope);
+  const kind = scopedKind ?? parsed.kind;
+  const via = scopedKind ? `ahood ${scope!.noun} publish` : `publish --kind ${kind}`;
 
-    const skillMdPath = join(path, KINDS.skill.rootDoc);
-    const hasSkillMd = existsSync(skillMdPath);
-    const resolvedKind = resolvePublishKind(path, kind as CliKind | undefined, via);
+  const skillMdPath = join(path, KINDS.skill.rootDoc);
+  const hasSkillMd = existsSync(skillMdPath);
+  const resolvedKind = resolvePublishKind(path, kind as CliKind | undefined, via);
 
-    // ahood-cli#93: fires for an explicit --kind skill, and for the
-    // inferred-skill case above (resolvedKind left undefined because
-    // SKILL.md was the only root file present) -- but not when SKILL.md
-    // merely happens to sit alongside an AGENT.md/server.json being
-    // published as --kind agent/mcp instead.
-    if (resolvedKind === "skill" || (resolvedKind === undefined && hasSkillMd)) {
-      warnAboutSkillDescription(skillMdPath);
-    }
-    if (resolvedKind === "prompt") assertValidPromptMd(path);
+  // ahood-cli#93: fires for an explicit --kind skill, and for the
+  // inferred-skill case above (resolvedKind left undefined because
+  // SKILL.md was the only root file present) -- but not when SKILL.md
+  // merely happens to sit alongside an AGENT.md/server.json being
+  // published as --kind agent/mcp instead.
+  if (resolvedKind === "skill" || (resolvedKind === undefined && hasSkillMd)) {
+    warnAboutSkillDescription(skillMdPath);
+  }
+  if (resolvedKind === "prompt") assertValidPromptMd(path);
 
-    if (scopedKind !== undefined) await assertPublishTargetKind(scope!, owner, skill);
+  if (scopedKind !== undefined) await assertPublishTargetKind(scope!, owner, skill);
 
-    const archive = await tarGzDirectory(path, KINDS[resolvedKind ?? "skill"].rootDoc);
+  const archive = await tarGzDirectory(path, KINDS[resolvedKind ?? "skill"].rootDoc);
 
-    const { init, created, visibility: createdVisibility } = await initVersion(
-      owner,
-      skill,
-      version,
-      archive.length,
-      changelog,
-      { name, tagline, tags, license, homepage, repository, kind: resolvedKind, visibility: visibilityFlag },
-      jsonOutput,
+  const { init, created, visibility: createdVisibility } = await initVersion(
+    owner,
+    skill,
+    version,
+    archive.length,
+    changelog,
+    { name, tagline, tags, license, homepage, repository, kind: resolvedKind, visibility: visibilityFlag },
+    jsonOutput,
+  );
+
+  // `created` is only set when this call just created the artifact, in
+  // which case createSkillForPublish's create-skill body above already
+  // applied these fields. Otherwise this is a re-publish of something that
+  // already existed, and the metadata flags still need to reach the server
+  // -- see updateExistingSkillMetadata's comment.
+  if (!created) {
+    await updateExistingSkillMetadata(owner, skill, { tagline, tags, license, homepage, repository, visibility: visibilityFlag }, jsonOutput);
+  }
+
+  // TS's lib.dom BodyInit (in scope here since tsconfig has no explicit
+  // "lib" override, so DOM is included alongside the Node types) type-checks
+  // Buffer/Uint8Array against `Uint8Array<ArrayBuffer>` specifically as of
+  // TS 5.7+'s ArrayBufferLike generics, which a Node Buffer's
+  // `Uint8Array<ArrayBufferLike>` doesn't structurally satisfy even though
+  // it is a valid BufferSource at runtime (this is exactly what Node's own
+  // fetch/undici accepts) -- see undici-types' BodyInit, which includes
+  // `NodeJS.ArrayBufferView` (i.e. Buffer) directly with no such
+  // restriction. Asserting through BodyInit here, rather than reshaping
+  // tsconfig's "lib" for the whole package, keeps this fix local to the one
+  // call site.
+  const putRes = await fetch(init.upload_url, {
+    method: "PUT",
+    body: archive as unknown as BodyInit,
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!putRes.ok) {
+    // The signed URL points at Supabase Storage directly, a different host
+    // than the API, so this never goes through apiJson -- sanitize by hand
+    // here for the same reason apiJson does (ahood-cli#31/#50): a raw
+    // proxy/WAF error page must not be spliced verbatim into a thrown Error.
+    const rawBody = await putRes.text().catch(() => "");
+    const body = rawBody ? sanitizeErrorMessage(rawBody) : "";
+    throw new Error(
+      `Upload failed with status ${putRes.status}${body ? `: ${body}` : ""} (version_id: ${init.version_id}, retry with the same command once the underlying issue is fixed).`,
     );
+  }
 
-    // `created` is only set when this call just created the artifact, in
-    // which case createSkillForPublish's create-skill body above already
-    // applied these fields. Otherwise this is a re-publish of something that
-    // already existed, and the metadata flags still need to reach the server
-    // -- see updateExistingSkillMetadata's comment.
-    if (!created) {
-      await updateExistingSkillMetadata(owner, skill, { tagline, tags, license, homepage, repository, visibility: visibilityFlag }, jsonOutput);
-    }
+  await apiJson<{ version_id: string; version: string; status: string }>(
+    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/complete`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version_id: init.version_id }),
+    },
+  );
 
-    // TS's lib.dom BodyInit (in scope here since tsconfig has no explicit
-    // "lib" override, so DOM is included alongside the Node types) type-checks
-    // Buffer/Uint8Array against `Uint8Array<ArrayBuffer>` specifically as of
-    // TS 5.7+'s ArrayBufferLike generics, which a Node Buffer's
-    // `Uint8Array<ArrayBufferLike>` doesn't structurally satisfy even though
-    // it is a valid BufferSource at runtime (this is exactly what Node's own
-    // fetch/undici accepts) -- see undici-types' BodyInit, which includes
-    // `NodeJS.ArrayBufferView` (i.e. Buffer) directly with no such
-    // restriction. Asserting through BodyInit here, rather than reshaping
-    // tsconfig's "lib" for the whole package, keeps this fix local to the one
-    // call site.
-    const putRes = await fetch(init.upload_url, {
-      method: "PUT",
-      body: archive as unknown as BodyInit,
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!putRes.ok) {
-      // The signed URL points at Supabase Storage directly, a different host
-      // than the API, so this never goes through apiJson -- sanitize by hand
-      // here for the same reason apiJson does (ahood-cli#31/#50): a raw
-      // proxy/WAF error page must not be spliced verbatim into a thrown Error.
-      const rawBody = await putRes.text().catch(() => "");
-      const body = rawBody ? sanitizeErrorMessage(rawBody) : "";
-      throw new Error(
-        `Upload failed with status ${putRes.status}${body ? `: ${body}` : ""} (version_id: ${init.version_id}, retry with the same command once the underlying issue is fixed).`,
-      );
-    }
+  if (!jsonOutput) console.log(`Uploaded ${owner}/${skill}@${version} -- processing...`);
+  const result = await pollVersionStatus(owner, skill, version);
+  if (result.status === "failed") {
+    throw new Error(`Publish failed: ${result.failure_reason ?? "unknown reason"}`);
+  }
 
-    await apiJson<{ version_id: string; version: string; status: string }>(
-      `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/complete`,
-      {
-        method: "POST",
+  // ahood#1612: apply the create-time choice now that the first version is
+  // in. A private result in a non-interactive run prints the exact command
+  // that makes it public; the hint is human-only (--json stays one object).
+  let visibilityNote: string | undefined;
+  if (created) {
+    const ref = `${created.owner}/${created.slug}`;
+    if (createdVisibility === "public") {
+      await apiJson(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ version_id: init.version_id }),
-      },
-    );
+        body: JSON.stringify({ visibility: "public" }),
+      });
+      visibilityNote = `${ref} is public.`;
+    } else if (visibilityFlag === undefined) {
+      visibilityNote = `${ref} is private. To let others find and install it: ahood skill edit ${ref} --visibility public`;
+    }
+  }
 
-    if (!jsonOutput) console.log(`Uploaded ${owner}/${skill}@${version} -- processing...`);
-    const result = await pollVersionStatus(owner, skill, version);
-    if (result.status === "failed") {
-      throw new Error(`Publish failed: ${result.failure_reason ?? "unknown reason"}`);
-    }
-
-    // ahood#1612: apply the create-time choice now that the first version is
-    // in. A private result in a non-interactive run prints the exact command
-    // that makes it public; the hint is human-only (--json stays one object).
-    let visibilityNote: string | undefined;
-    if (created) {
-      const ref = `${created.owner}/${created.slug}`;
-      if (createdVisibility === "public") {
-        await apiJson(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ visibility: "public" }),
-        });
-        visibilityNote = `${ref} is public.`;
-      } else if (visibilityFlag === undefined) {
-        visibilityNote = `${ref} is private. To let others find and install it: ahood skill edit ${ref} --visibility public`;
-      }
-    }
-
-    if (jsonOutput) {
-      const output: { version: string; status: string; failure_reason?: string; created?: CreateResponse } = {
-        version: result.version,
-        status: result.status,
-      };
-      if (result.failure_reason) output.failure_reason = result.failure_reason;
-      if (created) output.created = created;
-      console.log(JSON.stringify(output));
-    } else {
-      console.log(`Published ${owner}/${skill}@${result.version} (${result.status})`);
-      if (visibilityNote) console.log(visibilityNote);
-    }
-  } catch (error) {
-    if (jsonOutput) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.log(JSON.stringify({ error: message }));
-    }
-    throw error;
+  if (jsonOutput) {
+    const output: { version: string; status: string; failure_reason?: string; created?: CreateResponse } = {
+      version: result.version,
+      status: result.status,
+    };
+    if (result.failure_reason) output.failure_reason = result.failure_reason;
+    if (created) output.created = created;
+    console.log(JSON.stringify(output));
+  } else {
+    console.log(`Published ${owner}/${skill}@${result.version} (${result.status})`);
+    if (visibilityNote) console.log(visibilityNote);
   }
 }

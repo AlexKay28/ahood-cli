@@ -9,8 +9,9 @@ import { flagValue, unrecognizedArgs } from "../flags.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
 import { CLI_VERSION } from "../version.js";
+import { printJson } from "../json-output.js";
 
-const USAGE = 'Usage: ahood feedback "<message>" [--kind bug|idea|search_miss|confusing|praise] [--query <q>] [--artifact <owner/slug>]';
+const USAGE = 'Usage: ahood feedback "<message>" [--kind bug|idea|search_miss|confusing|praise] [--query <q>] [--artifact <owner/slug>] [--json]';
 
 export const FEEDBACK_KINDS = ["bug", "idea", "search_miss", "confusing", "praise"] as const;
 export type FeedbackKind = (typeof FEEDBACK_KINDS)[number];
@@ -19,7 +20,7 @@ const DEFAULT_KIND: FeedbackKind = "idea";
 export const MAX_FEEDBACK_MESSAGE_LENGTH = 4000;
 
 export async function feedback(args: string[]): Promise<void> {
-  const leftover = unrecognizedArgs(args, [], ["--kind", "--query", "--artifact"]);
+  const leftover = unrecognizedArgs(args, ["--json"], ["--kind", "--query", "--artifact"]);
   const flagLike = leftover.find((a) => a.startsWith("--"));
   if (flagLike) throw new UsageError(`Unknown argument: ${flagLike}\n${USAGE}`);
   const message = leftover.join(" ").trim();
@@ -36,8 +37,9 @@ export async function feedback(args: string[]): Promise<void> {
   if (query) context.query = query;
   if (artifact) context.artifact = artifact;
 
+  let sent: { id: string };
   try {
-    await apiJson<{ id: string }>("/api/v1/feedback", {
+    sent = await apiJson<{ id: string }>("/api/v1/feedback", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Ahood-Source": "cli" },
       body: JSON.stringify({ kind, message, context }),
@@ -45,6 +47,10 @@ export async function feedback(args: string[]): Promise<void> {
   } catch (error) {
     if (error instanceof ApiError) throw new ApiError(error.status, explain(error), error.body);
     throw error;
+  }
+  if (args.includes("--json")) {
+    printJson({ id: sent?.id, kind, sent: true });
+    return;
   }
   console.log(`Thanks, your ${kind.replace("_", " ")} feedback was sent to the ahood team.`);
 }

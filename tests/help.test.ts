@@ -213,7 +213,7 @@ describe("kind-scoped help (ahood-cli#172)", () => {
     expect(findCommandHelp("agent", "add")?.usage).toMatch(/^ahood agent add <owner>\/<agent>/);
     expect(findCommandHelp("agent", "show")?.usage).toMatch(/^ahood agent view /);
     expect(findCommandHelp("mcp", "serve")).toBeUndefined();
-    expect(findCommandHelp("mcp", "init")?.usage).toBe("ahood mcp init [name]");
+    expect(findCommandHelp("mcp", "init")?.usage).toBe("ahood mcp init [name] [--json]");
   });
 
   it("`ahood help useme` is no longer a help entry (ahood#1018); bare `ahood mcp` is not an account command", () => {

@@ -86,8 +86,8 @@ export async function readSkillMd(owner: string, skill: string): Promise<ReadSki
     // MCP caller has no visibility into stderr -- unlike skill_view, whose
     // returned object already surfaces yanked_at/yanked_reason, skill_read
     // was silently dropping this signal for MCP callers entirely. read()
-    // below still destructures only {version, content} for the CLI's
-    // --json output, so this addition doesn't change that shape.
+    // below picks {version, content, provenance} for the CLI's --json output,
+    // so this addition doesn't change that shape.
     yanked_at: detail.skill_versions.yanked_at ?? null,
     yanked_reason: detail.skill_versions.yanked_reason ?? null,
     provenance: provenanceMetaFor(detail.owner, detail.slug, { version: detail.skill_versions.version, name: detail.name }),

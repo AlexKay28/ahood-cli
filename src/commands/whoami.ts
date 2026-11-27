@@ -2,6 +2,7 @@ import { ApiError, apiJson } from "../http.js";
 import { resolveToken } from "../credentials.js";
 import { unrecognizedArgs } from "../flags.js";
 import { UsageError } from "../usage-error.js";
+import { jsonError, printJson } from "../json-output.js";
 
 // Mirrors GET /api/v1/profile's response shape. All fields besides
 // `username` are nullable in the backend (a profile can be created before
@@ -95,12 +96,30 @@ export async function checkAuth(): Promise<WhoamiResult> {
 
 const USAGE = "Usage: ahood whoami [--json]";
 
+// `profile_status` is the name; `profileStatus` is a deprecated alias kept so
+// scripts written against the camelCase key don't break (ahood-cli#251 --
+// every other key this CLI emits is snake_case).
+function profileStatusKeys(status: "provisioning" | "not_found"): { profile_status: string; profileStatus: string } {
+  return { profile_status: status, profileStatus: status };
+}
+
 export async function whoami(args: string[] = []): Promise<void> {
   // A typo'd flag must not pass silently as a successful auth check.
   const leftovers = unrecognizedArgs(args, ["--json"], []);
   if (leftovers.length > 0) throw new UsageError(`Unknown argument: ${leftovers[0]}\n${USAGE}`);
   const wantsJson = args.includes("--json");
   const result = await checkAuth();
+
+  // checkAuth() never throws, so main()'s catch never reports these outcomes;
+  // each failing branch below follows the --json error convention itself
+  // (ahood-cli#251): the human line on stderr in both modes, and under --json
+  // one document carrying {error, exit_code} next to the fields whoami has
+  // always emitted (authenticated, reason, mode), which scripts already read.
+  const fail = (fields: Record<string, unknown>, message: string, exitCode: number, error = message): void => {
+    console.error(message);
+    if (wantsJson) printJson({ ...fields, ...jsonError(error, exitCode) });
+    process.exitCode = exitCode;
+  };
 
   if (result.authenticated === false && result.reason === "not_logged_in") {
     // Previously exited 0 here, defeating whoami's purpose as a scriptable
@@ -109,9 +128,7 @@ export async function whoami(args: string[] = []): Promise<void> {
     // or rejected"), not the generic 1 -- this is exactly the case the
     // README's own exit-code table names as the canonical example of 4
     // (ahood-cli#80).
-    if (wantsJson) console.log(JSON.stringify({ authenticated: false }));
-    else console.error("Not logged in. Run `ahood login` (or set AHOOD_TOKEN).");
-    process.exitCode = 4;
+    fail({ authenticated: false }, "Not logged in. Run `ahood login` (or set AHOOD_TOKEN).", 4);
     return;
   }
 
@@ -119,16 +136,13 @@ export async function whoami(args: string[] = []): Promise<void> {
     // Same exit-4 reasoning as the "no token at all" branch above: the
     // token was rejected by the server, which is the other half of the
     // README's exit-code-4 definition ("or the token was refused").
-    if (wantsJson) console.log(JSON.stringify({ authenticated: false, reason: "invalid_token" }));
-    else console.error("Not authenticated -- your token is invalid or has been revoked.");
-    process.exitCode = 4;
+    fail({ authenticated: false, reason: "invalid_token" }, "Not authenticated -- your token is invalid or has been revoked.", 4);
     return;
   }
 
   if (result.authenticated === null) {
-    if (wantsJson) console.log(JSON.stringify({ authenticated: null, error: result.error }));
-    else console.error(`Could not verify your token: ${result.error}`);
-    process.exitCode = 1;
+    // `error` stays the bare underlying message it has always been here.
+    fail({ authenticated: null }, `Could not verify your token: ${result.error}`, 1, result.error);
     return;
   }
 
@@ -143,15 +157,13 @@ export async function whoami(args: string[] = []): Promise<void> {
     // code exitCodeFor() already gives an ApiError 404 elsewhere -- this is
     // that same class of failure, just decided locally since checkAuth()
     // never throws.
-    if (wantsJson) console.log(JSON.stringify({ authenticated: true, mode: result.mode, profileStatus: "not_found" }));
-    else {
-      console.error(
-        `Authenticated${asToken ? " with a personal API token" : ""}, but no profile was found for this account -- ` +
-          "this is not the usual just-signed-up delay, so something is actually wrong. Try `ahood login` again, and " +
-          "if it keeps happening, contact support.",
-      );
-    }
-    process.exitCode = 5;
+    fail(
+      { authenticated: true, mode: result.mode, ...profileStatusKeys("not_found") },
+      `Authenticated${asToken ? " with a personal API token" : ""}, but no profile was found for this account -- ` +
+        "this is not the usual just-signed-up delay, so something is actually wrong. Try `ahood login` again, and " +
+        "if it keeps happening, contact support.",
+      5,
+    );
     return;
   }
 
@@ -160,7 +172,7 @@ export async function whoami(args: string[] = []): Promise<void> {
     // row being created (ahood#336, ahood#340) -- not a failure of any kind,
     // so this stays exit 0. "Refresh this page" (the web copy's hint) makes
     // no sense here; re-running the command is the CLI-native equivalent.
-    if (wantsJson) console.log(JSON.stringify({ authenticated: true, mode: result.mode, profileStatus: "provisioning" }));
+    if (wantsJson) printJson({ authenticated: true, mode: result.mode, ...profileStatusKeys("provisioning") });
     else {
       console.log(
         `Authenticated${asToken ? " with a personal API token" : ""}. Your account is still being set up -- ` +
