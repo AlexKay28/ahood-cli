@@ -141,7 +141,43 @@ describe("whoami", () => {
     await whoami([]);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Could not verify your token/));
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringMatching(/invalid or has been revoked/));
-    expect(process.exitCode).toBe(1);
+    // 6, the same code every other command gives a 5xx (ahood-cli#256) --
+    // this asserted a flat 1, which hid the outage from retry-on-6 scripts.
+    expect(process.exitCode).toBe(6);
+  });
+
+  // ahood-cli#256: whoami is the canonical CI preflight, so its exit code for
+  // "could not verify" has to carry the same meaning as everywhere else.
+  it("exits 6 when the registry is unreachable", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed", { cause: new Error("connect ECONNREFUSED 127.0.0.1:9") });
+      }),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await whoami([]);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Could not verify your token: Request to .* failed/));
+    expect(process.exitCode).toBe(6);
+  });
+
+  it("exits 5 when the auth probe itself 404s", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApi(404, { error: "not found" });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await whoami([]);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Could not verify your token/));
+    expect(process.exitCode).toBe(5);
+  });
+
+  it("--json keeps {authenticated: null, error} and adds exit_code, without leaking the response body", async () => {
+    process.env.AHOOD_TOKEN = "tok_test";
+    stubApi(500, { error: "database is down", internal: "do-not-print" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await whoami(["--json"]);
+    expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ authenticated: null, error: "database is down", exit_code: 6 }));
+    expect(process.exitCode).toBe(6);
   });
 
   it("--json emits profileStatus: not_found (and exit 5) when the profile 404 isn't flagged as provisioning", async () => {

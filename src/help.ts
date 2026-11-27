@@ -1272,7 +1272,7 @@ export function formatHelp(): string {
     "",
     "Exit codes: 0 success, 1 general error, 2 usage/validation error,",
     "            4 authentication required or rejected, 5 not found,",
-    "            6 network/transport error or upstream server (5xx) error.",
+    "            6 network/transport error, upstream server (5xx) error, or rate limit/timeout (429, 408).",
     "",
     "Full reference: https://www.ahood.dev/docs",
   ].join("\n");

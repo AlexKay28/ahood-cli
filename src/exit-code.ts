@@ -24,6 +24,11 @@ export function exitCodeFor(error: unknown): number {
     // failure (6) since neither is something retrying with different input
     // would fix.
     if (error.status >= 500) return 6;
+    // ahood-cli#256: 429 (rate limited) and 408 (request timeout) are the two
+    // 4xx statuses that say "nothing is wrong with what you sent, come back
+    // later". Falling through to 2 told a script to fix its input and never
+    // retry -- the opposite of what both statuses mean.
+    if (error.status === 429 || error.status === 408) return 6;
     return 2;
   }
   if (error instanceof NetworkError) return 6;
