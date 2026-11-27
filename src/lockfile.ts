@@ -205,7 +205,16 @@ export function writeJsonFileAtomic(path: string, data: unknown, mode?: number):
 // The same write-then-rename for raw content. A doc install (ahood-cli#182)
 // writes its DOC.md through this, so an interrupted install never leaves a
 // truncated doc behind.
-export function writeFileAtomic(path: string, content: string | Buffer, mode?: number): void {
+//
+// `opts.enforceMode` (ahood-cli#254) flips `mode` from "creation only" to "always":
+// `ahood setup` tightens a token-bearing config to 0600 even when the user's
+// file already exists looser, which is the opposite of .mcp.json's rule above.
+export function writeFileAtomic(
+  path: string,
+  content: string | Buffer,
+  mode?: number,
+  opts: { enforceMode?: boolean } = {},
+): void {
   // Resolved before the mkdir so the directory that actually gets created is
   // the resolved target's, not the link's -- a link set up ahead of the first
   // install can point somewhere that doesn't exist yet -- and so that every
@@ -240,7 +249,7 @@ export function writeFileAtomic(path: string, content: string | Buffer, mode?: n
   // one refactor away from reintroducing #144.
   let finalMode: number;
   try {
-    finalMode = lstatSync(dest).mode & 0o777;
+    finalMode = opts.enforceMode && mode !== undefined ? mode & 0o777 : lstatSync(dest).mode & 0o777;
   } catch {
     finalMode = mode !== undefined ? mode & 0o777 : 0o666 & ~process.umask();
   }
