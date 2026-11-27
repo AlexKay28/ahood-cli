@@ -27,10 +27,32 @@ export type ActivityEntry = { id: number; createdAt: string; text: string; href:
 // ahood lib/enhancements/summary.ts EnhancementSummary.
 export type EvolutionSummary = { evolving_count: number; candidates_waiting: number };
 
-export type StatsArtifact = { ref: string; kind: string | null; visibility: string; downloads: number; stars: number };
+// views/reads/upvotes/downvotes/net_score are additive (ahood#1658): a registry
+// that predates them yields 0, and every old --json field is unchanged.
+export type StatsArtifact = {
+  ref: string;
+  kind: string | null;
+  visibility: string;
+  downloads: number;
+  stars: number;
+  views: number;
+  reads: number;
+  upvotes: number;
+  downvotes: number;
+  net_score: number;
+};
 export type Stats = {
   owner: string;
-  totals: { artifacts: number; downloads: number; stars: number };
+  totals: {
+    artifacts: number;
+    downloads: number;
+    stars: number;
+    views: number;
+    reads: number;
+    upvotes: number;
+    downvotes: number;
+    net_score: number;
+  };
   artifacts: StatsArtifact[];
   activity: ActivityEntry[];
   /** null when the summary could not be read; the rest of the report still stands. */
@@ -40,14 +62,23 @@ export type Stats = {
 export async function loadStats(): Promise<Stats> {
   const { username } = await apiJson<{ username: string }>("/api/v1/profile");
   const own = await listOwnSkills();
-  const artifacts = own
-    .map((s) => ({
-      ref: `${s.profiles?.username ?? username}/${s.slug}`,
-      kind: s.kind ?? null,
-      visibility: s.visibility,
-      downloads: s.downloads_count ?? 0,
-      stars: s.stars_count ?? 0,
-    }))
+  const artifacts: StatsArtifact[] = own
+    .map((s) => {
+      const upvotes = s.upvotes_count ?? 0;
+      const downvotes = s.downvotes_count ?? 0;
+      return {
+        ref: `${s.profiles?.username ?? username}/${s.slug}`,
+        kind: s.kind ?? null,
+        visibility: s.visibility,
+        downloads: s.downloads_count ?? 0,
+        stars: s.stars_count ?? 0,
+        views: s.views_count ?? 0,
+        reads: s.reads_count ?? 0,
+        upvotes,
+        downvotes,
+        net_score: upvotes - downvotes,
+      };
+    })
     .sort((a, b) => b.downloads - a.downloads || b.stars - a.stars);
   const { entries } = await apiJson<{ entries: ActivityEntry[] }>(`/api/v1/users/${encodeURIComponent(username)}/activity`);
   // Best effort: a summary failure must not hide the numbers already read.
@@ -58,6 +89,11 @@ export async function loadStats(): Promise<Stats> {
       artifacts: artifacts.length,
       downloads: artifacts.reduce((n, a) => n + a.downloads, 0),
       stars: artifacts.reduce((n, a) => n + a.stars, 0),
+      views: artifacts.reduce((n, a) => n + a.views, 0),
+      reads: artifacts.reduce((n, a) => n + a.reads, 0),
+      upvotes: artifacts.reduce((n, a) => n + a.upvotes, 0),
+      downvotes: artifacts.reduce((n, a) => n + a.downvotes, 0),
+      net_score: artifacts.reduce((n, a) => n + a.net_score, 0),
     },
     artifacts,
     activity: entries ?? [],
@@ -78,10 +114,13 @@ export async function stats(args: string[]): Promise<void> {
   const s = (v: unknown) => sanitizeForTerminal(v);
   const { totals } = report;
   console.log(`${s(report.owner)}: ${totals.artifacts} artifact(s), ${totals.downloads} downloads, ${totals.stars} stars`);
+  console.log(
+    `  ${totals.views} views, ${totals.reads} reads, ${totals.upvotes} upvotes, ${totals.downvotes} downvotes, net score ${totals.net_score}`,
+  );
   if (report.artifacts.length > 0) {
     console.log("");
     for (const a of report.artifacts) {
-      console.log(`  ${s(a.ref)}  [${s(a.kind ?? "?")}, ${s(a.visibility)}]  ${a.downloads} downloads, ${a.stars} stars`);
+      console.log(`  ${s(a.ref)}  [${s(a.kind ?? "?")}, ${s(a.visibility)}]  ${a.downloads} downloads, ${a.stars} stars, ${a.views} views, ${a.reads} reads, +${a.upvotes}/-${a.downvotes} (net ${a.net_score})`);
     }
   }
   console.log("");

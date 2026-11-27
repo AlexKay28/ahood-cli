@@ -90,8 +90,11 @@ is worth little.
 - Evolution proposals are approved or rejected only by the user: suggest `ahood review`.
   `ahood review --json` lists them, each with its diff; `ahood review show <id>` prints one
   proposal and its unified diff.
-- `ahood stats --json` shows the user's own artifacts' downloads and stars, totals and recent
-  activity.
+- `ahood stats --json` shows the user's own artifacts' views, reads, downloads, stars, upvotes,
+  downvotes and net score, totals and recent activity.
+- `ahood feedback "<message>" [--kind bug|idea|search_miss|confusing|praise] [--query <q>]
+  [--artifact <owner/slug>]` sends feedback to the ahood team (works logged out). Send it only with
+  the user's explicit yes, tell them what you will send, and never include secrets.
 
 ## Provenance and notices
 

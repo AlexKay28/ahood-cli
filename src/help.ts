@@ -142,15 +142,31 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
   },
   {
     usage: "ahood stats [--json]",
-    summary: "Show your own artifacts with their downloads and stars, the totals, recent activity and self-evolution counts.",
+    summary: "Show your own artifacts with their views, reads, downloads, stars and votes, the totals, recent activity and self-evolution counts.",
     desc:
-      "Lists every artifact you have published (public and private) with downloads and stars, sums them, prints your " +
+      "Lists every artifact you have published (public and private) with views, reads, downloads, stars, upvotes, downvotes and net score, sums them, prints your " +
       "recent activity (GET /api/v1/users/<you>/activity) and how many of your artifacts are evolving and how " +
       "many proposals wait for review (GET /api/v1/enhancements/summary). The evolution dashboard's yield " +
       "numbers need a browser session, so they are not shown here: see https://www.ahood.dev/workspace/my-evolution. " +
       "Needs a login.",
-    flags: ["--json    Emit {owner, totals, artifacts, activity, evolution}."],
+    flags: ["--json    Emit {owner, totals, artifacts, activity, evolution}; totals and each artifact also carry views, reads, upvotes, downvotes and net_score."],
     examples: ["ahood stats", "ahood stats --json"],
+  },
+  {
+    usage: 'ahood feedback "<message>" [--kind bug|idea|search_miss|confusing|praise] [--query <q>] [--artifact <owner/slug>]',
+    summary: "Send feedback (a bug, an idea, a search that found nothing, something confusing, praise) to the ahood team.",
+    desc:
+      "Sends one message to the ahood team (POST /api/v1/feedback); the CLI version is attached automatically. Works " +
+      "logged out (anonymous, rate limited harder) and logged in (a token needs the publish scope). The message is at " +
+      "most 4000 characters of plain text; a message that looks like it contains a secret or token is rejected, so " +
+      "never paste credentials. --kind defaults to idea; --query records the search that found nothing useful and " +
+      "--artifact the owner/slug the feedback is about.",
+    flags: [
+      "--kind <kind>        bug, idea (default), search_miss, confusing or praise.",
+      "--query <q>          For search_miss: the query that found nothing useful.",
+      "--artifact <ref>     The artifact the feedback is about, as owner/slug.",
+    ],
+    examples: ['ahood feedback "install failed on Windows" --kind bug', 'ahood feedback "no results" --kind search_miss --query "pdf tools"'],
   },
   {
     usage: "ahood setup [claude|codex|opencode] [--remove <harness>] [--yes] [--dry-run] [--store-token|--no-store-token] [--no-auto-update]",
