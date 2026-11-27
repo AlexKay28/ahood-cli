@@ -1,6 +1,7 @@
 import { apiJson } from "../http.js";
 import { confirm } from "../confirm.js";
 import { UsageError } from "../usage-error.js";
+import { sanitizeForTerminal } from "../terminal-safe.js";
 
 type TokenRow = { id: string; name: string; token_prefix: string; scopes: string[]; revoked_at: string | null; created_at: string };
 
@@ -34,7 +35,7 @@ async function tokenCreate(args: string[]): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
-  console.log(`Created token "${result.name}": ${result.token}`);
+  console.log(`Created token "${sanitizeForTerminal(result.name)}": ${result.token}`);
   console.log("Copy this now -- it will not be shown again.");
 }
 
@@ -51,7 +52,7 @@ async function tokenList(args: string[]): Promise<void> {
     return;
   }
   for (const t of tokens) {
-    console.log(`${t.id}  ${t.name}  ${t.token_prefix}...  ${t.scopes.join(",")}${t.revoked_at ? "  (revoked)" : ""}`);
+    console.log(`${sanitizeForTerminal(t.id)}  ${sanitizeForTerminal(t.name)}  ${sanitizeForTerminal(t.token_prefix)}...  ${t.scopes.map((x) => sanitizeForTerminal(x)).join(",")}${t.revoked_at ? "  (revoked)" : ""}`);
   }
 }
 

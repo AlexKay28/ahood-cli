@@ -2,6 +2,7 @@ import { createPatch } from "diff";
 import { fetchVersionMeta, downloadVerifiedArchive, extractSingleFileContent, type VersionMeta } from "./add.js";
 import { parseOwnerSkill, SEMVER_RE } from "../spec.js";
 import { UsageError } from "../usage-error.js";
+import { sanitizeDocumentForTerminal, sanitizeForTerminal } from "../terminal-safe.js";
 import { unrecognizedArgs } from "../flags.js";
 import { assertKind, isCliKind, KINDS, type KindScope } from "../kinds.js";
 
@@ -110,15 +111,15 @@ export async function diff(args: string[], scope?: KindScope): Promise<void> {
   console.log(`${owner}/${skill}: ${versionA} -> ${versionB}`);
   console.log("");
   if (skillMdChanged) {
-    console.log(skillmdDiff);
+    console.log(sanitizeDocumentForTerminal(skillmdDiff));
   } else {
     console.log(`${rootDoc} is unchanged between these versions.`);
   }
 
   const summaryParts: string[] = [];
-  if (manifest.added.length > 0) summaryParts.push(`Files added: ${manifest.added.join(", ")}`);
-  if (manifest.removed.length > 0) summaryParts.push(`Files removed: ${manifest.removed.join(", ")}`);
-  if (manifest.changed.length > 0) summaryParts.push(`Files changed: ${manifest.changed.join(", ")}`);
+  if (manifest.added.length > 0) summaryParts.push(`Files added: ${manifest.added.map((p) => sanitizeForTerminal(p)).join(", ")}`);
+  if (manifest.removed.length > 0) summaryParts.push(`Files removed: ${manifest.removed.map((p) => sanitizeForTerminal(p)).join(", ")}`);
+  if (manifest.changed.length > 0) summaryParts.push(`Files changed: ${manifest.changed.map((p) => sanitizeForTerminal(p)).join(", ")}`);
   if (summaryParts.length > 0) {
     console.log("");
     for (const line of summaryParts) console.log(line);

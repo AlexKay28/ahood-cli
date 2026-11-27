@@ -1,5 +1,6 @@
 import { apiJson } from "../http.js";
 import { KINDS, strictKind, type KindScope } from "../kinds.js";
+import { sanitizeForTerminal } from "../terminal-safe.js";
 
 // Same underlying endpoint as search.ts (GET /api/v1/skills, here with
 // ?mine=true instead of ?q=), so it carries the same `profiles.username`
@@ -54,6 +55,6 @@ export async function listSkills(args: string[] = [], scope?: KindScope): Promis
     // an individual row -- degrade that one row instead of crashing the
     // whole command (ahood-cli#106).
     const username = skill.profiles?.username ?? "(unknown)";
-    console.log(`${username}/${skill.slug} (${skill.visibility}) - ${skill.name}${skill.tagline ? `: ${skill.tagline}` : ""} (${skill.downloads_count} downloads, ${skill.stars_count} stars)`);
+    console.log(`${sanitizeForTerminal(username)}/${sanitizeForTerminal(skill.slug)} (${sanitizeForTerminal(skill.visibility)}) - ${sanitizeForTerminal(skill.name)}${skill.tagline ? `: ${sanitizeForTerminal(skill.tagline)}` : ""} (${skill.downloads_count} downloads, ${skill.stars_count} stars)`);
   }
 }

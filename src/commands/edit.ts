@@ -2,6 +2,7 @@ import { apiJson } from "../http.js";
 import { flagValue } from "../flags.js";
 import { parseOwnerSkill, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
+import { sanitizeForTerminal } from "../terminal-safe.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
 
 type UpdateResponse = {
@@ -74,8 +75,8 @@ export async function edit(args: string[], scope?: KindScope): Promise<void> {
     },
   );
 
-  console.log(`Updated ${owner}/${updated.slug}: tagline=${JSON.stringify(updated.tagline)}, license=${JSON.stringify(updated.license)}, visibility=${updated.visibility}, tags=[${updated.tags.join(", ")}]`);
+  console.log(`Updated ${owner}/${sanitizeForTerminal(updated.slug)}: tagline=${JSON.stringify(updated.tagline)}, license=${JSON.stringify(updated.license)}, visibility=${sanitizeForTerminal(updated.visibility)}, tags=[${updated.tags.map((t) => sanitizeForTerminal(t)).join(", ")}]`);
   if (updated.tags_warning) {
-    console.warn(`WARNING: ${updated.tags_warning}`);
+    console.warn(`WARNING: ${sanitizeForTerminal(updated.tags_warning)}`);
   }
 }

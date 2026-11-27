@@ -5,6 +5,7 @@ import { parseOwnerSkill } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { unrecognizedArgs } from "../flags.js";
 import { assertKind, ensureRemoteKind, type KindScope } from "../kinds.js";
+import { sanitizeForTerminal } from "../terminal-safe.js";
 
 const USAGE = "Usage: ahood skill view <owner>/<skill> [--json] [--web]";
 
@@ -105,28 +106,28 @@ export async function view(args: string[], scope?: KindScope): Promise<void> {
   }
 
   const field = (label: string, value: string) => console.log(`  ${label.padEnd(13)}${value}`);
-  console.log(`${detail.owner}/${detail.slug}`);
+  console.log(`${sanitizeForTerminal(detail.owner)}/${sanitizeForTerminal(detail.slug)}`);
   // Mirrors the wording/tone of `ahood skill add`'s yanked warning (src/commands/add.ts)
   // and the website's skill detail page banner -- this is the one CLI surface
   // whose entire job is "let me check this out before deciding to install it",
   // so it must not be the one place that stays silent about a yanked version.
   if (detail.skill_versions?.yanked_at) {
     console.warn(
-      `WARNING: ${detail.owner}/${detail.slug}@${detail.skill_versions.version} has been yanked${detail.skill_versions.yanked_reason ? `: ${detail.skill_versions.yanked_reason}` : "."}`,
+      `WARNING: ${sanitizeForTerminal(detail.owner)}/${sanitizeForTerminal(detail.slug)}@${sanitizeForTerminal(detail.skill_versions.version)} has been yanked${detail.skill_versions.yanked_reason ? `: ${sanitizeForTerminal(detail.skill_versions.yanked_reason)}` : "."}`,
     );
   }
-  field("name:", detail.name);
-  if (detail.tagline) field("tagline:", detail.tagline);
-  field("tags:", detail.tags.length > 0 ? detail.tags.join(", ") : "-");
-  field("license:", detail.license ?? "-");
+  field("name:", sanitizeForTerminal(detail.name));
+  if (detail.tagline) field("tagline:", sanitizeForTerminal(detail.tagline));
+  field("tags:", detail.tags.length > 0 ? detail.tags.map((t) => sanitizeForTerminal(t)).join(", ") : "-");
+  field("license:", sanitizeForTerminal(detail.license ?? "-"));
   field("visibility:", detail.visibility);
-  field("homepage:", detail.homepage ?? "-");
-  field("repository:", detail.repository ?? "-");
-  field("version:", detail.skill_versions ? detail.skill_versions.version : "no published version");
+  field("homepage:", sanitizeForTerminal(detail.homepage ?? "-"));
+  field("repository:", sanitizeForTerminal(detail.repository ?? "-"));
+  field("version:", detail.skill_versions ? sanitizeForTerminal(detail.skill_versions.version) : "no published version");
   field("downloads:", String(detail.downloads_count));
   field("stars:", String(detail.stars_count));
-  field("created:", detail.created_at);
-  field("updated:", detail.updated_at);
+  field("created:", sanitizeForTerminal(detail.created_at));
+  field("updated:", sanitizeForTerminal(detail.updated_at));
   if (detail.is_starred !== null) field("starred:", detail.is_starred ? "yes" : "no");
   if (detail.stats) field("usage:", formatStats(detail.stats));
   if (detail.my_vote === 1 || detail.my_vote === -1) field("your vote:", detail.my_vote === 1 ? "up" : "down");

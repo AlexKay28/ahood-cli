@@ -114,14 +114,14 @@ function printSnaps(jsonOutput: boolean, snaps: SnapSummary[], emptyMessage: str
     // newlines (it's freeform text) -- collapsed to spaces and re-truncated
     // here so one snap never spills across multiple terminal lines and
     // breaks the "one line per snap" contract.
-    const flat = snap.content_preview.replace(/\s+/g, " ").trim();
+    const flat = sanitizeForTerminal(snap.content_preview.replace(/\s+/g, " ").trim(), 10_000);
     const preview = flat.length > 60 ? `${flat.slice(0, 60)}...` : flat;
     // ?? [] -- see listSnaps/searchSnaps' identical degrade-on-null guard
     // below; a snap predating the tags column, or a degraded response,
     // should just show no tags rather than crashing on undefined.length.
     const tags = snap.tags ?? [];
-    const tagsSuffix = tags.length > 0 ? ` [${tags.join(", ")}]` : "";
-    console.log(`${snap.id} - ${preview} (${snap.created_at})${snap.shared ? " (shared)" : ""}${tagsSuffix}`);
+    const tagsSuffix = tags.length > 0 ? ` [${tags.map((t) => sanitizeForTerminal(t)).join(", ")}]` : "";
+    console.log(`${sanitizeForTerminal(snap.id)} - ${preview} (${sanitizeForTerminal(snap.created_at)})${snap.shared ? " (shared)" : ""}${tagsSuffix}`);
   }
 }
 

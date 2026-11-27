@@ -3,6 +3,7 @@ import { confirm } from "../confirm.js";
 import { parseOwnerSkill, parseOwnerSkillVersion } from "../spec.js";
 import { fetchVersionMeta } from "./add.js";
 import { UsageError } from "../usage-error.js";
+import { sanitizeForTerminal } from "../terminal-safe.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill unpublish <owner>/<skill>[@version] [--yes]";
@@ -89,7 +90,7 @@ export async function unpublish(args: string[], scope?: KindScope): Promise<void
     // pointer could now be stale with nothing in the terminal to say so, and
     // a later `ahood skill add owner/skill` trusts latest_version_id completely.
     if (result.latest_version_warning) {
-      console.warn(`WARNING: ${result.latest_version_warning}`);
+      console.warn(`WARNING: ${sanitizeForTerminal(result.latest_version_warning)}`);
     }
     return;
   }

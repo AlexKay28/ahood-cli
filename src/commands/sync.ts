@@ -9,7 +9,7 @@ import { unrecognizedArgs } from "../flags.js";
 import { itemKey } from "../installed.js";
 import { isCliKind, isPinnedFileKind, KINDS, type CliKind } from "../kinds.js";
 import { stripProvenanceHeader } from "../provenance-header.js";
-import { sanitizeDocumentForTerminal } from "../terminal-safe.js";
+import { sanitizeDocumentForTerminal, sanitizeForTerminal } from "../terminal-safe.js";
 import { UsageError } from "../usage-error.js";
 
 const USAGE = "Usage: ahood sync [<owner>/<slug> | <slug> ...] [--yes] [--dry-run] [--json]";
@@ -237,7 +237,7 @@ export async function sync(args: string[]): Promise<void> {
       results.push({ ...base(row), kind, action: "updated", ...(json ? { diff } : {}) });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!json) console.error(`Failed to sync ${key}: ${message}`);
+      if (!json) console.error(`Failed to sync ${key}: ${sanitizeForTerminal(message)}`);
       results.push({ ...base(row), action: "failed", reason: message });
     }
   }
@@ -245,7 +245,7 @@ export async function sync(args: string[]): Promise<void> {
   if (json) {
     console.log(JSON.stringify({ results }));
   } else {
-    for (const r of results.filter((x) => x.action === "skipped")) console.log(`Skipped ${itemKey(r)}: ${r.reason}`);
+    for (const r of results.filter((x) => x.action === "skipped")) console.log(`Skipped ${itemKey(r)}: ${sanitizeForTerminal(r.reason)}`);
     const count = (a: SyncAction) => results.filter((r) => r.action === a).length;
     if (candidates.length === 0) console.log(rows.length === 0 ? "Nothing installed with ahood yet." : "Everything is up to date.");
     else if (dryRun) console.log(`\n${count("would_update")} update(s) would be applied; nothing was changed (--dry-run).`);

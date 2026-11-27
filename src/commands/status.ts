@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { apiJson } from "../http.js";
 import { unrecognizedArgs } from "../flags.js";
 import { UsageError } from "../usage-error.js";
+import { sanitizeForTerminal } from "../terminal-safe.js";
 import { itemKey, migrateProjectLockfileOrWarn, readInstalled, type InstalledItem } from "../installed.js";
 import { reconcileLockfileSkillId } from "../lockfile.js";
 import { LOCKFILE_PATH } from "../spec.js";
@@ -182,10 +183,10 @@ function reconcileSkillIds(items: InstalledItem[], byKey: Map<string, ServerStat
         canonicalOwner: server.canonical_owner,
       });
       if (outcome.action === "refused") {
-        console.warn(`WARNING: ${outcome.message}`);
+        console.warn(`WARNING: ${sanitizeForTerminal(outcome.message)}`);
         mismatched.add(`${item.projectDir}::${itemKey(item).toLowerCase()}`);
       } else if (outcome.action === "renamed") {
-        console.log(`${outcome.from} is now ${outcome.to} -- its account was renamed, and the pin in ${lockPath} was updated to match.`);
+        console.log(`${sanitizeForTerminal(outcome.from)} is now ${sanitizeForTerminal(outcome.to)} -- its account was renamed, and the pin in ${lockPath} was updated to match.`);
       }
     } catch (error) {
       console.warn(
