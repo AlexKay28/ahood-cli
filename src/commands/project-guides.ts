@@ -58,7 +58,7 @@ export async function findProjectGuides(args: string[]): Promise<void> {
   for (const g of result.guides) {
     const tagline = g.tagline ? ` -- ${sanitizeForTerminal(g.tagline)}` : "";
     const mine = g.mine ? " (yours)" : "";
-    console.log(`  ${g.owner}/${g.slug}@${g.version}  ${sanitizeForTerminal(g.name)}${tagline} [${g.visibility}]${mine}`);
+    console.log(`  ${sanitizeForTerminal(g.owner)}/${sanitizeForTerminal(g.slug)}@${sanitizeForTerminal(g.version)}  ${sanitizeForTerminal(g.name)}${tagline} [${sanitizeForTerminal(g.visibility)}]${mine}`);
   }
   const first = result.guides[0];
   console.log(`Install one with \`ahood project add ${first.owner}/${first.slug}\` (saved to .claude/project.md).`);

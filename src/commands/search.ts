@@ -4,6 +4,7 @@ import { apiJson, ApiError, NO_ACCOUNT_MESSAGE } from "../http.js";
 import { flagValue, parseSearchQuery } from "../flags.js";
 import { UsageError } from "../usage-error.js";
 import { KINDS, strictKind, type CliKind, type KindScope } from "../kinds.js";
+import { sanitizeForTerminal } from "../terminal-safe.js";
 
 // GET /api/v1/skills's browse row (ahood app/api/v1/skills/route.ts select:
 // id, slug, name, tagline, tags, kind, downloads_count, stars_count, user_id,
@@ -84,7 +85,7 @@ function formatRow(skill: SearchRow): string {
   // an individual row (orphaned skill, deleted owner account) -- degrade
   // that one row instead of crashing the whole command (ahood-cli#106).
   const username = skill.profiles?.username ?? "(unknown)";
-  return `${username}/${skill.slug} - ${skill.name}${skill.tagline ? `: ${skill.tagline}` : ""} (${skill.downloads_count} downloads)`;
+  return `${sanitizeForTerminal(username)}/${sanitizeForTerminal(skill.slug)} - ${sanitizeForTerminal(skill.name)}${skill.tagline ? `: ${sanitizeForTerminal(skill.tagline)}` : ""} (${skill.downloads_count} downloads)`;
 }
 
 export async function search(args: string[], scope?: KindScope): Promise<void> {

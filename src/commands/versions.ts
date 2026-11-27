@@ -2,6 +2,7 @@ import { apiJson } from "../http.js";
 import { parseOwnerSkill } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
+import { sanitizeDocumentForTerminal, sanitizeForTerminal } from "../terminal-safe.js";
 
 const USAGE = "Usage: ahood skill versions <owner>/<skill> [--json]";
 
@@ -69,15 +70,15 @@ export async function versions(args: string[], scope?: KindScope): Promise<void>
   const field = (label: string, value: string) => console.log(`  ${label.padEnd(13)}${value}`);
   for (const v of list) {
     console.log("");
-    console.log(v.version);
-    field("published:", v.created_at);
+    console.log(sanitizeForTerminal(v.version));
+    field("published:", sanitizeForTerminal(v.created_at));
     field("size:", formatSize(v.package_size_bytes));
-    field("changelog:", v.changelog_md ? v.changelog_md : "-");
+    field("changelog:", v.changelog_md ? sanitizeDocumentForTerminal(v.changelog_md) : "-");
     // Marked right after the version's other details, only when the API
     // actually flags it (issue #58) -- non-yanked versions print exactly as
     // before, no "status:" line at all.
     if (v.yanked_at) {
-      field("status:", v.yanked_reason ? `YANKED -- ${v.yanked_reason}` : "YANKED");
+      field("status:", v.yanked_reason ? `YANKED -- ${sanitizeForTerminal(v.yanked_reason)}` : "YANKED");
     }
   }
 }

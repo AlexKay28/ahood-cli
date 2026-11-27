@@ -3,6 +3,7 @@ import { flagValue } from "../flags.js";
 import { confirm } from "../confirm.js";
 import { getApiUrl } from "../config.js";
 import { UsageError } from "../usage-error.js";
+import { sanitizeForTerminal } from "../terminal-safe.js";
 
 // Mirrors GET /api/v1/groups' and GET /api/v1/groups/{slug}'s response
 // shapes (see the ahood repo's app/api/v1/groups routes) -- owner_user_id is
@@ -54,7 +55,7 @@ export async function createGroup(args: string[]): Promise<void> {
     body: JSON.stringify(body),
   });
 
-  console.log(`Created group ${created.name} (${created.slug}).`);
+  console.log(`Created group ${sanitizeForTerminal(created.name)} (${sanitizeForTerminal(created.slug)}).`);
 }
 
 // Lists the caller's own groups (owner or member).
@@ -71,7 +72,7 @@ export async function listGroups(args: string[] = []): Promise<void> {
     return;
   }
   for (const g of groups) {
-    console.log(`${g.slug} - ${g.name}${g.description ? `: ${g.description}` : ""}`);
+    console.log(`${sanitizeForTerminal(g.slug)} - ${sanitizeForTerminal(g.name)}${g.description ? `: ${sanitizeForTerminal(g.description)}` : ""}`);
   }
 }
 
@@ -90,9 +91,9 @@ export async function groupMembers(args: string[]): Promise<void> {
     console.log(JSON.stringify({ group, members }));
     return;
   }
-  console.log(`${group.slug} - ${group.name}${group.description ? `: ${group.description}` : ""}`);
+  console.log(`${sanitizeForTerminal(group.slug)} - ${sanitizeForTerminal(group.name)}${group.description ? `: ${sanitizeForTerminal(group.description)}` : ""}`);
   for (const m of members) {
-    console.log(`  ${m.username} (${m.role})`);
+    console.log(`  ${sanitizeForTerminal(m.username)} (${sanitizeForTerminal(m.role)})`);
   }
 }
 
@@ -122,7 +123,7 @@ export async function inviteLink(args: string[]): Promise<void> {
     return;
   }
   console.log(url);
-  console.log(`Expires: ${expiresAt}`);
+  console.log(`Expires: ${sanitizeForTerminal(expiresAt)}`);
   console.log("This link (and its token) is shown only this once -- save it now, it cannot be retrieved again.");
 }
 
@@ -155,7 +156,7 @@ export async function joinGroup(args: string[]): Promise<void> {
     `/api/v1/groups/invites/${encodeURIComponent(token)}/accept`,
     { method: "POST" },
   );
-  console.log(`Joined ${groupName} (${groupSlug}).`);
+  console.log(`Joined ${sanitizeForTerminal(groupName)} (${sanitizeForTerminal(groupSlug)}).`);
 }
 
 // Removes a member (owner-only for someone else; see leaveGroup below for

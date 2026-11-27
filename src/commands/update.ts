@@ -2,6 +2,7 @@ import { LOCKFILE_PATH, parseOwnerSkill } from "../spec.js";
 import { readLockfile } from "../lockfile.js";
 import { add, fetchVersionMeta, readMcpConfig, updateMcpEntry } from "./add.js";
 import { UsageError } from "../usage-error.js";
+import { sanitizeDocumentForTerminal } from "../terminal-safe.js";
 import { assertKind, isCliKind, isPinnedFileKind, KINDS, localInstalledKind, strictKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]";
@@ -95,7 +96,7 @@ function printDryRunTable(previews: UpdatePreview[], firstColumn: string): void 
   }
   for (const p of changed) {
     console.log(`\n${p.skill}: ${p.current_version ?? "(not installed)"} -> ${p.latest_version}`);
-    console.log(p.changelog_md ? p.changelog_md : "(no changelog available)");
+    console.log(p.changelog_md ? sanitizeDocumentForTerminal(p.changelog_md) : "(no changelog available)");
   }
 }
 

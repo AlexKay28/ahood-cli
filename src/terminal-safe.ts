@@ -28,9 +28,10 @@ export function sanitizeForTerminal(text: unknown, maxLength = 200): string {
   return String(text).replace(CONTROL_CHARACTERS, " ").slice(0, maxLength);
 }
 
-// Same C0/C1 range as CONTROL_CHARACTERS above, minus the three characters
+// Same C0/C1 range as CONTROL_CHARACTERS above, minus the characters
 // that carry a document's layout rather than a terminal instruction: tab
-// (\x09), line feed (\x0a) and carriage return (\x0d).
+// (\x09), line feed (\x0a) and carriage return (\x0d, handled separately in
+// sanitizeDocumentForTerminal -- see ahood-cli#253).
 const CONTROL_CHARACTERS_EXCEPT_LAYOUT = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g;
 
 // The document-shaped sibling of sanitizeForTerminal, for the one caller that
@@ -60,6 +61,13 @@ const CONTROL_CHARACTERS_EXCEPT_LAYOUT = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/
 //     cannot repaint, retitle, or hide anything.
 //
 // Takes `unknown` for the same reason sanitizeForTerminal does (ahood-cli#122).
+//
+// Carriage return is the exception to "layout survives" (ahood-cli#253): a bare
+// \r returns the cursor to column 0 so the rest of the line overwrites what was
+// already printed ("fixes\rINJECTED" displays as INJECTED) -- no escape byte
+// needed, so the control-character strip alone does not stop it. CRLF line
+// endings are normalised to LF to keep Windows-authored documents readable;
+// any \r still standing alone is flattened to a space.
 export function sanitizeDocumentForTerminal(text: unknown): string {
-  return String(text).replace(CONTROL_CHARACTERS_EXCEPT_LAYOUT, " ");
+  return String(text).replace(/\r\n/g, "\n").replace(/\r/g, " ").replace(CONTROL_CHARACTERS_EXCEPT_LAYOUT, " ");
 }

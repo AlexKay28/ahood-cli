@@ -2,6 +2,7 @@ import { ApiError, apiJson } from "../http.js";
 import { resolveToken } from "../credentials.js";
 import { unrecognizedArgs } from "../flags.js";
 import { UsageError } from "../usage-error.js";
+import { sanitizeForTerminal } from "../terminal-safe.js";
 
 // Mirrors GET /api/v1/profile's response shape. All fields besides
 // `username` are nullable in the backend (a profile can be created before
@@ -127,7 +128,7 @@ export async function whoami(args: string[] = []): Promise<void> {
 
   if (result.authenticated === null) {
     if (wantsJson) console.log(JSON.stringify({ authenticated: null, error: result.error }));
-    else console.error(`Could not verify your token: ${result.error}`);
+    else console.error(`Could not verify your token: ${sanitizeForTerminal(result.error)}`);
     process.exitCode = 1;
     return;
   }
@@ -175,7 +176,7 @@ export async function whoami(args: string[] = []): Promise<void> {
     return;
   }
   if (result.mode === "session") {
-    console.log(result.profile ? `Authenticated as ${result.profile.username}.` : "Authenticated.");
+    console.log(result.profile ? `Authenticated as ${sanitizeForTerminal(result.profile.username)}.` : "Authenticated.");
   } else {
     console.log(
       result.profile

@@ -7,6 +7,7 @@ import { flagValue } from "../flags.js";
 import { confirmYesNo, isInteractive } from "../confirm.js";
 import { parseOwnerSkill, SEMVER_RE, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
+import { sanitizeForTerminal } from "../terminal-safe.js";
 import { assertKind, CLI_KINDS, isCliKind, KINDS, strictKind, type CliKind, type KindScope } from "../kinds.js";
 import { parsePromptDoc } from "../prompt-doc.js";
 import { stripProvenanceHeader } from "../provenance-header.js";
@@ -507,8 +508,8 @@ async function updateExistingSkillMetadata(
     `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`,
     { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
   );
-  if (!jsonOutput) console.log(`Updated ${owner}/${updated.slug} metadata.`);
-  if (updated.tags_warning) console.warn(`WARNING: ${updated.tags_warning}`);
+  if (!jsonOutput) console.log(`Updated ${owner}/${sanitizeForTerminal(updated.slug)} metadata.`);
+  if (updated.tags_warning) console.warn(`WARNING: ${sanitizeForTerminal(updated.tags_warning)}`);
 }
 
 // Which kind a publish folder is, from the root docs it holds (KINDS[k].
@@ -645,7 +646,7 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
     if (!jsonOutput) console.log(`Uploaded ${owner}/${skill}@${version} -- processing...`);
     const result = await pollVersionStatus(owner, skill, version);
     if (result.status === "failed") {
-      throw new Error(`Publish failed: ${result.failure_reason ?? "unknown reason"}`);
+      throw new Error(`Publish failed: ${sanitizeForTerminal(result.failure_reason ?? "unknown reason")}`);
     }
 
     // ahood#1612: apply the create-time choice now that the first version is
@@ -675,7 +676,7 @@ export async function publish(args: string[], scope?: KindScope): Promise<void> 
       if (created) output.created = created;
       console.log(JSON.stringify(output));
     } else {
-      console.log(`Published ${owner}/${skill}@${result.version} (${result.status})`);
+      console.log(`Published ${owner}/${skill}@${sanitizeForTerminal(result.version)} (${sanitizeForTerminal(result.status)})`);
       if (visibilityNote) console.log(visibilityNote);
     }
   } catch (error) {

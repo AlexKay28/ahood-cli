@@ -58,8 +58,12 @@ describe("sanitizeDocumentForTerminal (ahood-cli#133)", () => {
     expect(sanitizeDocumentForTerminal("alice\x07bob")).toBe("alice bob");
   });
 
-  it("preserves the layout characters a document is made of: \\n, \\r and \\t", () => {
-    expect(sanitizeDocumentForTerminal("# Title\r\n\n- one\n-\ttwo\n")).toBe("# Title\r\n\n- one\n-\ttwo\n");
+  it("preserves the layout characters a document is made of: \\n and \\t, and normalises CRLF to LF", () => {
+    expect(sanitizeDocumentForTerminal("# Title\r\n\n- one\n-\ttwo\n")).toBe("# Title\n\n- one\n-\ttwo\n");
+  });
+
+  it("flattens a bare \\r, which would overwrite the line already printed (ahood-cli#253)", () => {
+    expect(sanitizeDocumentForTerminal("fixes\rINJECTED")).toBe("fixes INJECTED");
   });
 
   it("does not truncate, however long the document is", () => {
