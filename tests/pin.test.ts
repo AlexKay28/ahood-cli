@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { pin, unpin } from "../src/commands/pin.js";
 import { readInstalled, recordInstall, updateInstalled } from "../src/installed.js";
 import { writeLockfileEntry } from "../src/lockfile.js";
+import { exitCodeFor } from "../src/exit-code.js";
 import { captureConsole, setupEnv } from "./helpers/me-env.js";
 
 describe("ahood pin / unpin (ahood#979)", () => {
@@ -45,5 +46,12 @@ describe("ahood pin / unpin (ahood#979)", () => {
     await expect(pin(["alice/pdf-tools@latest"])).rejects.toThrow(/Invalid version/);
     await expect(unpin(["alice/pdf-tools@1.0.0"])).rejects.toThrow(/unpin takes no version/);
     await expect(pin([])).rejects.toThrow(/Usage: ahood pin/);
+  });
+
+  it("exits 5 for something not installed, like remove and update -- and still 2 for a malformed argument (ahood-cli#255)", async () => {
+    expect(exitCodeFor(await pin(["alice/nope"]).catch((e: unknown) => e))).toBe(5);
+    expect(exitCodeFor(await unpin(["alice/nope"]).catch((e: unknown) => e))).toBe(5);
+    expect(exitCodeFor(await pin(["alice/pdf-tools@latest"]).catch((e: unknown) => e))).toBe(2);
+    expect(exitCodeFor(await pin([]).catch((e: unknown) => e))).toBe(2);
   });
 });

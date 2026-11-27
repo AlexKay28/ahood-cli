@@ -17,6 +17,8 @@ vi.mock("../src/lockfile.js", async (importOriginal) => {
   return { ...actual, withLock: vi.fn(actual.withLock), removeLockfileEntry: vi.fn(actual.removeLockfileEntry) };
 });
 import { remove } from "../src/commands/remove.js";
+import { exitCodeFor } from "../src/exit-code.js";
+import { NotInstalledError } from "../src/not-installed-error.js";
 import { writeLockfileEntry, readLockfile, removeLockfileEntry, withLock } from "../src/lockfile.js";
 import { agentPath, skillDir, MCP_CONFIG_PATH } from "../src/spec.js";
 import { hashMcpServerConfig } from "../src/commands/add.js";
@@ -131,14 +133,14 @@ describe("remove", () => {
   });
 
   it("reports failure instead of a false 'Removed' when nothing was installed, without prompting", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     // No stdio stub -- if remove() prompted here, reading from the real
     // stdin in a test run would hang, so this also pins that the not-
     // installed check happens BEFORE the confirm() gate.
-    await remove(["nobody/nothing"]);
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/was not installed/));
-    expect(process.exitCode).toBe(1);
-    process.exitCode = 0;
+    const error = await remove(["nobody/nothing"]).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(NotInstalledError);
+    expect((error as Error).message).toMatch(/was not installed/);
+    // The same code pin and update exit with for this condition (ahood-cli#255).
+    expect(exitCodeFor(error)).toBe(5);
   });
 
   it("removes an installed agent file and its lockfile entry", async () => {
@@ -157,11 +159,9 @@ describe("remove", () => {
   });
 
   it("still reports 'not installed' for a nonexistent agent (doesn't false-positive on the new agent check)", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    await remove(["nobody/no-such-agent"]);
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/was not installed/));
-    expect(process.exitCode).toBe(1);
-    process.exitCode = 0;
+    const error = await remove(["nobody/no-such-agent"]).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(NotInstalledError);
+    expect((error as Error).message).toMatch(/was not installed/);
   });
 
   it("warns about a live .mcp.json entry left behind by an mcp install, instead of silently reporting success (finding #3)", async () => {

@@ -1,6 +1,7 @@
 import { unrecognizedArgs } from "../flags.js";
 import { itemKey, migrateProjectLockfileOrWarn, readInstalled, updateInstalled, type InstalledItem } from "../installed.js";
 import { parseOwnerSkill, SEMVER_RE } from "../spec.js";
+import { NotInstalledError } from "../not-installed-error.js";
 import { UsageError } from "../usage-error.js";
 
 const PIN_USAGE = "Usage: ahood pin <owner>/<slug>[@version] [--json]";
@@ -33,8 +34,11 @@ function installsOf(items: InstalledItem[], key: string): InstalledItem[] {
   return items.filter((i) => itemKey(i).toLowerCase() === key.toLowerCase());
 }
 
-function notInstalled(key: string): UsageError {
-  return new UsageError(`${key} is not installed (per \`ahood status\`) -- install it first with \`ahood skill add ${key}\`.`);
+// Not a UsageError: the spec is well-formed, the install is what's missing,
+// and remove/update report that same condition with the same exit code
+// (ahood-cli#255).
+function notInstalled(key: string): NotInstalledError {
+  return new NotInstalledError(`${key} is not installed (per \`ahood status\`) -- install it first with \`ahood skill add ${key}\`.`);
 }
 
 export async function pin(args: string[]): Promise<void> {

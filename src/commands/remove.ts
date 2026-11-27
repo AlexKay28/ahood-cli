@@ -7,8 +7,9 @@ import {
   SKILLS_ROOT, AGENTS_ROOT, DOCS_ROOT, LOOPS_ROOT,
 } from "../spec.js";
 import { readMcpConfig, matchesMcpConfigHash } from "./add.js";
-import { UsageError } from "../usage-error.js";
+import { parseArgs, YES_FLAGS } from "../flags.js";
 import { forgetInstallOrWarn } from "../installed.js";
+import { NotInstalledError } from "../not-installed-error.js";
 import {
   assertKind,
   ensureRemoteKind,
@@ -61,10 +62,11 @@ function removeIfEmptyKindRoot(path: string): void {
 }
 
 export async function remove(args: string[], scope?: KindScope): Promise<void> {
-  const spec = args[0];
-  if (!spec) throw new UsageError(USAGE);
-  const yes = args.includes("--yes");
-  const { owner, skill } = parseOwnerSkill(spec, USAGE);
+  // Any order (ahood-cli#260): `remove --yes a/b` used to exit 2 -- it read
+  // args[0] as the spec -- while `unpublish --yes a/b` went through.
+  const parsed = parseArgs(args, { usage: USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
+  const yes = parsed.has(...YES_FLAGS);
+  const { owner, skill } = parseOwnerSkill(parsed.positionals[0], USAGE);
   const key = `${owner}/${skill}`;
 
   // Flat owner@skill directory (see skillDir's comment in spec.ts) -- no
@@ -93,9 +95,9 @@ export async function remove(args: string[], scope?: KindScope): Promise<void> {
     !dirExisted && !agentExisted && !pinnedFileExisted && !isPinnedFileKind(lockEntry?.kind) && hadLockfileEntry;
 
   if (!dirExisted && !agentExisted && !pinnedFileExisted && !hadLockfileEntry) {
-    console.error(`${key} was not installed -- nothing to remove.`);
-    process.exitCode = 1;
-    return;
+    // Thrown rather than printed with exitCode = 1, so it shares one exit
+    // code with pin and update's "not installed" (ahood-cli#255).
+    throw new NotInstalledError(`${key} was not installed -- nothing to remove.`);
   }
 
   if (scope && strictKind(scope) !== undefined) await assertInstalledKind(scope, owner, skill, lockEntry);

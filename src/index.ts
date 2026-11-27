@@ -141,8 +141,8 @@ const SNAP_VERBS: Record<string, (args: string[]) => Promise<void>> = {
 // `group`, and `snap` entity groups. Future entities get their own entry
 // here alongside these.
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
-  login: () => login(),
-  logout: () => logout(),
+  login,
+  logout,
   whoami,
   token,
   completion,

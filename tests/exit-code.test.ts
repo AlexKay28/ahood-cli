@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { exitCodeFor } from "../src/exit-code.js";
 import { ApiError, NetworkError } from "../src/http.js";
+import { NotInstalledError } from "../src/not-installed-error.js";
 import { UsageError } from "../src/usage-error.js";
 
 describe("exitCodeFor", () => {
   it("maps UsageError to 2 (usage/validation) -- a local argument-validation failure, not the generic 1 (ahood-cli#80)", () => {
     expect(exitCodeFor(new UsageError("Usage: ahood skill add <owner>/<skill>[@version]"))).toBe(2);
+  });
+
+  it("maps NotInstalledError to 5 (not found) -- the local half of the same class a registry 404 is (ahood-cli#255)", () => {
+    expect(exitCodeFor(new NotInstalledError("alice/foo is not installed"))).toBe(5);
   });
 
   it("maps 401/403 to 4 (auth)", () => {

@@ -1,5 +1,5 @@
 import { apiJson } from "../http.js";
-import { flagValue, parseSearchQuery, unrecognizedArgs, unrecognizedIndices } from "../flags.js";
+import { flagValue, parseArgs, parseSearchQuery, unrecognizedArgs, unrecognizedIndices, YES_FLAGS } from "../flags.js";
 import { confirm } from "../confirm.js";
 import { UsageError } from "../usage-error.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
@@ -318,9 +318,9 @@ export async function searchSnaps(args: string[]): Promise<void> {
 }
 
 export async function showSnap(args: string[]): Promise<void> {
-  const jsonOutput = args.includes("--json");
-  const id = args.find((a) => !a.startsWith("--"));
-  if (!id) throw new UsageError(SHOW_USAGE);
+  const parsed = parseArgs(args, { usage: SHOW_USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const jsonOutput = parsed.has("--json");
+  const id = parsed.positionals[0];
 
   const snap = await apiJson<SnapDetail>(`/api/v1/snaps/${encodeURIComponent(id)}`);
 
@@ -338,9 +338,11 @@ export async function showSnap(args: string[]): Promise<void> {
 }
 
 export async function removeSnap(args: string[]): Promise<void> {
-  const id = args.find((a) => !a.startsWith("--"));
-  if (!id) throw new UsageError(REMOVE_USAGE);
-  const yes = args.includes("--yes");
+  // `snap remove <id> --dry-run --yes` used to delete it (ahood-cli#260).
+  // --json is tolerated, not implemented (ahood-cli#251).
+  const parsed = parseArgs(args, { usage: REMOVE_USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
+  const id = parsed.positionals[0];
+  const yes = parsed.has(...YES_FLAGS);
 
   // Matches remove.ts/group.ts's confirm-before-destroy pattern (CLAUDE.md:
   // "Destructive commands ... prompt for confirmation unless --yes is
@@ -357,9 +359,9 @@ export async function removeSnap(args: string[]): Promise<void> {
 }
 
 export async function shareSnap(args: string[]): Promise<void> {
-  const jsonOutput = args.includes("--json");
-  const id = args.find((a) => !a.startsWith("--"));
-  if (!id) throw new UsageError(SHARE_USAGE);
+  const parsed = parseArgs(args, { usage: SHARE_USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const jsonOutput = parsed.has("--json");
+  const id = parsed.positionals[0];
 
   // POST .../share is documented idempotent -- mints a link on first call,
   // returns the same existing one on any later call -- so this never needs
@@ -376,9 +378,9 @@ export async function shareSnap(args: string[]): Promise<void> {
 }
 
 export async function unshareSnap(args: string[]): Promise<void> {
-  const id = args.find((a) => !a.startsWith("--"));
-  if (!id) throw new UsageError(UNSHARE_USAGE);
-  const yes = args.includes("--yes");
+  const parsed = parseArgs(args, { usage: UNSHARE_USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
+  const id = parsed.positionals[0];
+  const yes = parsed.has(...YES_FLAGS);
 
   // Not destructive in the data-loss sense -- the snap itself is untouched,
   // and re-sharing mints/returns a link exactly as before (share is

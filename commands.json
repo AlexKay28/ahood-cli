@@ -27,7 +27,7 @@
           "summary": "Manage personal API tokens.",
           "desc": "Manage personal API tokens. All three subcommands require an existing browser-backed session -- a CLI session authenticated with a bearer token can't manage tokens end-to-end; use /workspace/settings/tokens in the browser instead.",
           "flags": [
-            "--yes    (revoke only) Skip the confirmation prompt and revoke immediately."
+            "--yes, -y    (revoke only) Skip the confirmation prompt and revoke immediately."
           ],
           "examples": [
             "ahood token create ci-runner",
@@ -304,7 +304,10 @@
         {
           "usage": "ahood skill remove <owner>/<skill> [--yes]",
           "summary": "Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed).",
-          "desc": "Uninstall and unpin (local only). Prompts for confirmation unless --yes is passed. For an mcp-kind install, also deletes its .mcp.json entry as long as it still matches what ahood last installed there -- a hand-edited or unverifiable entry is left in place and warned about instead of being silently touched."
+          "desc": "Uninstall and unpin (local only). Prompts for confirmation unless --yes is passed. For an mcp-kind install, also deletes its .mcp.json entry as long as it still matches what ahood last installed there -- a hand-edited or unverifiable entry is left in place and warned about instead of being silently touched.",
+          "flags": [
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
+          ]
         },
         {
           "usage": "ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
@@ -327,7 +330,7 @@
           "summary": "Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed).",
           "desc": "Without @version: delete a skill from the registry for every consumer (not just your local install). With @version (e.g. alice/foo@1.2.3): yank that single version instead of deleting the whole skill -- it is marked yanked, not removed. Existing lockfile pins still resolve and verify against it, but new installs are warned off it. Prompts for a typed \"yes\" unless --yes is passed.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -503,7 +506,7 @@
           "summary": "Uninstall and unpin an agent (local only, prompts unless --yes is passed).",
           "desc": "Uninstall and unpin an agent from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -524,7 +527,7 @@
           "summary": "Delete an agent from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
           "desc": "Without @version: delete an agent from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not an agent.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -683,7 +686,7 @@
           "summary": "Uninstall and unpin an MCP server manifest (local only, prompts unless --yes is passed).",
           "desc": "Uninstall and unpin an MCP server manifest from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -704,7 +707,7 @@
           "summary": "Delete an MCP server manifest from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
           "desc": "Without @version: delete an MCP server manifest from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not an MCP server manifest.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -863,7 +866,7 @@
           "summary": "Uninstall and unpin a doc (local only, prompts unless --yes is passed).",
           "desc": "Uninstall and unpin a doc from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -884,7 +887,7 @@
           "summary": "Delete a doc from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
           "desc": "Without @version: delete a doc from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not a doc.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -1056,7 +1059,7 @@
           "summary": "Uninstall and unpin a project guide (local only, prompts unless --yes is passed).",
           "desc": "Uninstall and unpin a project guide from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -1077,7 +1080,7 @@
           "summary": "Delete a project guide from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
           "desc": "Without @version: delete a project guide from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not a project guide.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -1240,7 +1243,7 @@
           "summary": "Uninstall and unpin a loop (local only, prompts unless --yes is passed).",
           "desc": "Uninstall and unpin a loop from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -1261,7 +1264,7 @@
           "summary": "Delete a loop from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
           "desc": "Without @version: delete a loop from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not a loop.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -1424,7 +1427,7 @@
           "summary": "Delete a prompt from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
           "desc": "Without @version: delete a prompt from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not a prompt.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -1542,7 +1545,7 @@
           "summary": "Remove a member from a group you own (prompts for confirmation unless --yes is passed).",
           "desc": "Remove a member from a group you own. The group's owner cannot be removed this way -- delete the group instead. Only the group's owner can remove someone other than themselves. Prompts for a typed \"yes\" unless --yes is passed.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -1550,7 +1553,7 @@
           "summary": "Leave a group you belong to (prompts for confirmation unless --yes is passed).",
           "desc": "Leave a group you belong to. The group's owner cannot leave -- delete the group instead. Prompts for a typed \"yes\" unless --yes is passed.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -1558,7 +1561,7 @@
           "summary": "Permanently delete a group you own (prompts for confirmation unless --yes is passed).",
           "desc": "Permanently delete a group you own, removing it for every member. Prompts for a typed \"yes\" unless --yes is passed.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         }
       ]
@@ -1628,7 +1631,7 @@
           "summary": "Permanently delete a snap (prompts for confirmation unless --yes is passed).",
           "desc": "Permanently delete a snap. Irreversible. Prompts for a typed \"yes\" unless --yes is passed.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {
@@ -1644,7 +1647,7 @@
           "summary": "Revoke a snap's share link (the snap itself is untouched; prompts for confirmation unless --yes is passed).",
           "desc": "Revoke a snap's share link -- the snap itself is untouched, and re-running `ahood snap share` mints a new link. Prompts for a typed \"yes\" unless --yes is passed, since anyone using the old link loses access immediately.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI."
           ]
         },
         {

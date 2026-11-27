@@ -1,6 +1,7 @@
 import { apiJson } from "../http.js";
 import { confirm } from "../confirm.js";
 import { UsageError } from "../usage-error.js";
+import { parseArgs, YES_FLAGS } from "../flags.js";
 
 type TokenRow = { id: string; name: string; token_prefix: string; scopes: string[]; revoked_at: string | null; created_at: string };
 
@@ -19,8 +20,10 @@ export async function token(args: string[]): Promise<void> {
 }
 
 async function tokenCreate(args: string[]): Promise<void> {
-  const name = args[0];
-  if (!name) throw new UsageError("Usage: ahood token create <name>");
+  // `token create --json` used to POST a token literally named "--json"
+  // (ahood-cli#260). --json is tolerated, not implemented (ahood-cli#251).
+  const { positionals } = parseArgs(args, { usage: "Usage: ahood token create <name>", booleans: ["--json"], min: 1, max: 1 });
+  const name = positionals[0];
   // Note: this itself requires an existing session-backed token or a
   // browser login -- per docs/adr/backend/0001-backend-services.md's Phase
   // 3 section, tokens can't mint tokens (POST /auth/tokens is session-only,
@@ -39,7 +42,7 @@ async function tokenCreate(args: string[]): Promise<void> {
 }
 
 async function tokenList(args: string[]): Promise<void> {
-  const jsonOutput = args.includes("--json");
+  const jsonOutput = parseArgs(args, { usage: "Usage: ahood token list [--json]", booleans: ["--json"], max: 0 }).has("--json");
   const { tokens } = await apiJson<{ tokens: TokenRow[] }>("/api/v1/auth/tokens");
 
   if (jsonOutput) {
@@ -56,9 +59,14 @@ async function tokenList(args: string[]): Promise<void> {
 }
 
 async function tokenRevoke(args: string[]): Promise<void> {
-  const yes = args.includes("--yes");
-  const id = args.find((a) => !a.startsWith("--"));
-  if (!id) throw new UsageError("Usage: ahood token revoke <id> [--yes]");
+  const parsed = parseArgs(args, {
+    usage: "Usage: ahood token revoke <id> [--yes]",
+    booleans: [...YES_FLAGS, "--json"],
+    min: 1,
+    max: 1,
+  });
+  const yes = parsed.has(...YES_FLAGS);
+  const id = parsed.positionals[0];
 
   // --yes bypasses both the lookup and the prompt entirely, preserving the
   // original one-shot behavior (a single DELETE call) for scripts/CI that
