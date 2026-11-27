@@ -619,7 +619,7 @@ Stable across releases, safe to branch on in a script:
 | `2` | Usage or validation error (bad arguments, or the server rejected the request as invalid) |
 | `4` | Authentication required or rejected (not logged in, or the token was refused) |
 | `5` | Not found |
-| `6` | Network/transport error, or an upstream server (5xx) error |
+| `6` | Network/transport error, an upstream server (5xx) error, or a rate limit/timeout (429, 408) -- safe to retry |
 
 ## Compatibility
 

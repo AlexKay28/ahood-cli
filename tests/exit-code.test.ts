@@ -28,6 +28,11 @@ describe("exitCodeFor", () => {
     expect(exitCodeFor(new ApiError(503, "unavailable"))).toBe(6);
   });
 
+  it("maps 429 and 408 to 6, not 2 -- 'come back later' is retryable, not a usage error (ahood-cli#256)", () => {
+    expect(exitCodeFor(new ApiError(429, "rate limited"))).toBe(6);
+    expect(exitCodeFor(new ApiError(408, "request timeout"))).toBe(6);
+  });
+
   it("maps NetworkError to 6", () => {
     expect(exitCodeFor(new NetworkError("fetch failed"))).toBe(6);
   });
