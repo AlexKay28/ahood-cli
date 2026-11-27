@@ -714,7 +714,25 @@ export async function resolveMcpServerConfig(
   // for a missing required variable must not first cost the user a secret
   // prompt.
   for (const variable of envVars) {
-    if (handledAsSecret(variable)) continue;
+    if (handledAsSecret(variable)) {
+      // A name this CLI moved onto the secret path itself (ahood-cli#259)
+      // keeps the non-secret path's refusal when nobody can answer a prompt:
+      // required, no value from any route, no terminal. Without this it
+      // reached promptSecret and died on "Prompt was not answered (stdin
+      // closed)", which names neither the variable nor the way out. Checked
+      // in this pass, not the secret one, for the reason given above -- it
+      // must not first cost a prompt for some other secret. Declared secrets
+      // are left to ahood-cli#257.
+      if (variable.is_secret || !variable.is_required || process.stdin.isTTY) continue;
+      const ownCredential = isAhoodCredentialName(variable.name);
+      if ((!ownCredential && process.env[variable.name]) || existingEnv?.[variable.name]) continue;
+      throw new Error(
+        ownCredential
+          ? // Exporting it is exactly what the refusal pass above rejects.
+            `${sanitizeForTerminal(variable.name)} is required by ${sanitizeForTerminal(manifest.name)} but is not set -- re-run in a terminal to type a value for it.`
+          : `${sanitizeForTerminal(variable.name)} is required by ${sanitizeForTerminal(manifest.name)} but is not set -- export ${sanitizeForTerminal(variable.name)} and re-run.`,
+      );
+    }
     // Same truthiness rule as the secret branch below: an empty-string env
     // var reads as "not set" rather than installing an empty value.
     const fromEnv = process.env[variable.name];

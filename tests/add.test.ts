@@ -1410,6 +1410,7 @@ describe("add", () => {
     it("handles a credential-looking name declared non-secret as a secret: prompts when unset, and says so", async () => {
       await stubMcp([{ name: "GH_TOKEN", description: "GitHub token", is_required: true, is_secret: false }]);
       delete process.env.GH_TOKEN;
+      process.stdin.isTTY = true;
 
       await add([`${OWNER}/${SKILL}`]);
 
@@ -1504,13 +1505,47 @@ describe("add", () => {
       expect(promptSecret).toHaveBeenCalledWith(expect.stringContaining("SORT_KEY"));
     });
 
-    it("still asks for a REQUIRED, unset, credential-looking non-secret with no terminal (unchanged)", async () => {
-      await stubMcp([{ name: "SORT_KEY", description: "d", is_required: true, is_secret: false }]);
+    // Same refusal the non-secret path has always given (ahood-cli#120),
+    // rather than a prompt nobody can answer -- and ahead of the prompt for
+    // the declared secret listed before it.
+    it("refuses a REQUIRED, unset, credential-looking non-secret with no terminal, naming the variable and without prompting", async () => {
+      await stubMcp([
+        { name: "WEATHER_API_KEY", description: "API key", is_required: true, is_secret: true },
+        { name: "SORT_KEY", description: "d", is_required: true, is_secret: false },
+      ]);
+      delete process.env.WEATHER_API_KEY;
       delete process.env.SORT_KEY;
 
-      await add([`${OWNER}/${SKILL}`]);
+      await expect(add([`${OWNER}/${SKILL}`])).rejects.toThrow(
+        "SORT_KEY is required by weather-server but is not set -- export SORT_KEY and re-run.",
+      );
 
-      expect(promptSecret).toHaveBeenCalledWith(expect.stringContaining("SORT_KEY"));
+      expect(promptSecret).not.toHaveBeenCalled();
+      expect(existsSync(join(dir, MCP_CONFIG_PATH))).toBe(false);
+    });
+
+    it("installs a REQUIRED credential-looking non-secret from the environment with no terminal", async () => {
+      await stubMcp([{ name: "SORT_KEY", description: "d", is_required: true, is_secret: false }]);
+      process.env.SORT_KEY = "by-date";
+
+      try {
+        await add([`${OWNER}/${SKILL}`]);
+      } finally {
+        delete process.env.SORT_KEY;
+      }
+
+      expect(promptSecret).not.toHaveBeenCalled();
+      expect(JSON.parse(readFileSync(join(dir, MCP_CONFIG_PATH), "utf-8")).mcpServers[SKILL].env).toEqual({ SORT_KEY: "by-date" });
+    });
+
+    it("refuses a REQUIRED, unset AHOOD_TOKEN with no terminal without telling the user to export it", async () => {
+      await stubMcp([{ name: "AHOOD_TOKEN", description: "token", is_required: true, is_secret: false }]);
+
+      const error = (await add([`${OWNER}/${SKILL}`]).catch((e: unknown) => e)) as Error;
+
+      expect(error.message).toBe("AHOOD_TOKEN is required by weather-server but is not set -- re-run in a terminal to type a value for it.");
+      expect(promptSecret).not.toHaveBeenCalled();
+      expect(existsSync(join(dir, MCP_CONFIG_PATH))).toBe(false);
     });
 
     // `environment_variables` is third-party JSON behind an `as` cast: a
