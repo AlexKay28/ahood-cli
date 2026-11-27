@@ -94,7 +94,7 @@ function fakeContext(opts: { mcp?: Record<string, unknown>; children?: string[] 
   const mcp = new Map<string, unknown>(Object.entries(opts.mcp ?? {}));
   const prompts: Array<Record<string, unknown>> = [];
   const synthetic: Array<{ sessionID: string; text: string }> = [];
-  const queue: OpencodeEvent[] = [];
+  const queue: Array<{ event: OpencodeEvent; handled: () => void }> = [];
   let wake: (() => void) | null = null;
   let subscribed = false;
   const registration = { dispose: async () => {} };
@@ -111,7 +111,12 @@ function fakeContext(opts: { mcp?: Record<string, unknown>; children?: string[] 
             while (!signal?.aborted) {
               if (queue.length === 0) await new Promise<void>((r) => (wake = r));
               const next = queue.shift();
-              if (next) yield next;
+              if (next) {
+                yield next.event;
+                // for-await only asks for the next event once its body -- the
+                // plugin's handler -- has finished, so this is the real completion signal.
+                next.handled();
+              }
             }
           },
         };
@@ -130,10 +135,14 @@ function fakeContext(opts: { mcp?: Record<string, unknown>; children?: string[] 
     prompts,
     synthetic,
     subscribed: () => subscribed,
+    // ahood#266: resolves when the plugin has finished handling the event, not
+    // after a fixed number of event-loop turns -- a handler that waits on the
+    // stubbed `npx` child process (real wall-clock time) outlasted those under load.
     emit: async (event) => {
-      queue.push(event);
+      if (!subscribed) return;
+      const handled = new Promise<void>((resolve) => queue.push({ event, handled: resolve }));
       wake?.();
-      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+      await handled;
     },
   };
 }
