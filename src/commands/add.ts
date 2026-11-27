@@ -3,7 +3,7 @@ import { mkdirSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync, read
 import { basename, dirname, join, resolve, sep } from "node:path";
 import * as tarStream from "tar-stream";
 import { gunzipSync } from "node:zlib";
-import { apiFetchWithRateLimitRetry, apiJson, ApiError, bodyReadError, isBodyReadFailure, sanitizeErrorMessage } from "../http.js";
+import { apiFetchWithRateLimitRetry, apiJson, ApiError, bodyReadError, isBodyReadFailure, sanitizeErrorMessage, type ProgressDeadline } from "../http.js";
 import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, pinnedFilePath, AGENTS_ROOT, MCP_CONFIG_PATH } from "../spec.js";
 import {
   readLockfile,
@@ -25,6 +25,21 @@ import { buildProvenanceHeader, type ProvenanceHeaderMeta } from "../provenance-
 
 const USAGE = "Usage: ahood skill add <owner>/<skill>[@version]";
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB compressed
+// ahood-cli#270: the archive is the one response big enough that the default
+// 30s TOTAL deadline is wrong for it -- a full-size archive needs ~1.7 MB/s to
+// fit, so on a slower link it failed on every attempt. It is judged on
+// progress instead: 30s with no bytes at all is a stall (the same patience
+// every other request gets for its whole response).
+const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
+// The idle timeout alone would let a server drip one byte every 29s forever,
+// so the body also has a hard cap: the time a MAX_DOWNLOAD_BYTES archive takes
+// at the slowest link worth supporting. 64 KiB/s (~0.5 Mbit/s) is below any
+// broadband or usable mobile connection, and gives 800s (~13 min). That only
+// binds near the size cap: a typical archive is kilobytes, and even a 1 MB one
+// clears the cap at 1.3 KiB/s.
+const DOWNLOAD_FLOOR_BYTES_PER_SECOND = 64 * 1024;
+const DOWNLOAD_TOTAL_TIMEOUT_MS = Math.ceil(MAX_DOWNLOAD_BYTES / DOWNLOAD_FLOOR_BYTES_PER_SECOND) * 1000;
+export const DOWNLOAD_DEADLINE: ProgressDeadline = { idleMs: DOWNLOAD_IDLE_TIMEOUT_MS, totalMs: DOWNLOAD_TOTAL_TIMEOUT_MS };
 const MAX_EXTRACTED_BYTES = 200 * 1024 * 1024; // 200 MB decompressed
 const MAX_ENTRY_COUNT = 10_000;
 // ahood#1553 step 4: the canonical site, always -- not getApiUrl() (which
@@ -1117,12 +1132,24 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
 // of add()'s download flow below, pulled out so `diff.ts` (ahood-cli#88) can
 // fetch two versions' archives the same verified way without duplicating
 // the download/checksum logic.
-export async function downloadVerifiedArchive(owner: string, skill: string, meta: VersionMeta): Promise<Buffer> {
+//
+// `deadline` is a parameter only so tests can shorten it; every caller takes
+// the default.
+export async function downloadVerifiedArchive(
+  owner: string,
+  skill: string,
+  meta: VersionMeta,
+  deadline: ProgressDeadline = DOWNLOAD_DEADLINE,
+): Promise<Buffer> {
   const downloadPath = `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/download?version=${encodeURIComponent(meta.version)}`;
   // ahood-cli#256: same bounded 429 retry as apiJson. A bare apiFetch here
   // meant the metadata call rode out a rate limit and the download right after
   // it failed the install on the first 429.
-  const downloadRes = await apiFetchWithRateLimitRetry(downloadPath, { headers: { "X-Ahood-Source": "cli" }, redirect: "follow" });
+  const downloadRes = await apiFetchWithRateLimitRetry(
+    downloadPath,
+    { headers: { "X-Ahood-Source": "cli" }, redirect: "follow" },
+    { progressDeadline: deadline },
+  );
   if (!downloadRes.ok) {
     // Same host as every other apiJson call, so this must throw ApiError
     // (not a plain Error) to get the right exitCodeFor mapping (401/404/5xx),

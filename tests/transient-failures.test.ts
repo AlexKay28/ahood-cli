@@ -137,8 +137,11 @@ describe("the request timeout covers the body read (ahood-cli#256)", () => {
     expect(exitCodeFor(caught)).toBe(6);
   });
 
+  // ahood-cli#270: the download no longer rides the default signal shortened
+  // above -- its body is on an idle timeout of its own, shortened here the
+  // same way (30s -> 100ms). tests/download-deadline.test.ts covers the rest.
   it("archive download: a server that sends headers and then stalls fails as NetworkError, exit 6", async () => {
-    const caught = await caughtFrom(downloadVerifiedArchive(OWNER, SKILL, metaFor(Buffer.from("x"))));
+    const caught = await caughtFrom(downloadVerifiedArchive(OWNER, SKILL, metaFor(Buffer.from("x")), { idleMs: 100, totalMs: 5_000 }));
 
     expect(caught).toBeInstanceOf(NetworkError);
     expect(exitCodeFor(caught)).toBe(6);
