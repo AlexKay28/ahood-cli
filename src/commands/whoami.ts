@@ -1,4 +1,5 @@
 import { ApiError, apiJson } from "../http.js";
+import { exitCodeFor } from "../exit-code.js";
 import { resolveToken } from "../credentials.js";
 import { unrecognizedArgs } from "../flags.js";
 import { UsageError } from "../usage-error.js";
@@ -29,7 +30,10 @@ export type WhoamiResult =
   | { authenticated: false; reason: "not_logged_in" }
   | { authenticated: false; reason: "invalid_token" }
   | ({ authenticated: true; mode: "session" | "token" } & ProfileOutcome)
-  | { authenticated: null; error: string };
+  // `cause` is the error as thrown (ahood-cli#256): `error` alone is a string,
+  // and a string cannot say whether the failure was a dead network, a 5xx or a
+  // 404 -- which is exactly what the exit code has to say.
+  | { authenticated: null; error: string; cause: unknown };
 
 // Best-effort enrichment: whoami's real job is answering "does this token
 // still authenticate?", which is already settled by the time this runs.
@@ -89,7 +93,7 @@ export async function checkAuth(): Promise<WhoamiResult> {
       return { authenticated: false, reason: "invalid_token" };
     }
     const message = error instanceof Error ? error.message : String(error);
-    return { authenticated: null, error: message };
+    return { authenticated: null, error: message, cause: error };
   }
 }
 
@@ -126,9 +130,17 @@ export async function whoami(args: string[] = []): Promise<void> {
   }
 
   if (result.authenticated === null) {
-    if (wantsJson) console.log(JSON.stringify({ authenticated: null, error: result.error }));
+    // ahood-cli#256: this used to be a flat exit 1, so `whoami` -- the
+    // canonical CI preflight -- reported a dead network or a registry 5xx as
+    // "general error" while every other command reported 6 for the very same
+    // failure, and retry-on-6 logic never fired. Same mapping as the top-level
+    // handler now. `exit_code` repeats it in the JSON so a caller that only
+    // captured stdout can still branch on it; `cause` itself is never
+    // serialized (an ApiError carries the raw response body).
+    const exitCode = exitCodeFor(result.cause);
+    if (wantsJson) console.log(JSON.stringify({ authenticated: null, error: result.error, exit_code: exitCode }));
     else console.error(`Could not verify your token: ${result.error}`);
-    process.exitCode = 1;
+    process.exitCode = exitCode;
     return;
   }
 

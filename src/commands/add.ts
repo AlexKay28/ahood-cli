@@ -3,7 +3,7 @@ import { mkdirSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync, read
 import { basename, dirname, join, resolve, sep } from "node:path";
 import * as tarStream from "tar-stream";
 import { gunzipSync } from "node:zlib";
-import { apiFetch, apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
+import { apiFetchWithRateLimitRetry, apiJson, ApiError, bodyReadError, isBodyReadFailure, sanitizeErrorMessage } from "../http.js";
 import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, pinnedFilePath, AGENTS_ROOT, MCP_CONFIG_PATH } from "../spec.js";
 import {
   readLockfile,
@@ -1118,10 +1118,11 @@ export async function updateMcpEntry(owner: string, skill: string, meta: Version
 // fetch two versions' archives the same verified way without duplicating
 // the download/checksum logic.
 export async function downloadVerifiedArchive(owner: string, skill: string, meta: VersionMeta): Promise<Buffer> {
-  const downloadRes = await apiFetch(
-    `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/download?version=${encodeURIComponent(meta.version)}`,
-    { headers: { "X-Ahood-Source": "cli" }, redirect: "follow" },
-  );
+  const downloadPath = `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/download?version=${encodeURIComponent(meta.version)}`;
+  // ahood-cli#256: same bounded 429 retry as apiJson. A bare apiFetch here
+  // meant the metadata call rode out a rate limit and the download right after
+  // it failed the install on the first 429.
+  const downloadRes = await apiFetchWithRateLimitRetry(downloadPath, { headers: { "X-Ahood-Source": "cli" }, redirect: "follow" });
   if (!downloadRes.ok) {
     // Same host as every other apiJson call, so this must throw ApiError
     // (not a plain Error) to get the right exitCodeFor mapping (401/404/5xx),
@@ -1132,7 +1133,12 @@ export async function downloadVerifiedArchive(owner: string, skill: string, meta
     const body = rawBody ? sanitizeErrorMessage(rawBody) : "";
     throw new ApiError(downloadRes.status, `Download failed with status ${downloadRes.status}${body ? `: ${body}` : ""}`);
   }
-  const buffer = await readBoundedBody(downloadRes, MAX_DOWNLOAD_BYTES);
+  // ahood-cli#256: headers arrived, then the body stalled or the socket died.
+  // That is a transport failure (exit 6, retryable), not the generic exit 1 it
+  // used to be. readBoundedBody's own size-cap errors pass through untouched.
+  const buffer = await readBoundedBody(downloadRes, MAX_DOWNLOAD_BYTES).catch((error: unknown) => {
+    throw isBodyReadFailure(error) ? bodyReadError(downloadPath, error) : error;
+  });
 
   const actualChecksum = createHash("sha256").update(buffer).digest("hex");
   if (actualChecksum !== meta.checksum_sha256) {
