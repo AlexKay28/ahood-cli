@@ -14,16 +14,15 @@ import {
   constants as fsConstants,
   copyFileSync,
   existsSync,
-  mkdirSync,
   readdirSync,
   readFileSync,
-  renameSync,
   rmdirSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
+import { writeFileAtomic } from "../lockfile.js";
 import { SetupRefusedError } from "./errors.js";
 import { displayPath } from "./paths.js";
 
@@ -106,15 +105,15 @@ export function fileMode(path: string): number | null {
   }
 }
 
-// The rename swaps in a new inode, so without the chmod an edited file would
-// silently take the umask default (e.g. a user's 0600 config.toml -> 0644).
+// Delegates to the shared atomic writer so a symlinked harness config (stow,
+// chezmoi dotfiles) is written THROUGH instead of being replaced by a regular
+// file, and the temp file is unpredictable, sits next to the resolved target
+// and is removed on failure (ahood-cli#254, same fix as #144 for .mcp.json).
+// An explicit `mode` is enforced even on an existing file (a token file must
+// end up 0600); without one the file keeps its current bits, since the rename
+// swaps in a new inode that would otherwise take the umask default.
 function writeAtomic(path: string, content: string, mode: number | undefined): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const keep = mode ?? fileMode(path) ?? undefined;
-  const tmp = `${path}.ahood-tmp-${process.pid}`;
-  writeFileSync(tmp, content, keep === undefined ? undefined : { mode: keep });
-  if (keep !== undefined) chmodSync(tmp, keep);
-  renameSync(tmp, path);
+  writeFileAtomic(path, content, mode, { enforceMode: true });
 }
 
 export function applyChanges(changes: FileChange[], opts: { dryRun: boolean; stamp: string }): AppliedChange[] {
