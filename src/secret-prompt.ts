@@ -24,7 +24,9 @@ export function promptSecret(promptText: string): Promise<string> {
     return questionLine(promptText, (reason) => `Prompt was not answered (${reason}).`);
   }
 
-  process.stdout.write(promptText);
+  // stderr for the prompt, mask and erase sequences alike (ahood-cli#277):
+  // a secret's '*' count must not land in captured stdout.
+  process.stderr.write(promptText);
   stdin.setRawMode(true);
   stdin.resume();
   stdin.setEncoding("utf8");
@@ -40,14 +42,14 @@ export function promptSecret(promptText: string): Promise<string> {
       for (const char of chunk) {
         if (char === "\n" || char === "\r") {
           cleanup();
-          process.stdout.write("\n");
+          process.stderr.write("\n");
           resolve(value);
           return;
         }
         if (char === "\u0003") {
           // Ctrl-C
           cleanup();
-          process.stdout.write("\n");
+          process.stderr.write("\n");
           reject(new Error("Prompt cancelled (Ctrl-C)."));
           return;
         }
@@ -55,12 +57,12 @@ export function promptSecret(promptText: string): Promise<string> {
           // Backspace/delete
           if (value.length > 0) {
             value = value.slice(0, -1);
-            process.stdout.write("\b \b");
+            process.stderr.write("\b \b");
           }
           continue;
         }
         value += char;
-        process.stdout.write("*");
+        process.stderr.write("*");
       }
     }
     stdin.on("data", onData);

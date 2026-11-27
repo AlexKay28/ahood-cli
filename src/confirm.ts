@@ -64,7 +64,10 @@ export function questionLine(promptText: string, unanswered: (reason: string) =>
   // Optional calls: a redirected file has neither method, and just ends.
   const pipe = stdin.isTTY ? undefined : (stdin as { ref?: () => void; unref?: () => void });
   pipe?.ref?.();
-  const rl = createInterface({ input: stdin, output: process.stdout });
+  // Prompts go to stderr, never stdout (ahood-cli#277): stdout is the data
+  // channel, and `ahood skill remove a/b > out.txt` used to swallow the
+  // question into the file while the user stared at a silent terminal.
+  const rl = createInterface({ input: stdin, output: process.stderr });
   return new Promise((resolve, reject) => {
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
@@ -76,7 +79,7 @@ export function questionLine(promptText: string, unanswered: (reason: string) =>
       unanswerable.add(stdin);
       // The prompt was written without a newline; end that line so the error
       // doesn't land glued to the end of the question.
-      process.stdout.write("\n");
+      process.stderr.write("\n");
       reject(new PromptUnansweredError(unanswered(reason), reason));
     };
     rl.once("close", () => giveUp("stdin closed"));
@@ -124,8 +127,11 @@ export async function confirmYesNo(promptText: string): Promise<boolean> {
   return answer === "y" || answer === "yes";
 }
 
-// Whether a per-item prompt can be shown at all: stdin and stdout both a
-// terminal. Piped or redirected, there is nobody to answer.
+// Whether a per-item prompt can be shown at all: stdin and stderr both a
+// terminal. stderr, not stdout, because that is where prompts are written
+// (ahood-cli#277): `ahood skill remove a/b > out.txt` still has a human at
+// the keyboard and a terminal showing the question, so it must prompt rather
+// than refuse. Piped stdin or a redirected stderr means nobody can answer.
 export function isInteractive(): boolean {
-  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  return Boolean(process.stdin.isTTY && process.stderr.isTTY);
 }

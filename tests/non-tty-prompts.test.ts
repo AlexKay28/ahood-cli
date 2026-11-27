@@ -30,7 +30,7 @@ function stubStdio(): { stdin: FakeStdin; written(): string } {
     },
   });
   vi.spyOn(process, "stdin", "get").mockReturnValue(stdin as unknown as typeof process.stdin);
-  vi.spyOn(process, "stdout", "get").mockReturnValue(stdout as unknown as typeof process.stdout);
+  vi.spyOn(process, "stderr", "get").mockReturnValue(stdout as unknown as typeof process.stderr);
   return { stdin, written: () => written.join("") };
 }
 
