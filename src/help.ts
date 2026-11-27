@@ -244,7 +244,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     desc: "Show a single skill's details (tags, license, homepage, repository, dates, etc.) without installing it. Alias: ahood skill show.",
     flags: [
       "--json   Emit the raw skill object instead of formatted lines.",
-      "--web    Open the skill's page in your browser instead of printing.",
+      "--web    Open the skill's page in your browser instead of printing; the URL is always printed too (with --json, emits {\"url\"} and opens nothing).",
     ],
   },
   {
@@ -471,7 +471,7 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
       usage: `${p} view <owner>/${n} [--json] [--web]`,
       summary: `Show a single ${label}'s details without installing it (alias: ${p} show).`,
       desc: `Show a single ${label}'s details without installing it. Alias: ${p} show. ${kindRefusal}`,
-      flags: ["--json   Emit the raw object instead of formatted lines.", "--web    Open its page in your browser instead of printing."],
+      flags: ["--json   Emit the raw object instead of formatted lines.", "--web    Open its page in your browser instead of printing; the URL is always printed too (with --json, emits {\"url\"} and opens nothing)."],
     },
     {
       usage: `${p} read <owner>/${n} [--json]`,

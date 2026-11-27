@@ -1,5 +1,9 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import * as cp from "node:child_process";
 import { view } from "../src/commands/view.js";
+
+vi.mock("node:child_process", async (orig) => ({ ...(await orig<typeof import("node:child_process")>()), spawn: vi.fn() }));
 
 const API_URL = "http://ahood.test";
 
@@ -14,6 +18,37 @@ describe("view", () => {
     vi.unstubAllGlobals();
     if (originalApiUrl === undefined) delete process.env.AHOOD_API_URL;
     else process.env.AHOOD_API_URL = originalApiUrl;
+  });
+
+  describe("--web (ahood-cli#252)", () => {
+    it("prints the URL and does not crash when the opener is missing (async ENOENT)", async () => {
+      const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
+      vi.mocked(cp.spawn).mockImplementation((() => {
+        queueMicrotask(() => child.emit("error", Object.assign(new Error("spawn xdg-open ENOENT"), { code: "ENOENT" })));
+        return child;
+      }) as never);
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await expect(view(["alice/pdf", "--web"])).resolves.toBeUndefined();
+        await new Promise((r) => setTimeout(r, 5));
+        expect(log).toHaveBeenCalledWith(`Open this URL in your browser: ${API_URL}/alice/pdf`);
+        expect(child.unref).toHaveBeenCalled();
+      } finally {
+        log.mockRestore();
+      }
+    });
+
+    it("--web --json emits {url} and never spawns", async () => {
+      vi.mocked(cp.spawn).mockClear();
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await view(["alice/pdf", "--web", "--json"]);
+        expect(log).toHaveBeenCalledWith(JSON.stringify({ url: `${API_URL}/alice/pdf` }));
+        expect(cp.spawn).not.toHaveBeenCalled();
+      } finally {
+        log.mockRestore();
+      }
+    });
   });
 
   it("rejects with a usage error when no spec is given", async () => {

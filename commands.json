@@ -221,7 +221,7 @@
           "desc": "Show a single skill's details (tags, license, homepage, repository, dates, etc.) without installing it. Alias: ahood skill show.",
           "flags": [
             "--json   Emit the raw skill object instead of formatted lines.",
-            "--web    Open the skill's page in your browser instead of printing."
+            "--web    Open the skill's page in your browser instead of printing; the URL is always printed too (with --json, emits {\"url\"} and opens nothing)."
           ],
           "aliases": [
             "show"
@@ -431,7 +431,7 @@
           "desc": "Show a single agent's details without installing it. Alias: ahood agent show. Refused, before anything else happens, when the target is not an agent.",
           "flags": [
             "--json   Emit the raw object instead of formatted lines.",
-            "--web    Open its page in your browser instead of printing."
+            "--web    Open its page in your browser instead of printing; the URL is always printed too (with --json, emits {\"url\"} and opens nothing)."
           ],
           "aliases": [
             "show"
@@ -611,7 +611,7 @@
           "desc": "Show a single MCP server manifest's details without installing it. Alias: ahood mcp show. Refused, before anything else happens, when the target is not an MCP server manifest.",
           "flags": [
             "--json   Emit the raw object instead of formatted lines.",
-            "--web    Open its page in your browser instead of printing."
+            "--web    Open its page in your browser instead of printing; the URL is always printed too (with --json, emits {\"url\"} and opens nothing)."
           ],
           "aliases": [
             "show"
@@ -791,7 +791,7 @@
           "desc": "Show a single doc's details without installing it. Alias: ahood doc show. Refused, before anything else happens, when the target is not a doc.",
           "flags": [
             "--json   Emit the raw object instead of formatted lines.",
-            "--web    Open its page in your browser instead of printing."
+            "--web    Open its page in your browser instead of printing; the URL is always printed too (with --json, emits {\"url\"} and opens nothing)."
           ],
           "aliases": [
             "show"
@@ -984,7 +984,7 @@
           "desc": "Show a single project guide's details without installing it. Alias: ahood project show. Refused, before anything else happens, when the target is not a project guide.",
           "flags": [
             "--json   Emit the raw object instead of formatted lines.",
-            "--web    Open its page in your browser instead of printing."
+            "--web    Open its page in your browser instead of printing; the URL is always printed too (with --json, emits {\"url\"} and opens nothing)."
           ],
           "aliases": [
             "show"
@@ -1168,7 +1168,7 @@
           "desc": "Show a single loop's details without installing it. Alias: ahood loop show. Refused, before anything else happens, when the target is not a loop.",
           "flags": [
             "--json   Emit the raw object instead of formatted lines.",
-            "--web    Open its page in your browser instead of printing."
+            "--web    Open its page in your browser instead of printing; the URL is always printed too (with --json, emits {\"url\"} and opens nothing)."
           ],
           "aliases": [
             "show"
@@ -1365,7 +1365,7 @@
           "desc": "Show a single prompt's details without installing it. Alias: ahood prompt show. Refused, before anything else happens, when the target is not a prompt.",
           "flags": [
             "--json   Emit the raw object instead of formatted lines.",
-            "--web    Open its page in your browser instead of printing."
+            "--web    Open its page in your browser instead of printing; the URL is always printed too (with --json, emits {\"url\"} and opens nothing)."
           ],
           "aliases": [
             "show"

@@ -52,17 +52,25 @@ type SkillDetail = {
 // Spawned with argv as an array (not a shell string), so a crafted owner/skill
 // can never inject shell syntax -- and both segments are already restricted
 // to a safe charset by parseOwnerSkill before this ever runs.
+//
+// spawn() reports a missing opener (ENOENT on a headless host) asynchronously
+// via the child's 'error' event, never by throwing, so a try/catch alone
+// leaves it unhandled and crashes the process (ahood-cli#252). The URL is
+// printed regardless, since an opener can exist yet do nothing (no display).
 function openBrowser(url: string): void {
+  console.log(`Open this URL in your browser: ${url}`);
+  const [cmd, cmdArgs]: [string, string[]] =
+    process.platform === "win32"
+      ? ["cmd", ["/c", "start", "", url]]
+      : process.platform === "darwin"
+        ? ["open", [url]]
+        : ["xdg-open", [url]];
   try {
-    if (process.platform === "win32") {
-      spawn("cmd", ["/c", "start", "", url], { stdio: "ignore", detached: true }).unref();
-    } else if (process.platform === "darwin") {
-      spawn("open", [url], { stdio: "ignore", detached: true }).unref();
-    } else {
-      spawn("xdg-open", [url], { stdio: "ignore", detached: true }).unref();
-    }
+    const child = spawn(cmd, cmdArgs, { stdio: "ignore", detached: true });
+    child.on("error", () => {});
+    child.unref();
   } catch {
-    console.log(`Open this URL in your browser: ${url}`);
+    // The URL was already printed above.
   }
 }
 
@@ -92,7 +100,8 @@ export async function view(args: string[], scope?: KindScope): Promise<void> {
   const url = `${getApiUrl()}/${owner}/${skill}`;
   if (web) {
     await ensureRemoteKind(scope, owner, skill, "view", "open");
-    openBrowser(url);
+    if (jsonOutput) console.log(JSON.stringify({ url }));
+    else openBrowser(url);
     return;
   }
 
