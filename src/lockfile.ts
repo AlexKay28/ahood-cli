@@ -77,8 +77,9 @@ export function readLockfile(path: string): Lockfile {
 // can't be disproven. Shared by the stale-lock reclaim (ahood-cli#100) and the
 // stale-temp sweep (ahood-cli#125) so both answer "is the process that left
 // this behind still around?" the same way, rather than growing two divergent
-// staleness rules.
-function isPidDead(pid: number): boolean {
+// staleness rules. Exported for add.ts's interrupted-swap recovery
+// (ahood-cli#258), the third thing asking that same question.
+export function isPidDead(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return false;

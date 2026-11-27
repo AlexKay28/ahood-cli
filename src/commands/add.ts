@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, readdirSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import * as tarStream from "tar-stream";
 import { gunzipSync } from "node:zlib";
 import { apiFetch, apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
 import { LOCKFILE_PATH, parseOwnerSkillVersion, skillDir, agentPath, pinnedFilePath, AGENTS_ROOT, MCP_CONFIG_PATH } from "../spec.js";
 import {
+  isPidDead,
   readLockfile,
   withLock,
   writeFileAtomic,
@@ -224,7 +225,7 @@ async function readBoundedBody(res: Response, maxBytes: number): Promise<Buffer>
   return Buffer.concat(chunks);
 }
 
-/** `extractTarGz`'s/`extractFreshVersion`'s optional root-doc stamp (ahood#1553
+/** `extractTarGz`'s/`installSkillDir`'s optional root-doc stamp (ahood#1553
  *  step 4): `fileName` is matched against each entry's own canonical,
  *  top-level path (e.g. "SKILL.md", never a nested one of the same name),
  *  and only that one entry's content is passed through buildProvenanceHeader
@@ -321,20 +322,48 @@ export async function extractTarGz(buffer: Buffer, destDir: string, provenance?:
   });
 }
 
-// Extracts into a fresh temp directory next to destDir, then swaps it in.
-// Extracting straight into destDir (the old behavior) only ever ADDED files
-// on an upgrade -- anything removed in a newer version, including a script
-// pulled for a security reason, silently stuck around. The temp+rename swap
-// also means a failed/interrupted extract never leaves destDir half-upgraded.
-async function extractFreshVersion(buffer: Buffer, destDir: string, provenance?: RootDocProvenance): Promise<void> {
+// Replaces destDir with the archive's contents and runs `pin` (the lockfile
+// write) as one all-or-nothing step: if anything fails, destDir is back to
+// exactly what it was -- the previous version on an upgrade, nothing on a
+// fresh install.
+//
+// Extracting straight into destDir (the oldest behavior) only ever ADDED
+// files on an upgrade -- anything removed in a newer version, including a
+// script pulled for a security reason, silently stuck around; staging a fresh
+// copy and renaming it in fixed that. But the swap used to be rmSync(destDir)
+// then rename, BEFORE the pin: a lock timeout or EACCES on the lockfile then
+// "rolled back" by deleting the new copy, and the working previous version
+// was already gone while the lockfile still pinned it (ahood-cli#258). So the
+// previous version is renamed aside instead, and only deleted once the pin
+// has landed.
+//
+// Both the staged copy and the set-aside one live under a single holder
+// directory beside destDir, `.<owner>@<skill>.swap-<pid>-<ms>/{new,old}`:
+// - beside destDir so both renames stay on one filesystem, i.e. atomic;
+// - one level DOWN rather than as siblings, because Claude Code's skill loader
+//   looks for SKILL.md exactly one level below .claude/skills/ (see skillDir
+//   in spec.ts). A sibling `.<name>.old-*` would hold a complete SKILL.md and
+//   stay out of the loader only for as long as it skips dot-directories, which
+//   nothing here can verify; the holder itself has no SKILL.md, so a copy left
+//   behind by a killed run is never loaded as a second skill either way.
+async function installSkillDir(
+  key: string,
+  buffer: Buffer,
+  destDir: string,
+  provenance: RootDocProvenance | undefined,
+  pin: () => void,
+): Promise<void> {
   const parentDir = dirname(destDir);
   mkdirSync(parentDir, { recursive: true });
-  const tempDir = join(parentDir, `.${basename(destDir)}.tmp-${process.pid}-${Date.now()}`);
-  rmSync(tempDir, { recursive: true, force: true });
+  recoverInterruptedSwaps(destDir);
+  const holder = join(parentDir, `.${basename(destDir)}.swap-${process.pid}-${Date.now()}`);
+  const staged = join(holder, "new");
+  const aside = join(holder, "old");
+  rmSync(holder, { recursive: true, force: true });
   try {
-    await extractTarGz(buffer, tempDir, provenance);
+    await extractTarGz(buffer, staged, provenance);
   } catch (error) {
-    rmSync(tempDir, { recursive: true, force: true });
+    rmSync(holder, { recursive: true, force: true });
     try {
       rmdirSync(parentDir);
     } catch {
@@ -342,14 +371,82 @@ async function extractFreshVersion(buffer: Buffer, destDir: string, provenance?:
     }
     throw error;
   }
-  rmSync(destDir, { recursive: true, force: true });
-  renameSync(tempDir, destDir);
+
+  // Tracked step by step so the rollback undoes only what actually happened:
+  // if setting the previous version aside is itself what failed, destDir
+  // still IS the previous version and must not be touched.
+  let hadPrevious = false;
+  let swappedIn = false;
+  try {
+    try {
+      renameSync(destDir, aside);
+      hadPrevious = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    renameSync(staged, destDir);
+    swappedIn = true;
+    pin();
+  } catch (error) {
+    rollbackOrWarn(
+      () => {
+        if (swappedIn) rmSync(destDir, { recursive: true, force: true });
+        if (hadPrevious) renameSync(aside, destDir);
+        rmSync(holder, { recursive: true, force: true });
+      },
+      hadPrevious
+        ? `WARNING: could not restore ${key}'s previous version to ${destDir} after its update failed -- that version may still be at ${aside}. Move it back by hand, or run \`ahood skill add ${key}\` to reinstall.`
+        : `WARNING: could not remove ${destDir} after ${key}'s install failed -- it may be left behind with no ${LOCKFILE_PATH} pin. Run \`ahood skill remove ${key}\` to clean it up.`,
+    );
+    throw error;
+  }
+  // The install is complete and pinned by now, so a holder that can't be
+  // deleted must not turn it into a failure. Whatever is left is collected by
+  // recoverInterruptedSwaps on a later run.
+  try {
+    rmSync(holder, { recursive: true, force: true });
+  } catch {
+    // see above
+  }
+}
+
+// Exactly what installSkillDir's holder name ends in -- a decimal pid and a
+// decimal millisecond timestamp. Same rule as lockfile.ts's TEMP_SUFFIX_RE: a
+// directory the user merely happened to name similarly is never ours to
+// delete.
+const SWAP_SUFFIX_RE = /^([1-9][0-9]{0,9})-[0-9]{1,25}$/;
+
+// installSkillDir's rollback can't run on SIGKILL, an OOM kill or power loss.
+// A run killed between its two renames leaves destDir missing with the
+// previous version stranded in a holder while the lockfile still pins it, so
+// before the next install of the same skill that version is put back (which
+// also makes it the "previous" this run restores if it fails in turn). Every
+// other leftover holder is just deleted. Only holders whose pid is gone are
+// touched: a live pid may be a concurrent ahood mid-swap. Like
+// sweepStaleTempFiles this judges by pid alone, so on a filesystem shared
+// between hosts a live run elsewhere reads as dead here.
+function recoverInterruptedSwaps(destDir: string): void {
+  const parentDir = dirname(destDir);
+  const prefix = `.${basename(destDir)}.swap-`;
+  for (const entry of readdirSync(parentDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
+    const match = SWAP_SUFFIX_RE.exec(entry.name.slice(prefix.length));
+    if (!match || !isPidDead(Number(match[1]))) continue;
+    const holder = join(parentDir, entry.name);
+    try {
+      const aside = join(holder, "old");
+      if (!existsSync(destDir) && existsSync(aside)) renameSync(aside, destDir);
+      rmSync(holder, { recursive: true, force: true });
+    } catch {
+      // Best-effort: one unrecoverable leftover must not block this install.
+    }
+  }
 }
 
 // Agent packages install as one file, not a directory (Claude Code's own
 // .claude/agents/*.md convention is flat, non-recursive) -- extracts just
 // AGENT.md's content from the downloaded tarball rather than writing every
-// entry to disk the way extractFreshVersion does for skills. Exported so
+// entry to disk the way installSkillDir does for skills. Exported so
 // `diff.ts` can reuse the exact same in-memory single-file extraction to
 // pull SKILL.md out of two downloaded version archives without ever writing
 // either to disk (ahood-cli#88).
@@ -1285,6 +1382,9 @@ async function addArtifact(args: string[], scope?: KindScope): Promise<void> {
     const content = await extractSingleFileContent(buffer, "AGENT.md", await provenanceMetaForAsync(owner, skill, meta));
     mkdirSync(AGENTS_ROOT, { recursive: true });
     const destPath = agentPath(owner, skill);
+    // Kept so a failed pin can put the previous version back, exactly as
+    // installPinnedFile does (ahood-cli#258).
+    const previous = existsSync(destPath) ? readFileSync(destPath) : undefined;
     writeFileAtomic(destPath, content);
     try {
       writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
@@ -1297,12 +1397,15 @@ async function addArtifact(args: string[], scope?: KindScope): Promise<void> {
       // rollback (ahood-cli#132): an agent file left behind by a lock
       // timeout is less dangerous than a stranded mcp secret -- `remove`
       // finds it via agentExisted even with no pin -- but "a failed install
-      // installs nothing" is the invariant worth having at all three sites,
-      // and the previous version's content is gone either way, overwritten
-      // by the writeFileSync above before the pin was ever attempted.
+      // installs nothing" is the invariant worth having at all three sites.
+      // On an update that means restoring the previous version, not deleting
+      // the file: deleting it took a working agent away over a transient
+      // lock timeout while the lockfile went on pinning it (ahood-cli#258).
       rollbackOrWarn(
-        () => rmSync(destPath, { force: true }),
-        `WARNING: could not remove ${destPath} after ${key}'s install failed -- it may be left behind with no ${LOCKFILE_PATH} pin. Run \`ahood skill remove ${key}\` to clean it up.`,
+        () => (previous === undefined ? rmSync(destPath, { force: true }) : writeFileAtomic(destPath, previous)),
+        previous === undefined
+          ? `WARNING: could not remove ${destPath} after ${key}'s install failed -- it may be left behind with no ${LOCKFILE_PATH} pin. Run \`ahood skill remove ${key}\` to clean it up.`
+          : `WARNING: could not restore ${destPath} after ${key}'s update failed -- it may not match its ${LOCKFILE_PATH} pin. Run \`ahood skill add ${key}\` to reinstall.`,
       );
       if (error instanceof LockfileChecksumConflictError) {
         throw new Error(checksumConflictMessage(key, meta, error.existing));
@@ -1331,21 +1434,20 @@ async function addArtifact(args: string[], scope?: KindScope): Promise<void> {
   // every other file (scripts/, nested docs, ...) is written as-is.
   // ahood#1569: this is the exact path the bug was filed from -- a pinned
   // `ahood skill add owner/skill@version` -- so it needs the async resolver.
-  await extractFreshVersion(buffer, destDir, { fileName: "SKILL.md", meta: await provenanceMetaForAsync(owner, skill, meta) });
+  const provenance = { fileName: "SKILL.md", meta: await provenanceMetaForAsync(owner, skill, meta) };
   try {
-    writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
-      version: meta.version,
-      checksum_sha256: meta.checksum_sha256,
-      ...(meta.skill_id ? { skillId: meta.skill_id } : {}),
-    });
-  } catch (error) {
-    // Same widening as the agent path above (ahood-cli#132). extractFreshVersion
-    // has already cleared any previous version out of this directory, so the
-    // only thing this deletes is what this failed install just put there.
-    rollbackOrWarn(
-      () => rmSync(destDir, { recursive: true, force: true }),
-      `WARNING: could not remove ${destDir} after ${key}'s install failed -- it may be left behind with no ${LOCKFILE_PATH} pin. Run \`ahood skill remove ${key}\` to clean it up.`,
+    // The pin is written inside installSkillDir, which undoes its own swap if
+    // the write throws -- for any reason, not just a checksum conflict
+    // (ahood-cli#132), and by restoring the previous version rather than
+    // deleting what is there (ahood-cli#258).
+    await installSkillDir(key, buffer, destDir, provenance, () =>
+      writeLockfileEntryVerifyingChecksum(LOCKFILE_PATH, key, {
+        version: meta.version,
+        checksum_sha256: meta.checksum_sha256,
+        ...(meta.skill_id ? { skillId: meta.skill_id } : {}),
+      }),
     );
+  } catch (error) {
     if (error instanceof LockfileChecksumConflictError) {
       throw new Error(checksumConflictMessage(key, meta, error.existing));
     }
