@@ -184,14 +184,15 @@ describe("group commands", () => {
       expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/shown only this once/));
     });
 
-    it("--json emits {token, expiresAt, url}", async () => {
+    // ahood-cli#251: expires_at is the key; expiresAt stays as a deprecated alias.
+    it("--json emits {token, expires_at, url}, keeping expiresAt as an alias", async () => {
       stubApi(200, { token: "abc123", expiresAt: "2026-09-14T00:00:00.000Z" });
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
       await inviteLink([SLUG, "--json"]);
 
       expect(logSpy).toHaveBeenCalledWith(
-        JSON.stringify({ token: "abc123", expiresAt: "2026-09-14T00:00:00.000Z", url: `${API_URL}/workspace/groups/join?token=abc123` }),
+        JSON.stringify({ token: "abc123", expires_at: "2026-09-14T00:00:00.000Z", expiresAt: "2026-09-14T00:00:00.000Z", url: `${API_URL}/workspace/groups/join?token=abc123` }),
       );
     });
   });

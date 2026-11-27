@@ -1,6 +1,9 @@
 import { ApiError, apiJson, parseRetryAfterMs, sanitizeErrorMessage } from "../http.js";
 import { getApiUrl } from "../config.js";
 import { writeCredentials } from "../credentials.js";
+import { parseArgs } from "../flags.js";
+import { jsonRequested } from "../json-output.js";
+import { UsageError } from "../usage-error.js";
 
 // device_code (ahood-cli#1320 contract §1/§3): a one-shot secret the START
 // response carries ONLY to let this CLI re-identify itself on every poll via
@@ -31,7 +34,21 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function login(): Promise<void> {
+export async function login(args: string[] = []): Promise<void> {
+  // index.ts used to drop login's args, so a typo'd flag started a device-code
+  // flow anyway (ahood-cli#260).
+  //
+  // --json is refused rather than tolerated (ahood-cli#251): the flow prints a
+  // code for a person to compare in a browser and then waits on them, so it
+  // has no single document to emit -- and a caller that wants JSON is
+  // unattended, which is what AHOOD_TOKEN is for.
+  if (jsonRequested(args)) {
+    throw new UsageError(
+      "ahood login is interactive (it waits for you to approve a code in the browser) and has no --json output. " +
+        "For unattended use, set AHOOD_TOKEN instead.\nUsage: ahood login",
+    );
+  }
+  parseArgs(args, { usage: "Usage: ahood login", max: 0 });
   // device_code is destructured here and ONLY ever passed to
   // apiFetchWithTimeout below, which turns it into a poll header -- per
   // contract §1 it must never be printed or persisted, unlike `code`, which

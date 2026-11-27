@@ -1,6 +1,7 @@
 import { apiJson } from "../http.js";
-import { flagValue, parseSearchQuery, unrecognizedArgs, unrecognizedIndices } from "../flags.js";
+import { flagValue, parseArgs, parseSearchQuery, unrecognizedArgs, unrecognizedIndices, YES_FLAGS } from "../flags.js";
 import { confirm } from "../confirm.js";
+import { assertJsonHasConsent, printJson } from "../json-output.js";
 import { UsageError } from "../usage-error.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
 
@@ -67,9 +68,9 @@ export const SNAP_CREATE_FLAGS = ["--json", "--tags", ...STRUCTURED_FLAG_NAMES];
 const LIST_USAGE = "Usage: ahood snap list [--json] [--limit <n>] [--tags tag1,tag2]";
 const SEARCH_USAGE = "Usage: ahood snap search <query> [--json] [--limit <n>] [--tags tag1,tag2]";
 const SHOW_USAGE = "Usage: ahood snap show <id> [--json]";
-const REMOVE_USAGE = "Usage: ahood snap remove <id> [--yes]";
+const REMOVE_USAGE = "Usage: ahood snap remove <id> [--yes] [--json]";
 const SHARE_USAGE = "Usage: ahood snap share <id> [--json]";
-const UNSHARE_USAGE = "Usage: ahood snap unshare <id> [--yes]";
+const UNSHARE_USAGE = "Usage: ahood snap unshare <id> [--yes] [--json]";
 const TAGS_USAGE =
   'Usage: ahood snap tags <id> [tag ...] [--clear] [--json] (with no tag list, prints the snap\'s current tags; pass --clear or "" to remove them all)';
 
@@ -318,9 +319,9 @@ export async function searchSnaps(args: string[]): Promise<void> {
 }
 
 export async function showSnap(args: string[]): Promise<void> {
-  const jsonOutput = args.includes("--json");
-  const id = args.find((a) => !a.startsWith("--"));
-  if (!id) throw new UsageError(SHOW_USAGE);
+  const parsed = parseArgs(args, { usage: SHOW_USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const jsonOutput = parsed.has("--json");
+  const id = parsed.positionals[0];
 
   const snap = await apiJson<SnapDetail>(`/api/v1/snaps/${encodeURIComponent(id)}`);
 
@@ -338,9 +339,12 @@ export async function showSnap(args: string[]): Promise<void> {
 }
 
 export async function removeSnap(args: string[]): Promise<void> {
-  const id = args.find((a) => !a.startsWith("--"));
-  if (!id) throw new UsageError(REMOVE_USAGE);
-  const yes = args.includes("--yes");
+  // `snap remove <id> --dry-run --yes` used to delete it (ahood-cli#260).
+  const parsed = parseArgs(args, { usage: REMOVE_USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
+  const id = parsed.positionals[0];
+  const yes = parsed.has(...YES_FLAGS);
+  const jsonOutput = parsed.has("--json");
+  assertJsonHasConsent(jsonOutput, yes, REMOVE_USAGE);
 
   // Matches remove.ts/group.ts's confirm-before-destroy pattern (CLAUDE.md:
   // "Destructive commands ... prompt for confirmation unless --yes is
@@ -353,13 +357,17 @@ export async function removeSnap(args: string[]): Promise<void> {
   }
 
   await apiJson<{ deleted: boolean }>(`/api/v1/snaps/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (jsonOutput) {
+    printJson({ id, deleted: true });
+    return;
+  }
   console.log(`Deleted snap ${id}.`);
 }
 
 export async function shareSnap(args: string[]): Promise<void> {
-  const jsonOutput = args.includes("--json");
-  const id = args.find((a) => !a.startsWith("--"));
-  if (!id) throw new UsageError(SHARE_USAGE);
+  const parsed = parseArgs(args, { usage: SHARE_USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const jsonOutput = parsed.has("--json");
+  const id = parsed.positionals[0];
 
   // POST .../share is documented idempotent -- mints a link on first call,
   // returns the same existing one on any later call -- so this never needs
@@ -376,9 +384,11 @@ export async function shareSnap(args: string[]): Promise<void> {
 }
 
 export async function unshareSnap(args: string[]): Promise<void> {
-  const id = args.find((a) => !a.startsWith("--"));
-  if (!id) throw new UsageError(UNSHARE_USAGE);
-  const yes = args.includes("--yes");
+  const parsed = parseArgs(args, { usage: UNSHARE_USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
+  const id = parsed.positionals[0];
+  const yes = parsed.has(...YES_FLAGS);
+  const jsonOutput = parsed.has("--json");
+  assertJsonHasConsent(jsonOutput, yes, UNSHARE_USAGE);
 
   // Not destructive in the data-loss sense -- the snap itself is untouched,
   // and re-sharing mints/returns a link exactly as before (share is
@@ -396,6 +406,10 @@ export async function unshareSnap(args: string[]): Promise<void> {
   }
 
   await apiJson<{ shared: boolean }>(`/api/v1/snaps/${encodeURIComponent(id)}/share`, { method: "DELETE" });
+  if (jsonOutput) {
+    printJson({ id, shared: false });
+    return;
+  }
   console.log(`Unshared snap ${id}.`);
 }
 

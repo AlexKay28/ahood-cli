@@ -1,8 +1,9 @@
 import { apiJson } from "../http.js";
-import { flagValue } from "../flags.js";
+import { parseArgs } from "../flags.js";
 import { parseOwnerSkill, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
+import { printJson } from "../json-output.js";
 
 type UpdateResponse = {
   slug: string;
@@ -21,7 +22,7 @@ type UpdateResponse = {
 };
 
 const USAGE =
-  "Usage: ahood skill edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]";
+  "Usage: ahood skill edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>] [--json]";
 
 // Mirrors PATCH /api/v1/skills/{owner}/{skill}'s allow-list exactly
 // (lib/skills/mutations.ts's UpdateSkillInput) -- only a field the caller
@@ -29,30 +30,38 @@ const USAGE =
 // never clobbers an existing value (the route only validates/writes keys
 // that are present on the body at all).
 export async function edit(args: string[], scope?: KindScope): Promise<void> {
-  const spec = args[0];
-  if (!spec || spec.startsWith("--")) throw new UsageError(USAGE);
-  const { owner, skill } = parseOwnerSkill(spec, USAGE);
+  // An undeclared flag is refused rather than dropped: `--visiblity public`
+  // next to a valid --tagline used to PATCH the tagline alone and exit 0, so
+  // the skill stayed private with nothing to say so (ahood-cli#260).
+  const parsed = parseArgs(args, {
+    usage: USAGE,
+    booleans: ["--json"],
+    values: ["--tagline", "--tags", "--license", "--visibility", "--homepage", "--repository"],
+    min: 1,
+    max: 1,
+  });
+  const { owner, skill } = parseOwnerSkill(parsed.positionals[0], USAGE);
 
   const body: Record<string, unknown> = {};
-  const tagline = flagValue(args, "--tagline");
+  const tagline = parsed.value("--tagline");
   if (tagline !== undefined) body.tagline = tagline;
-  const tags = flagValue(args, "--tags");
+  const tags = parsed.value("--tags");
   if (tags !== undefined) body.tags = tags.split(",").map((t) => t.trim()).filter(Boolean);
-  const license = flagValue(args, "--license");
+  const license = parsed.value("--license");
   if (license !== undefined) body.license = license;
-  const visibility = flagValue(args, "--visibility");
+  const visibility = parsed.value("--visibility");
   if (visibility !== undefined) {
     if (visibility !== "public" && visibility !== "private") {
       throw new UsageError(`--visibility must be "public" or "private" (got "${visibility}").`);
     }
     body.visibility = visibility;
   }
-  const homepage = flagValue(args, "--homepage");
+  const homepage = parsed.value("--homepage");
   if (homepage !== undefined) {
     validateExternalUrl(homepage, "--homepage");
     body.homepage = homepage;
   }
-  const repository = flagValue(args, "--repository");
+  const repository = parsed.value("--repository");
   if (repository !== undefined) {
     validateExternalUrl(repository, "--repository");
     body.repository = repository;
@@ -74,8 +83,16 @@ export async function edit(args: string[], scope?: KindScope): Promise<void> {
     },
   );
 
-  console.log(`Updated ${owner}/${updated.slug}: tagline=${JSON.stringify(updated.tagline)}, license=${JSON.stringify(updated.license)}, visibility=${updated.visibility}, tags=[${updated.tags.join(", ")}]`);
+  // tags_warning is warned about in both modes: stderr is the human channel
+  // under --json too, and the field itself is in the document.
   if (updated.tags_warning) {
     console.warn(`WARNING: ${updated.tags_warning}`);
   }
+  if (parsed.has("--json")) {
+    // The PATCH response as the registry returned it (ahood-cli#251), plus the
+    // owner/skill the caller addressed -- the response carries only the slug.
+    printJson({ owner, skill, ...updated });
+    return;
+  }
+  console.log(`Updated ${owner}/${updated.slug}: tagline=${JSON.stringify(updated.tagline)}, license=${JSON.stringify(updated.license)}, visibility=${updated.visibility}, tags=[${updated.tags.join(", ")}]`);
 }

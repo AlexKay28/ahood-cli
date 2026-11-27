@@ -10,27 +10,32 @@
           "desc": "Device-code browser login, stores a token locally."
         },
         {
-          "usage": "ahood logout",
+          "usage": "ahood logout [--json]",
           "summary": "Removes the stored token.",
-          "desc": "Removes the stored token."
+          "desc": "Removes the stored token.",
+          "flags": [
+            "--json    Emit {logged_out} instead of prose."
+          ]
         },
         {
           "usage": "ahood whoami [--json]",
           "summary": "Reports whether your stored token still authenticates.",
           "desc": "Reports whether your stored token still authenticates.",
           "flags": [
-            "--json    Emit a machine-readable result instead of prose."
+            "--json    Emit {authenticated, mode, ...profile} instead of prose; a failed check adds {error, exit_code}. While the profile is missing it carries profile_status (provisioning|not_found); profileStatus is a deprecated alias."
           ]
         },
         {
-          "usage": "ahood token create <name>|list [--json]|revoke <id> [--yes]",
+          "usage": "ahood token create <name> [--json]|list [--json]|revoke <id> [--yes] [--json]",
           "summary": "Manage personal API tokens.",
           "desc": "Manage personal API tokens. All three subcommands require an existing browser-backed session -- a CLI session authenticated with a bearer token can't manage tokens end-to-end; use /workspace/settings/tokens in the browser instead.",
           "flags": [
-            "--yes    (revoke only) Skip the confirmation prompt and revoke immediately."
+            "--yes, -y    (revoke only) Skip the confirmation prompt and revoke immediately.",
+            "--json       create: emit the new token's object, raw `token` included (shown only this once). list: emit the raw token objects. revoke: emit {id, revoked}; needs --yes, since JSON mode never prompts."
           ],
           "examples": [
             "ahood token create ci-runner",
+            "ahood token create ci-runner --json",
             "ahood token list --json",
             "ahood token revoke <id>",
             "ahood token revoke <id> --yes"
@@ -124,7 +129,7 @@
           "summary": "Print an artifact's root document (SKILL.md, AGENT.md, LOOP.md, ...) without installing it.",
           "desc": "An alias of `ahood skill read`, under the name the /ahood plugin commands use: prints the latest version's root document to stdout so an agent can use it once in this session, with nothing installed or written. Works for every kind. Plain mode prints the raw content (control sequences stripped in a terminal).",
           "flags": [
-            "--json    Emit {version, content} as a single line instead of the raw content."
+            "--json    Emit {version, content, provenance} as a single line instead of the raw content."
           ],
           "examples": [
             "ahood try alice/pdf-tools",
@@ -144,13 +149,14 @@
           ]
         },
         {
-          "usage": "ahood feedback \"<message>\" [--kind bug|idea|search_miss|confusing|praise] [--query <q>] [--artifact <owner/slug>]",
+          "usage": "ahood feedback \"<message>\" [--kind bug|idea|search_miss|confusing|praise] [--query <q>] [--artifact <owner/slug>] [--json]",
           "summary": "Send feedback (a bug, an idea, a search that found nothing, something confusing, praise) to the ahood team.",
           "desc": "Sends one message to the ahood team (POST /api/v1/feedback); the CLI version is attached automatically. Works logged out (anonymous, rate limited harder) and logged in (a token needs the publish scope). The message is at most 4000 characters of plain text; a message that looks like it contains a secret or token is rejected, so never paste credentials. --kind defaults to idea; --query records the search that found nothing useful and --artifact the owner/slug the feedback is about.",
           "flags": [
             "--kind <kind>        bug, idea (default), search_miss, confusing or praise.",
             "--query <q>          For search_miss: the query that found nothing useful.",
-            "--artifact <ref>     The artifact the feedback is about, as owner/slug."
+            "--artifact <ref>     The artifact the feedback is about, as owner/slug.",
+            "--json               Emit {id, kind, sent} instead of prose."
           ],
           "examples": [
             "ahood feedback \"install failed on Windows\" --kind bug",
@@ -232,7 +238,7 @@
           "summary": "Print a skill's full SKILL.md content, without installing it.",
           "desc": "Print a skill's full SKILL.md content (the prompt itself) without installing it via `ahood skill add`. Plain mode prints the raw content verbatim to stdout -- no formatting, no labels -- so it's safe to pipe into a file or another tool.",
           "flags": [
-            "--json    Emit {version, content} as a single line instead of the raw content."
+            "--json    Emit {version, content, provenance} as a single line instead of the raw content; `content` is exactly what the registry stores, and `provenance` ({title, owner, slug, version, url}) says where it came from."
           ],
           "examples": [
             "ahood skill read alice/pdf-tools",
@@ -268,12 +274,16 @@
           ]
         },
         {
-          "usage": "ahood skill add <owner>/<skill>[@version]",
+          "usage": "ahood skill add <owner>/<skill>[@version] [--json]",
           "summary": "Install a skill into .claude/skills/, pinned in the lockfile.",
           "desc": "Install a skill into .claude/skills/, pinned in the lockfile. An artifact published with --kind agent installs instead as a single file at .claude/agents/<owner>@<skill>.md (Claude Code's own subagent loader scans .claude/agents/*.md as flat files), not a .claude/skills/ directory. An artifact published with --kind mcp installs by merging an entry into .mcp.json instead, prompting for any secret environment variables its server.json declares that aren't already set in your shell. A doc or project guide is refused here; install it with `ahood doc add` or `ahood project add`.",
+          "flags": [
+            "--json    Emit {owner, skill, version, kind, installed_path}; progress lines go to stderr. Never prompts: an mcp server's required secret must already be exported."
+          ],
           "examples": [
             "ahood skill add alice/pdf-tools",
-            "ahood skill add alice/pdf-tools@1.2.0"
+            "ahood skill add alice/pdf-tools@1.2.0",
+            "ahood skill add alice/pdf-tools --json"
           ]
         },
         {
@@ -302,12 +312,16 @@
           ]
         },
         {
-          "usage": "ahood skill remove <owner>/<skill> [--yes]",
+          "usage": "ahood skill remove <owner>/<skill> [--yes] [--json]",
           "summary": "Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed).",
-          "desc": "Uninstall and unpin (local only). Prompts for confirmation unless --yes is passed. For an mcp-kind install, also deletes its .mcp.json entry as long as it still matches what ahood last installed there -- a hand-edited or unverifiable entry is left in place and warned about instead of being silently touched."
+          "desc": "Uninstall and unpin (local only). Prompts for confirmation unless --yes is passed. For an mcp-kind install, also deletes its .mcp.json entry as long as it still matches what ahood last installed there -- a hand-edited or unverifiable entry is left in place and warned about instead of being silently touched.",
+          "flags": [
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, removed, mcp_entry} (mcp_entry: none|removed|left|unchecked). Needs --yes: JSON mode never prompts."
+          ]
         },
         {
-          "usage": "ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]",
           "summary": "Update a skill you own, changing only the flags you pass.",
           "desc": "Update a skill you own. Only the flags you pass are changed. Every flag also accepts the --flag=value form (e.g. --tagline=--fast and cheap), needed when a value itself starts with --.",
           "flags": [
@@ -316,29 +330,37 @@
             "--license <id>                An SPDX license identifier, e.g. MIT.",
             "--visibility public|private   Who can see and install the skill.",
             "--homepage <url>              The skill's homepage URL.",
-            "--repository <url>            The skill's source repository URL."
+            "--repository <url>            The skill's source repository URL.",
+            "--json                        Emit the updated skill: {owner, skill, slug, tagline, license, visibility, tags, ...}."
           ],
           "examples": [
             "ahood skill edit alice/pdf-tools --tagline \"Merge and split PDFs\""
           ]
         },
         {
-          "usage": "ahood skill unpublish <owner>/<skill>[@version] [--yes]",
+          "usage": "ahood skill unpublish <owner>/<skill>[@version] [--yes] [--json]",
           "summary": "Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed).",
           "desc": "Without @version: delete a skill from the registry for every consumer (not just your local install). With @version (e.g. alice/foo@1.2.3): yank that single version instead of deleting the whole skill -- it is marked yanked, not removed. Existing lockfile pins still resolve and verify against it, but new installs are warned off it. Prompts for a typed \"yes\" unless --yes is passed.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, unpublished}, or {owner, skill, version, yanked} for a single version. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood skill star <owner>/<skill>",
+          "usage": "ahood skill star <owner>/<skill> [--json]",
           "summary": "Star a skill.",
-          "desc": "Star a skill."
+          "desc": "Star a skill.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
-          "usage": "ahood skill unstar <owner>/<skill>",
+          "usage": "ahood skill unstar <owner>/<skill> [--json]",
           "summary": "Remove your star from a skill.",
-          "desc": "Remove your star from a skill."
+          "desc": "Remove your star from a skill.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
           "usage": "ahood skill vote <owner>/<skill> up|down [--note <text>] [--version <x.y.z>] [--json]",
@@ -356,31 +378,36 @@
           ]
         },
         {
-          "usage": "ahood skill share <owner>/<skill> --group <group>",
+          "usage": "ahood skill share <owner>/<skill> --group <group> [--json]",
           "summary": "Share a skill you own with a group, without changing its public/private visibility.",
           "desc": "Share a skill you own with a group. Sharing is additive -- it doesn't change the skill's own public/private visibility, it just makes it visible to everyone in the group too. You must own the skill and already be a member of the target group.",
           "flags": [
-            "--group <group>   The group's slug (from `ahood group list`)."
+            "--group <group>   The group's slug (from `ahood group list`).",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ],
           "examples": [
             "ahood skill share alice/pdf-tools --group design-team"
           ]
         },
         {
-          "usage": "ahood skill unshare <owner>/<skill> --group <group>",
+          "usage": "ahood skill unshare <owner>/<skill> --group <group> [--json]",
           "summary": "Stop sharing a skill you own with a group.",
           "desc": "Stop sharing a skill you own with a group. Does not affect the skill's own visibility.",
           "flags": [
-            "--group <group>   The group's slug."
+            "--group <group>   The group's slug.",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ],
           "examples": [
             "ahood skill unshare alice/pdf-tools --group design-team"
           ]
         },
         {
-          "usage": "ahood skill init [name]",
+          "usage": "ahood skill init [name] [--json]",
           "summary": "Scaffold a new skill folder with a minimal, valid SKILL.md.",
           "desc": "Scaffold a new skill folder with a minimal, valid SKILL.md. Creates ./<name>/SKILL.md if a name is given, or ./SKILL.md in the current directory otherwise. Refuses to overwrite an existing SKILL.md at the target path.",
+          "flags": [
+            "--json    Emit {kind, name, path} instead of prose; the next-step hints go to stderr."
+          ],
           "examples": [
             "ahood skill init pdf-tools",
             "ahood skill init"
@@ -400,7 +427,7 @@
             "--repository <url>            The artifact's source repository URL. Updated even on a re-publish of an existing artifact.",
             "--changelog <text>            What changed in this version, shown by `ahood skill versions`.",
             "--visibility public|private   Who can find it. New artifacts are created private; on a terminal, publish asks whether to make a new one public (default no). Pass this to skip the question (scripts, CI). On a re-publish it changes visibility only when given.",
-            "--json                        Suppress human progress lines; print one {version,status,...} JSON object on completion (or {error} on failure)."
+            "--json                        Suppress human progress lines; print one {version,status,...} JSON object on completion (or {error, exit_code} on failure)."
           ],
           "examples": [
             "ahood skill publish alice/pdf-tools@1.1.0",
@@ -442,7 +469,7 @@
           "summary": "Print a published agent's AGENT.md, without installing it.",
           "desc": "Print the AGENT.md of a published agent verbatim, without installing it -- read it before you add it. Refused, before anything else happens, when the target is not an agent.",
           "flags": [
-            "--json    Emit {version, content} as a single line instead of the raw content."
+            "--json    Emit {version, content, provenance} as a single line instead of the raw content."
           ],
           "examples": [
             "ahood agent read alice/code-reviewer"
@@ -473,9 +500,12 @@
           ]
         },
         {
-          "usage": "ahood agent add <owner>/<agent>[@version]",
+          "usage": "ahood agent add <owner>/<agent>[@version] [--json]",
           "summary": "Install an agent into .claude/agents/<owner>@<agent>.md, pinned in the lockfile.",
           "desc": "Install an agent into .claude/agents/<owner>@<agent>.md, pinned in .claude/skills.lock.json. Refused before anything is downloaded or written when the target is not an agent.",
+          "flags": [
+            "--json    Emit {owner, skill, version, kind, installed_path}; progress lines go to stderr."
+          ],
           "examples": [
             "ahood agent add alice/code-reviewer",
             "ahood agent add alice/code-reviewer@1.2.0"
@@ -499,15 +529,16 @@
           ]
         },
         {
-          "usage": "ahood agent remove <owner>/<agent> [--yes]",
+          "usage": "ahood agent remove <owner>/<agent> [--yes] [--json]",
           "summary": "Uninstall and unpin an agent (local only, prompts unless --yes is passed).",
           "desc": "Uninstall and unpin an agent from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, removed, mcp_entry}. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood agent edit <owner>/<agent> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood agent edit <owner>/<agent> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]",
           "summary": "Update an agent you own, changing only the flags you pass.",
           "desc": "Update an agent you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not an agent.",
           "flags": [
@@ -516,26 +547,34 @@
             "--license <id>                An SPDX license identifier, e.g. MIT.",
             "--visibility public|private   Who can see and install it.",
             "--homepage <url>              Homepage URL.",
-            "--repository <url>            Source repository URL."
+            "--repository <url>            Source repository URL.",
+            "--json                        Emit the updated entry: {owner, skill, slug, tagline, license, visibility, tags, ...}."
           ]
         },
         {
-          "usage": "ahood agent unpublish <owner>/<agent>[@version] [--yes]",
+          "usage": "ahood agent unpublish <owner>/<agent>[@version] [--yes] [--json]",
           "summary": "Delete an agent from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
           "desc": "Without @version: delete an agent from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not an agent.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, unpublished}, or {owner, skill, version, yanked} for one version. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood agent star <owner>/<agent>",
+          "usage": "ahood agent star <owner>/<agent> [--json]",
           "summary": "Star an agent.",
-          "desc": "Star an agent. Refused, before anything else happens, when the target is not an agent."
+          "desc": "Star an agent. Refused, before anything else happens, when the target is not an agent.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
-          "usage": "ahood agent unstar <owner>/<agent>",
+          "usage": "ahood agent unstar <owner>/<agent> [--json]",
           "summary": "Remove your star from an agent.",
-          "desc": "Remove your star from an agent. Refused, before anything else happens, when the target is not an agent."
+          "desc": "Remove your star from an agent. Refused, before anything else happens, when the target is not an agent.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
           "usage": "ahood agent vote <owner>/<agent> up|down [--note <text>] [--version <x.y.z>] [--json]",
@@ -549,25 +588,30 @@
           ]
         },
         {
-          "usage": "ahood agent share <owner>/<agent> --group <group>",
+          "usage": "ahood agent share <owner>/<agent> --group <group> [--json]",
           "summary": "Share an agent you own with a group, without changing its visibility.",
           "desc": "Share an agent you own with a group you belong to. Refused, before anything else happens, when the target is not an agent.",
           "flags": [
-            "--group <group>   The group's slug (from `ahood group list`)."
+            "--group <group>   The group's slug (from `ahood group list`).",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ]
         },
         {
-          "usage": "ahood agent unshare <owner>/<agent> --group <group>",
+          "usage": "ahood agent unshare <owner>/<agent> --group <group> [--json]",
           "summary": "Stop sharing an agent you own with a group.",
           "desc": "Stop sharing an agent you own with a group. Refused, before anything else happens, when the target is not an agent.",
           "flags": [
-            "--group <group>   The group's slug."
+            "--group <group>   The group's slug.",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ]
         },
         {
-          "usage": "ahood agent init [name]",
+          "usage": "ahood agent init [name] [--json]",
           "summary": "Scaffold a new agent folder with a minimal, valid AGENT.md.",
           "desc": "Scaffold a minimal AGENT.md that passes the registry's publish validation: ./<name>/AGENT.md with a name, or ./AGENT.md without. Refuses to overwrite an existing AGENT.md, or to add one to a folder that already holds another kind's root document. Names are slug-normalized and must stay inside the current directory.",
+          "flags": [
+            "--json    Emit {kind, name, path} instead of prose; the next-step hints go to stderr."
+          ],
           "examples": [
             "ahood agent init code-reviewer",
             "ahood agent init"
@@ -582,7 +626,7 @@
             "--name <text>                 Required only when creating the entry on this publish.",
             "--changelog <text>            What changed in this version.",
             "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
-            "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
+            "--json                        Print one {version,status,...} JSON object on completion (or {error, exit_code} on failure)."
           ],
           "examples": [
             "ahood agent publish alice/code-reviewer@1.0.0 --name \"Code Reviewer\""
@@ -622,7 +666,7 @@
           "summary": "Print a published MCP server manifest's server.json, without installing it.",
           "desc": "Print the server.json of a published MCP server manifest verbatim, without installing it -- read it before you add it. Refused, before anything else happens, when the target is not an MCP server manifest.",
           "flags": [
-            "--json    Emit {version, content} as a single line instead of the raw content."
+            "--json    Emit {version, content, provenance} as a single line instead of the raw content."
           ],
           "examples": [
             "ahood mcp read alice/github-server"
@@ -653,9 +697,12 @@
           ]
         },
         {
-          "usage": "ahood mcp add <owner>/<server>[@version]",
+          "usage": "ahood mcp add <owner>/<server>[@version] [--json]",
           "summary": "Install an MCP server manifest into an entry in .mcp.json, pinned in the lockfile.",
           "desc": "Install an MCP server manifest into an entry in .mcp.json, pinned in .claude/skills.lock.json. Prompts for any secret environment variables its server.json declares that aren't already set. Refused before anything is downloaded or written when the target is not an MCP server manifest.",
+          "flags": [
+            "--json    Emit {owner, skill, version, kind, installed_path}; progress lines go to stderr. Never prompts: a required secret must already be exported."
+          ],
           "examples": [
             "ahood mcp add alice/github-server",
             "ahood mcp add alice/github-server@1.2.0"
@@ -679,15 +726,16 @@
           ]
         },
         {
-          "usage": "ahood mcp remove <owner>/<server> [--yes]",
+          "usage": "ahood mcp remove <owner>/<server> [--yes] [--json]",
           "summary": "Uninstall and unpin an MCP server manifest (local only, prompts unless --yes is passed).",
           "desc": "Uninstall and unpin an MCP server manifest from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, removed, mcp_entry}. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood mcp edit <owner>/<server> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood mcp edit <owner>/<server> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]",
           "summary": "Update an MCP server manifest you own, changing only the flags you pass.",
           "desc": "Update an MCP server manifest you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not an MCP server manifest.",
           "flags": [
@@ -696,26 +744,34 @@
             "--license <id>                An SPDX license identifier, e.g. MIT.",
             "--visibility public|private   Who can see and install it.",
             "--homepage <url>              Homepage URL.",
-            "--repository <url>            Source repository URL."
+            "--repository <url>            Source repository URL.",
+            "--json                        Emit the updated entry: {owner, skill, slug, tagline, license, visibility, tags, ...}."
           ]
         },
         {
-          "usage": "ahood mcp unpublish <owner>/<server>[@version] [--yes]",
+          "usage": "ahood mcp unpublish <owner>/<server>[@version] [--yes] [--json]",
           "summary": "Delete an MCP server manifest from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
           "desc": "Without @version: delete an MCP server manifest from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not an MCP server manifest.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, unpublished}, or {owner, skill, version, yanked} for one version. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood mcp star <owner>/<server>",
+          "usage": "ahood mcp star <owner>/<server> [--json]",
           "summary": "Star an MCP server manifest.",
-          "desc": "Star an MCP server manifest. Refused, before anything else happens, when the target is not an MCP server manifest."
+          "desc": "Star an MCP server manifest. Refused, before anything else happens, when the target is not an MCP server manifest.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
-          "usage": "ahood mcp unstar <owner>/<server>",
+          "usage": "ahood mcp unstar <owner>/<server> [--json]",
           "summary": "Remove your star from an MCP server manifest.",
-          "desc": "Remove your star from an MCP server manifest. Refused, before anything else happens, when the target is not an MCP server manifest."
+          "desc": "Remove your star from an MCP server manifest. Refused, before anything else happens, when the target is not an MCP server manifest.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
           "usage": "ahood mcp vote <owner>/<server> up|down [--note <text>] [--version <x.y.z>] [--json]",
@@ -729,25 +785,30 @@
           ]
         },
         {
-          "usage": "ahood mcp share <owner>/<server> --group <group>",
+          "usage": "ahood mcp share <owner>/<server> --group <group> [--json]",
           "summary": "Share an MCP server manifest you own with a group, without changing its visibility.",
           "desc": "Share an MCP server manifest you own with a group you belong to. Refused, before anything else happens, when the target is not an MCP server manifest.",
           "flags": [
-            "--group <group>   The group's slug (from `ahood group list`)."
+            "--group <group>   The group's slug (from `ahood group list`).",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ]
         },
         {
-          "usage": "ahood mcp unshare <owner>/<server> --group <group>",
+          "usage": "ahood mcp unshare <owner>/<server> --group <group> [--json]",
           "summary": "Stop sharing an MCP server manifest you own with a group.",
           "desc": "Stop sharing an MCP server manifest you own with a group. Refused, before anything else happens, when the target is not an MCP server manifest.",
           "flags": [
-            "--group <group>   The group's slug."
+            "--group <group>   The group's slug.",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ]
         },
         {
-          "usage": "ahood mcp init [name]",
+          "usage": "ahood mcp init [name] [--json]",
           "summary": "Scaffold a new MCP server manifest folder with a minimal, valid server.json.",
           "desc": "Scaffold a minimal server.json that passes the registry's publish validation: ./<name>/server.json with a name, or ./server.json without. The starter points at a reserved example.com URL, so it can never install anyone's real server until you edit it. Refuses to overwrite an existing server.json, or to add one to a folder that already holds another kind's root document. Names are slug-normalized and must stay inside the current directory.",
+          "flags": [
+            "--json    Emit {kind, name, path} instead of prose; the next-step hints go to stderr."
+          ],
           "examples": [
             "ahood mcp init github-server",
             "ahood mcp init"
@@ -762,7 +823,7 @@
             "--name <text>                 Required only when creating the entry on this publish.",
             "--changelog <text>            What changed in this version.",
             "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
-            "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
+            "--json                        Print one {version,status,...} JSON object on completion (or {error, exit_code} on failure)."
           ],
           "examples": [
             "ahood mcp publish alice/github-server@1.0.0 --name \"GitHub Server\""
@@ -802,7 +863,7 @@
           "summary": "Print a published doc's DOC.md, without installing it.",
           "desc": "Print the DOC.md of a published doc verbatim, without installing it -- read it before you add it. Refused, before anything else happens, when the target is not a doc.",
           "flags": [
-            "--json    Emit {version, content} as a single line instead of the raw content."
+            "--json    Emit {version, content, provenance} as a single line instead of the raw content."
           ],
           "examples": [
             "ahood doc read alice/setup-guide"
@@ -833,9 +894,12 @@
           ]
         },
         {
-          "usage": "ahood doc add <owner>/<doc>[@version]",
+          "usage": "ahood doc add <owner>/<doc>[@version] [--json]",
           "summary": "Install a doc into .claude/docs/<owner>@<doc>.md, pinned in the lockfile.",
           "desc": "Install a doc into .claude/docs/<owner>@<doc>.md, pinned in .claude/skills.lock.json. Refused before anything is downloaded or written when the target is not a doc.",
+          "flags": [
+            "--json    Emit {owner, skill, version, kind, installed_path}; progress lines go to stderr."
+          ],
           "examples": [
             "ahood doc add alice/setup-guide",
             "ahood doc add alice/setup-guide@1.2.0"
@@ -859,15 +923,16 @@
           ]
         },
         {
-          "usage": "ahood doc remove <owner>/<doc> [--yes]",
+          "usage": "ahood doc remove <owner>/<doc> [--yes] [--json]",
           "summary": "Uninstall and unpin a doc (local only, prompts unless --yes is passed).",
           "desc": "Uninstall and unpin a doc from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, removed, mcp_entry}. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood doc edit <owner>/<doc> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood doc edit <owner>/<doc> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]",
           "summary": "Update a doc you own, changing only the flags you pass.",
           "desc": "Update a doc you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not a doc.",
           "flags": [
@@ -876,26 +941,34 @@
             "--license <id>                An SPDX license identifier, e.g. MIT.",
             "--visibility public|private   Who can see and install it.",
             "--homepage <url>              Homepage URL.",
-            "--repository <url>            Source repository URL."
+            "--repository <url>            Source repository URL.",
+            "--json                        Emit the updated entry: {owner, skill, slug, tagline, license, visibility, tags, ...}."
           ]
         },
         {
-          "usage": "ahood doc unpublish <owner>/<doc>[@version] [--yes]",
+          "usage": "ahood doc unpublish <owner>/<doc>[@version] [--yes] [--json]",
           "summary": "Delete a doc from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
           "desc": "Without @version: delete a doc from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not a doc.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, unpublished}, or {owner, skill, version, yanked} for one version. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood doc star <owner>/<doc>",
+          "usage": "ahood doc star <owner>/<doc> [--json]",
           "summary": "Star a doc.",
-          "desc": "Star a doc. Refused, before anything else happens, when the target is not a doc."
+          "desc": "Star a doc. Refused, before anything else happens, when the target is not a doc.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
-          "usage": "ahood doc unstar <owner>/<doc>",
+          "usage": "ahood doc unstar <owner>/<doc> [--json]",
           "summary": "Remove your star from a doc.",
-          "desc": "Remove your star from a doc. Refused, before anything else happens, when the target is not a doc."
+          "desc": "Remove your star from a doc. Refused, before anything else happens, when the target is not a doc.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
           "usage": "ahood doc vote <owner>/<doc> up|down [--note <text>] [--version <x.y.z>] [--json]",
@@ -909,25 +982,30 @@
           ]
         },
         {
-          "usage": "ahood doc share <owner>/<doc> --group <group>",
+          "usage": "ahood doc share <owner>/<doc> --group <group> [--json]",
           "summary": "Share a doc you own with a group, without changing its visibility.",
           "desc": "Share a doc you own with a group you belong to. Refused, before anything else happens, when the target is not a doc.",
           "flags": [
-            "--group <group>   The group's slug (from `ahood group list`)."
+            "--group <group>   The group's slug (from `ahood group list`).",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ]
         },
         {
-          "usage": "ahood doc unshare <owner>/<doc> --group <group>",
+          "usage": "ahood doc unshare <owner>/<doc> --group <group> [--json]",
           "summary": "Stop sharing a doc you own with a group.",
           "desc": "Stop sharing a doc you own with a group. Refused, before anything else happens, when the target is not a doc.",
           "flags": [
-            "--group <group>   The group's slug."
+            "--group <group>   The group's slug.",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ]
         },
         {
-          "usage": "ahood doc init [name]",
+          "usage": "ahood doc init [name] [--json]",
           "summary": "Scaffold a new doc folder with a minimal, valid DOC.md.",
           "desc": "Scaffold a minimal DOC.md that passes the registry's publish validation: ./<name>/DOC.md with a name, or ./DOC.md without. Refuses to overwrite an existing DOC.md, or to add one to a folder that already holds another kind's root document. Names are slug-normalized and must stay inside the current directory.",
+          "flags": [
+            "--json    Emit {kind, name, path} instead of prose; the next-step hints go to stderr."
+          ],
           "examples": [
             "ahood doc init setup-guide",
             "ahood doc init"
@@ -942,7 +1020,7 @@
             "--name <text>                 Required only when creating the entry on this publish.",
             "--changelog <text>            What changed in this version.",
             "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
-            "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
+            "--json                        Print one {version,status,...} JSON object on completion (or {error, exit_code} on failure)."
           ],
           "examples": [
             "ahood doc publish alice/setup-guide@1.0.0 --name \"Setup Guide\""
@@ -995,7 +1073,7 @@
           "summary": "Print a published project guide's PROJECT.md, without installing it.",
           "desc": "Print the PROJECT.md of a published project guide verbatim, without installing it -- read it before you add it. Refused, before anything else happens, when the target is not a project guide.",
           "flags": [
-            "--json    Emit {version, content} as a single line instead of the raw content."
+            "--json    Emit {version, content, provenance} as a single line instead of the raw content."
           ],
           "examples": [
             "ahood project read alice/acme-api"
@@ -1026,9 +1104,12 @@
           ]
         },
         {
-          "usage": "ahood project add <owner>/<slug>[@version]",
+          "usage": "ahood project add <owner>/<slug>[@version] [--json]",
           "summary": "Install a project guide into .claude/project.md, pinned in the lockfile.",
           "desc": "Install a project guide into .claude/project.md, pinned in .claude/skills.lock.json. Refused before anything is downloaded or written when the target is not a project guide.",
+          "flags": [
+            "--json    Emit {owner, skill, version, kind, installed_path}; progress lines go to stderr."
+          ],
           "examples": [
             "ahood project add alice/acme-api",
             "ahood project add alice/acme-api@1.2.0"
@@ -1052,15 +1133,16 @@
           ]
         },
         {
-          "usage": "ahood project remove <owner>/<slug> [--yes]",
+          "usage": "ahood project remove <owner>/<slug> [--yes] [--json]",
           "summary": "Uninstall and unpin a project guide (local only, prompts unless --yes is passed).",
           "desc": "Uninstall and unpin a project guide from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, removed, mcp_entry}. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood project edit <owner>/<slug> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood project edit <owner>/<slug> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]",
           "summary": "Update a project guide you own, changing only the flags you pass.",
           "desc": "Update a project guide you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not a project guide.",
           "flags": [
@@ -1069,26 +1151,34 @@
             "--license <id>                An SPDX license identifier, e.g. MIT.",
             "--visibility public|private   Who can see and install it.",
             "--homepage <url>              Homepage URL.",
-            "--repository <url>            Source repository URL."
+            "--repository <url>            Source repository URL.",
+            "--json                        Emit the updated entry: {owner, skill, slug, tagline, license, visibility, tags, ...}."
           ]
         },
         {
-          "usage": "ahood project unpublish <owner>/<slug>[@version] [--yes]",
+          "usage": "ahood project unpublish <owner>/<slug>[@version] [--yes] [--json]",
           "summary": "Delete a project guide from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
           "desc": "Without @version: delete a project guide from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not a project guide.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, unpublished}, or {owner, skill, version, yanked} for one version. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood project star <owner>/<slug>",
+          "usage": "ahood project star <owner>/<slug> [--json]",
           "summary": "Star a project guide.",
-          "desc": "Star a project guide. Refused, before anything else happens, when the target is not a project guide."
+          "desc": "Star a project guide. Refused, before anything else happens, when the target is not a project guide.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
-          "usage": "ahood project unstar <owner>/<slug>",
+          "usage": "ahood project unstar <owner>/<slug> [--json]",
           "summary": "Remove your star from a project guide.",
-          "desc": "Remove your star from a project guide. Refused, before anything else happens, when the target is not a project guide."
+          "desc": "Remove your star from a project guide. Refused, before anything else happens, when the target is not a project guide.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
           "usage": "ahood project vote <owner>/<slug> up|down [--note <text>] [--version <x.y.z>] [--json]",
@@ -1102,23 +1192,25 @@
           ]
         },
         {
-          "usage": "ahood project share <owner>/<slug> --group <group>",
+          "usage": "ahood project share <owner>/<slug> --group <group> [--json]",
           "summary": "Share a project guide you own with a group, without changing its visibility.",
           "desc": "Share a project guide you own with a group you belong to. Refused, before anything else happens, when the target is not a project guide.",
           "flags": [
-            "--group <group>   The group's slug (from `ahood group list`)."
+            "--group <group>   The group's slug (from `ahood group list`).",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ]
         },
         {
-          "usage": "ahood project unshare <owner>/<slug> --group <group>",
+          "usage": "ahood project unshare <owner>/<slug> --group <group> [--json]",
           "summary": "Stop sharing a project guide you own with a group.",
           "desc": "Stop sharing a project guide you own with a group. Refused, before anything else happens, when the target is not a project guide.",
           "flags": [
-            "--group <group>   The group's slug."
+            "--group <group>   The group's slug.",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ]
         },
         {
-          "usage": "ahood project init [name] [--project <git-remote> | --no-project]",
+          "usage": "ahood project init [name] [--project <git-remote> | --no-project] [--json]",
           "summary": "Scaffold a new project guide folder with a minimal, valid PROJECT.md.",
           "desc": "Scaffold a minimal PROJECT.md that passes the registry's publish validation: ./<name>/PROJECT.md with a name, or ./PROJECT.md without. Refuses to overwrite an existing PROJECT.md, or to add one to a folder that already holds another kind's root document. Names are slug-normalized and must stay inside the current directory. The optional `project` field (the repository's git remote, which is how get_project_guide finds the guide) is filled from `git remote get-url origin`, normalized to host/owner/repo.",
           "flags": [
@@ -1139,7 +1231,7 @@
             "--name <text>                 Required only when creating the entry on this publish.",
             "--changelog <text>            What changed in this version.",
             "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
-            "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
+            "--json                        Print one {version,status,...} JSON object on completion (or {error, exit_code} on failure)."
           ],
           "examples": [
             "ahood project publish alice/acme-api@1.0.0 --name \"Acme API\""
@@ -1179,7 +1271,7 @@
           "summary": "Print a published loop's LOOP.md, without installing it.",
           "desc": "Print the LOOP.md of a published loop verbatim, without installing it -- read it before you add it. Refused, before anything else happens, when the target is not a loop.",
           "flags": [
-            "--json    Emit {version, content} as a single line instead of the raw content."
+            "--json    Emit {version, content, provenance} as a single line instead of the raw content."
           ],
           "examples": [
             "ahood loop read alice/code-review-pass"
@@ -1210,9 +1302,12 @@
           ]
         },
         {
-          "usage": "ahood loop add <owner>/<loop>[@version]",
+          "usage": "ahood loop add <owner>/<loop>[@version] [--json]",
           "summary": "Install a loop into .claude/loops/<owner>@<loop>.md, pinned in the lockfile.",
           "desc": "Install a loop into .claude/loops/<owner>@<loop>.md, pinned in .claude/skills.lock.json. Refused before anything is downloaded or written when the target is not a loop.",
+          "flags": [
+            "--json    Emit {owner, skill, version, kind, installed_path}; progress lines go to stderr."
+          ],
           "examples": [
             "ahood loop add alice/code-review-pass",
             "ahood loop add alice/code-review-pass@1.2.0"
@@ -1236,15 +1331,16 @@
           ]
         },
         {
-          "usage": "ahood loop remove <owner>/<loop> [--yes]",
+          "usage": "ahood loop remove <owner>/<loop> [--yes] [--json]",
           "summary": "Uninstall and unpin a loop (local only, prompts unless --yes is passed).",
           "desc": "Uninstall and unpin a loop from this project (local only). Refused, before the prompt and before anything is deleted, when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, removed, mcp_entry}. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood loop edit <owner>/<loop> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood loop edit <owner>/<loop> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]",
           "summary": "Update a loop you own, changing only the flags you pass.",
           "desc": "Update a loop you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not a loop.",
           "flags": [
@@ -1253,26 +1349,34 @@
             "--license <id>                An SPDX license identifier, e.g. MIT.",
             "--visibility public|private   Who can see and install it.",
             "--homepage <url>              Homepage URL.",
-            "--repository <url>            Source repository URL."
+            "--repository <url>            Source repository URL.",
+            "--json                        Emit the updated entry: {owner, skill, slug, tagline, license, visibility, tags, ...}."
           ]
         },
         {
-          "usage": "ahood loop unpublish <owner>/<loop>[@version] [--yes]",
+          "usage": "ahood loop unpublish <owner>/<loop>[@version] [--yes] [--json]",
           "summary": "Delete a loop from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
           "desc": "Without @version: delete a loop from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not a loop.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, unpublished}, or {owner, skill, version, yanked} for one version. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood loop star <owner>/<loop>",
+          "usage": "ahood loop star <owner>/<loop> [--json]",
           "summary": "Star a loop.",
-          "desc": "Star a loop. Refused, before anything else happens, when the target is not a loop."
+          "desc": "Star a loop. Refused, before anything else happens, when the target is not a loop.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
-          "usage": "ahood loop unstar <owner>/<loop>",
+          "usage": "ahood loop unstar <owner>/<loop> [--json]",
           "summary": "Remove your star from a loop.",
-          "desc": "Remove your star from a loop. Refused, before anything else happens, when the target is not a loop."
+          "desc": "Remove your star from a loop. Refused, before anything else happens, when the target is not a loop.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
           "usage": "ahood loop vote <owner>/<loop> up|down [--note <text>] [--version <x.y.z>] [--json]",
@@ -1286,25 +1390,30 @@
           ]
         },
         {
-          "usage": "ahood loop share <owner>/<loop> --group <group>",
+          "usage": "ahood loop share <owner>/<loop> --group <group> [--json]",
           "summary": "Share a loop you own with a group, without changing its visibility.",
           "desc": "Share a loop you own with a group you belong to. Refused, before anything else happens, when the target is not a loop.",
           "flags": [
-            "--group <group>   The group's slug (from `ahood group list`)."
+            "--group <group>   The group's slug (from `ahood group list`).",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ]
         },
         {
-          "usage": "ahood loop unshare <owner>/<loop> --group <group>",
+          "usage": "ahood loop unshare <owner>/<loop> --group <group> [--json]",
           "summary": "Stop sharing a loop you own with a group.",
           "desc": "Stop sharing a loop you own with a group. Refused, before anything else happens, when the target is not a loop.",
           "flags": [
-            "--group <group>   The group's slug."
+            "--group <group>   The group's slug.",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ]
         },
         {
-          "usage": "ahood loop init [name]",
+          "usage": "ahood loop init [name] [--json]",
           "summary": "Scaffold a new loop folder with a minimal, valid LOOP.md.",
           "desc": "Scaffold a minimal LOOP.md that passes the registry's publish validation: ./<name>/LOOP.md with a name, or ./LOOP.md without. Refuses to overwrite an existing LOOP.md, or to add one to a folder that already holds another kind's root document. Names are slug-normalized and must stay inside the current directory.",
+          "flags": [
+            "--json    Emit {kind, name, path} instead of prose; the next-step hints go to stderr."
+          ],
           "examples": [
             "ahood loop init code-review-pass",
             "ahood loop init"
@@ -1319,7 +1428,7 @@
             "--name <text>                 Required only when creating the entry on this publish.",
             "--changelog <text>            What changed in this version.",
             "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
-            "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
+            "--json                        Print one {version,status,...} JSON object on completion (or {error, exit_code} on failure)."
           ],
           "examples": [
             "ahood loop publish alice/code-review-pass@1.0.0 --name \"Code Review Pass\""
@@ -1376,7 +1485,7 @@
           "summary": "Print a published prompt's PROMPT.md, without installing it.",
           "desc": "Print the PROMPT.md of a published prompt verbatim, unfilled -- its frontmatter declares the inputs `ahood prompt get` takes. Refused, before anything else happens, when the target is not a prompt.",
           "flags": [
-            "--json    Emit {version, content} as a single line instead of the raw content."
+            "--json    Emit {version, content, provenance} as a single line instead of the raw content."
           ],
           "examples": [
             "ahood prompt read alice/brutalist-landing-page"
@@ -1407,7 +1516,7 @@
           ]
         },
         {
-          "usage": "ahood prompt edit <owner>/<prompt> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood prompt edit <owner>/<prompt> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository] [--json]",
           "summary": "Update a prompt you own, changing only the flags you pass.",
           "desc": "Update a prompt you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not a prompt.",
           "flags": [
@@ -1416,26 +1525,34 @@
             "--license <id>                An SPDX license identifier, e.g. MIT.",
             "--visibility public|private   Who can see and install it.",
             "--homepage <url>              Homepage URL.",
-            "--repository <url>            Source repository URL."
+            "--repository <url>            Source repository URL.",
+            "--json                        Emit the updated entry: {owner, skill, slug, tagline, license, visibility, tags, ...}."
           ]
         },
         {
-          "usage": "ahood prompt unpublish <owner>/<prompt>[@version] [--yes]",
+          "usage": "ahood prompt unpublish <owner>/<prompt>[@version] [--yes] [--json]",
           "summary": "Delete a prompt from the registry for every consumer, or yank one version (prompts unless --yes is passed).",
           "desc": "Without @version: delete a prompt from the registry for every consumer. With @version: yank that version. Refused before the prompt when the target is not a prompt.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {owner, skill, unpublished}, or {owner, skill, version, yanked} for one version. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood prompt star <owner>/<prompt>",
+          "usage": "ahood prompt star <owner>/<prompt> [--json]",
           "summary": "Star a prompt.",
-          "desc": "Star a prompt. Refused, before anything else happens, when the target is not a prompt."
+          "desc": "Star a prompt. Refused, before anything else happens, when the target is not a prompt.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
-          "usage": "ahood prompt unstar <owner>/<prompt>",
+          "usage": "ahood prompt unstar <owner>/<prompt> [--json]",
           "summary": "Remove your star from a prompt.",
-          "desc": "Remove your star from a prompt. Refused, before anything else happens, when the target is not a prompt."
+          "desc": "Remove your star from a prompt. Refused, before anything else happens, when the target is not a prompt.",
+          "flags": [
+            "--json    Emit {owner, skill, starred} instead of prose."
+          ]
         },
         {
           "usage": "ahood prompt vote <owner>/<prompt> up|down [--note <text>] [--version <x.y.z>] [--json]",
@@ -1449,25 +1566,30 @@
           ]
         },
         {
-          "usage": "ahood prompt share <owner>/<prompt> --group <group>",
+          "usage": "ahood prompt share <owner>/<prompt> --group <group> [--json]",
           "summary": "Share a prompt you own with a group, without changing its visibility.",
           "desc": "Share a prompt you own with a group you belong to. Refused, before anything else happens, when the target is not a prompt.",
           "flags": [
-            "--group <group>   The group's slug (from `ahood group list`)."
+            "--group <group>   The group's slug (from `ahood group list`).",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ]
         },
         {
-          "usage": "ahood prompt unshare <owner>/<prompt> --group <group>",
+          "usage": "ahood prompt unshare <owner>/<prompt> --group <group> [--json]",
           "summary": "Stop sharing a prompt you own with a group.",
           "desc": "Stop sharing a prompt you own with a group. Refused, before anything else happens, when the target is not a prompt.",
           "flags": [
-            "--group <group>   The group's slug."
+            "--group <group>   The group's slug.",
+            "--json            Emit {owner, skill, group, shared} instead of prose."
           ]
         },
         {
-          "usage": "ahood prompt init [name]",
+          "usage": "ahood prompt init [name] [--json]",
           "summary": "Scaffold a new prompt folder with a minimal, valid PROMPT.md.",
           "desc": "Scaffold a minimal PROMPT.md that passes the registry's publish validation -- a name, an intent, one declared input, and a body that uses it: ./<name>/PROMPT.md with a name, or ./PROMPT.md without. Refuses to overwrite an existing PROMPT.md, or to add one to a folder that already holds another kind's root document. Names are slug-normalized and must stay inside the current directory.",
+          "flags": [
+            "--json    Emit {kind, name, path} instead of prose; the next-step hints go to stderr."
+          ],
           "examples": [
             "ahood prompt init brutalist-landing-page",
             "ahood prompt init"
@@ -1482,7 +1604,7 @@
             "--name <text>                 Required only when creating the entry on this publish.",
             "--changelog <text>            What changed in this version.",
             "--visibility public|private   New entries are private; on a terminal publish asks whether to make a new one public. Pass this to skip the question.",
-            "--json                        Print one {version,status,...} JSON object on completion (or {error} on failure)."
+            "--json                        Print one {version,status,...} JSON object on completion (or {error, exit_code} on failure)."
           ],
           "examples": [
             "ahood prompt publish alice/brutalist-landing-page@1.0.0 --name \"Brutalist Landing Page\""
@@ -1494,11 +1616,12 @@
       "id": "group",
       "commands": [
         {
-          "usage": "ahood group create <name> [--description <text>]",
+          "usage": "ahood group create <name> [--description <text>] [--json]",
           "summary": "Create a private group, becoming its owner.",
           "desc": "Create a private group. You become its owner.",
           "flags": [
-            "--description <text>   Optional short description."
+            "--description <text>   Optional short description.",
+            "--json                 Emit the new group's object ({id, slug, name, ...}) -- `slug` is what every other group command takes."
           ],
           "examples": [
             "ahood group create \"Design Team\" --description \"Shared skills for the design team\""
@@ -1517,7 +1640,7 @@
           "summary": "List a group's members and their role (owner-only visible to members).",
           "desc": "List a group's details and members. Member-only -- you must belong to the group. Returns not found (rather than a permission error) if you don't, so a group's existence isn't leaked to non-members.",
           "flags": [
-            "--json    Emit the raw group/members objects instead of formatted lines."
+            "--json    Emit {group, members} instead of formatted lines. Each member carries user_id, avatar_url and joined_at; the camelCase userId, avatarUrl and joinedAt are deprecated aliases."
           ]
         },
         {
@@ -1525,40 +1648,46 @@
           "summary": "Create (or regenerate) a shareable invite link for a group you own.",
           "desc": "Create or regenerate a shareable invite link for a group you own. Regenerating invalidates any previously issued link. The raw token is shown only this once -- only its hash is stored server-side, so it cannot be retrieved again later; save it (or the link) somewhere safe.",
           "flags": [
-            "--json    Emit {token, expiresAt, url} instead of formatted lines."
+            "--json    Emit {token, expires_at, url} instead of formatted lines (expiresAt is a deprecated alias of expires_at)."
           ]
         },
         {
-          "usage": "ahood group join <invite-url-or-token>",
+          "usage": "ahood group join <invite-url-or-token> [--json]",
           "summary": "Join a group using an invite link or its raw token.",
           "desc": "Join a group using an invite link (e.g. https://www.ahood.dev/workspace/groups/join?token=...) or its bare raw token -- either form works.",
+          "flags": [
+            "--json    Emit {joined, slug, name} instead of prose."
+          ],
           "examples": [
             "ahood group join https://www.ahood.dev/workspace/groups/join?token=abc123",
             "ahood group join abc123"
           ]
         },
         {
-          "usage": "ahood group remove-member <group> <username> [--yes]",
+          "usage": "ahood group remove-member <group> <username> [--yes] [--json]",
           "summary": "Remove a member from a group you own (prompts for confirmation unless --yes is passed).",
           "desc": "Remove a member from a group you own. The group's owner cannot be removed this way -- delete the group instead. Only the group's owner can remove someone other than themselves. Prompts for a typed \"yes\" unless --yes is passed.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {removed, slug, username}. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood group leave <group> [--yes]",
+          "usage": "ahood group leave <group> [--yes] [--json]",
           "summary": "Leave a group you belong to (prompts for confirmation unless --yes is passed).",
           "desc": "Leave a group you belong to. The group's owner cannot leave -- delete the group instead. Prompts for a typed \"yes\" unless --yes is passed.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {left, slug, username}. Needs --yes: JSON mode never prompts."
           ]
         },
         {
-          "usage": "ahood group delete <group> [--yes]",
+          "usage": "ahood group delete <group> [--yes] [--json]",
           "summary": "Permanently delete a group you own (prompts for confirmation unless --yes is passed).",
           "desc": "Permanently delete a group you own, removing it for every member. Prompts for a typed \"yes\" unless --yes is passed.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {deleted, slug}. Needs --yes: JSON mode never prompts."
           ]
         }
       ]
@@ -1624,11 +1753,12 @@
           ]
         },
         {
-          "usage": "ahood snap remove <id> [--yes]",
+          "usage": "ahood snap remove <id> [--yes] [--json]",
           "summary": "Permanently delete a snap (prompts for confirmation unless --yes is passed).",
           "desc": "Permanently delete a snap. Irreversible. Prompts for a typed \"yes\" unless --yes is passed.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {id, deleted}. Needs --yes: JSON mode never prompts."
           ]
         },
         {
@@ -1640,11 +1770,12 @@
           ]
         },
         {
-          "usage": "ahood snap unshare <id> [--yes]",
+          "usage": "ahood snap unshare <id> [--yes] [--json]",
           "summary": "Revoke a snap's share link (the snap itself is untouched; prompts for confirmation unless --yes is passed).",
           "desc": "Revoke a snap's share link -- the snap itself is untouched, and re-running `ahood snap share` mints a new link. Prompts for a typed \"yes\" unless --yes is passed, since anyone using the old link loses access immediately.",
           "flags": [
-            "--yes    Skip the interactive confirmation, for scripts/CI."
+            "--yes, -y    Skip the interactive confirmation, for scripts/CI.",
+            "--json       Emit {id, shared}. Needs --yes: JSON mode never prompts."
           ]
         },
         {

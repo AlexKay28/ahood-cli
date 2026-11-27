@@ -1,6 +1,8 @@
 import { apiJson } from "../http.js";
 import { parseOwnerSkill } from "../spec.js";
+import { parseArgs } from "../flags.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
+import { printJson } from "../json-output.js";
 
 type StarResponse = { starred: boolean };
 
@@ -10,23 +12,33 @@ type StarResponse = { starred: boolean };
 // deletes any matching row), so starring an already-starred skill or
 // unstarring one you never starred is a no-op 200, not an error.
 export async function star(args: string[], scope?: KindScope): Promise<void> {
-  const USAGE = "Usage: ahood skill star <owner>/<skill>";
-  const { owner, skill } = parseOwnerSkill(args[0] ?? "", USAGE);
+  const USAGE = "Usage: ahood skill star <owner>/<skill> [--json]";
+  const { positionals, has } = parseArgs(args, { usage: USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const { owner, skill } = parseOwnerSkill(positionals[0], USAGE);
 
   await ensureRemoteKind(scope, owner, skill, "star", "star");
   await apiJson<StarResponse>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/star`, {
     method: "POST",
   });
+  if (has("--json")) {
+    printJson({ owner, skill, starred: true });
+    return;
+  }
   console.log(`Starred ${owner}/${skill}.`);
 }
 
 export async function unstar(args: string[], scope?: KindScope): Promise<void> {
-  const USAGE = "Usage: ahood skill unstar <owner>/<skill>";
-  const { owner, skill } = parseOwnerSkill(args[0] ?? "", USAGE);
+  const USAGE = "Usage: ahood skill unstar <owner>/<skill> [--json]";
+  const { positionals, has } = parseArgs(args, { usage: USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const { owner, skill } = parseOwnerSkill(positionals[0], USAGE);
 
   await ensureRemoteKind(scope, owner, skill, "unstar", "unstar");
   await apiJson<StarResponse>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/star`, {
     method: "DELETE",
   });
+  if (has("--json")) {
+    printJson({ owner, skill, starred: false });
+    return;
+  }
   console.log(`Unstarred ${owner}/${skill}.`);
 }

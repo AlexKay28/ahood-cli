@@ -3,7 +3,7 @@ import { provenanceMetaFor } from "./add.js";
 import { buildProvenanceHeader, type ProvenanceHeaderMeta } from "../provenance-header.js";
 import { parseOwnerSkill } from "../spec.js";
 import { sanitizeDocumentForTerminal, sanitizeForTerminal } from "../terminal-safe.js";
-import { UsageError } from "../usage-error.js";
+import { parseArgs } from "../flags.js";
 import { ensureRemoteKind, strictKind, type KindScope } from "../kinds.js";
 import { printRateHint } from "../rate-hint.js";
 
@@ -86,8 +86,8 @@ export async function readSkillMd(owner: string, skill: string): Promise<ReadSki
     // MCP caller has no visibility into stderr -- unlike skill_view, whose
     // returned object already surfaces yanked_at/yanked_reason, skill_read
     // was silently dropping this signal for MCP callers entirely. read()
-    // below still destructures only {version, content} for the CLI's
-    // --json output, so this addition doesn't change that shape.
+    // below picks {version, content, provenance} for the CLI's --json output,
+    // so this addition doesn't change that shape.
     yanked_at: detail.skill_versions.yanked_at ?? null,
     yanked_reason: detail.skill_versions.yanked_reason ?? null,
     provenance: provenanceMetaFor(detail.owner, detail.slug, { version: detail.skill_versions.version, name: detail.name }),
@@ -96,10 +96,9 @@ export async function readSkillMd(owner: string, skill: string): Promise<ReadSki
 }
 
 export async function read(args: string[], scope?: KindScope): Promise<void> {
-  const jsonOutput = args.includes("--json");
-  const spec = args.find((a) => !a.startsWith("--"));
-  if (!spec) throw new UsageError(USAGE);
-  const { owner, skill } = parseOwnerSkill(spec, USAGE);
+  const parsed = parseArgs(args, { usage: USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const jsonOutput = parsed.has("--json");
+  const { owner, skill } = parseOwnerSkill(parsed.positionals[0], USAGE);
 
   await ensureRemoteKind(scope, owner, skill, "read", "read");
   const { version, content, provenance } = await readSkillMd(owner, skill);

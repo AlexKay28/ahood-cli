@@ -71,7 +71,7 @@ export async function diff(args: string[], scope?: KindScope): Promise<void> {
   // expected -- the exact bug class #134/#135/#136 fixed for every sibling
   // command that already calls unrecognizedArgs.
   const positionals = unrecognizedArgs(args, ["--json"], []);
-  const unknownFlag = positionals.find((a) => a.startsWith("--"));
+  const unknownFlag = positionals.find((a) => a.startsWith("-"));
   if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${USAGE}`);
   if (positionals.length > 3) throw new UsageError(`Unexpected argument "${positionals[3]}".\n${USAGE}`);
   const jsonOutput = args.includes("--json");

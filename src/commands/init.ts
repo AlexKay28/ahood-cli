@@ -2,10 +2,11 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { UsageError } from "../usage-error.js";
 import { CLI_KINDS, KINDS, strictKind, type CliKind, type KindScope } from "../kinds.js";
-import { flagValue } from "../flags.js";
+import { parseArgs, type ParsedArgs } from "../flags.js";
 import { detectProjectRemote, normalizeProjectRemote } from "../project-remote.js";
+import { jsonRequested, printJson, withProseOnStderr } from "../json-output.js";
 
-const USAGE = "Usage: ahood skill init [name]";
+const USAGE = "Usage: ahood skill init [name] [--json]";
 
 // Mirrors the server's slug convention referenced by ahood-cli#60 (and the
 // same shape as spec.ts's SEGMENT_RE, minus "." and "_" -- skill slugs are
@@ -214,19 +215,16 @@ const NEXT_STEPS: Record<CliKind, string[]> = {
 // `project init`'s flags for the `project` field (ahood-cli#185), parsed and
 // validated up front: --project <remote> sets it, --no-project leaves it out.
 // A rejected remote is not echoed, since it can carry a token.
-type ProjectFlags = { rest: string[]; explicit?: string; skip: boolean };
+type ProjectFlags = { explicit?: string; skip: boolean };
 
-function parseProjectFlags(args: string[]): ProjectFlags {
-  const raw = flagValue(args, "--project");
-  const skip = args.includes("--no-project");
+function parseProjectFlags(parsed: ParsedArgs): ProjectFlags {
+  const raw = parsed.value("--project");
+  const skip = parsed.has("--no-project");
   if (skip && raw !== undefined) throw new UsageError("Pass --project <remote> or --no-project, not both.");
-  const rest = args.filter(
-    (a, i) => a !== "--no-project" && a !== "--project" && !a.startsWith("--project=") && args[i - 1] !== "--project",
-  );
-  if (raw === undefined) return { rest, skip };
+  if (raw === undefined) return { skip };
   const normalized = normalizeProjectRemote(raw);
   if (!normalized.ok) throw new UsageError(`--project is ${normalized.reason}.`);
-  return { rest, explicit: normalized.value, skip };
+  return { explicit: normalized.value, skip };
 }
 
 // The field's value: the flags' choice, else this repository's origin. Only
@@ -248,12 +246,33 @@ function skillNameFor(dirPath: string, fallback = "my-skill"): string {
   return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(base) ? base : fallback;
 }
 
+type Scaffolded = { kind: CliKind; name: string; path: string; project?: string };
+
+// Under --json the scaffold's notes and next steps go to stderr and stdout
+// gets {kind, name, path} (ahood-cli#251): `name` is what was written into the
+// document -- possibly normalized from what was typed -- and `path` is the
+// file to edit, the two things a script would otherwise scrape from prose.
 export async function init(args: string[], scope?: KindScope): Promise<void> {
+  const json = jsonRequested(args);
+  const created = await withProseOnStderr(json, () => scaffold(args, scope));
+  if (json) printJson(created);
+}
+
+async function scaffold(args: string[], scope?: KindScope): Promise<Scaffolded> {
   const strict = strictKind(scope);
   const kind: CliKind = strict ?? "skill";
-  const projectFlags = kind === "project" ? parseProjectFlags(args) : undefined;
-  if (projectFlags) args = projectFlags.rest;
-  let name = args[0];
+  // --project/--no-project are declared for the project kind only, so
+  // `ahood skill init foo --project x` is refused rather than scaffolding a
+  // skill and ignoring the flag (ahood-cli#260).
+  const forProject = kind === "project";
+  const parsed = parseArgs(args, {
+    usage: USAGE,
+    booleans: forProject ? ["--json", "--no-project"] : ["--json"],
+    values: forProject ? ["--project"] : [],
+    max: 1,
+  });
+  const projectFlags = forProject ? parseProjectFlags(parsed) : undefined;
+  let name: string | undefined = parsed.positionals[0];
   if (name !== undefined && name.startsWith("-")) throw new UsageError(USAGE);
 
   if (name) {
@@ -312,10 +331,12 @@ export async function init(args: string[], scope?: KindScope): Promise<void> {
 
   const project = projectFlags ? resolveProjectField(projectFlags) : undefined;
   mkdirSync(targetDir, { recursive: true });
-  writeFileSync(docPath, TEMPLATES[kind](name ?? skillNameFor(targetDir, `my-${kind}`), project));
+  const docName = name ?? skillNameFor(targetDir, `my-${kind}`);
+  writeFileSync(docPath, TEMPLATES[kind](docName, project));
 
   console.log(`Created ${docPath}`);
   for (const line of NEXT_STEPS[kind]) console.log(line);
   const placeholder = KINDS[kind].placeholder;
   console.log(`Run \`ahood ${strict ?? "skill"} publish <owner>/${placeholder}@<version>${name ? ` --path ${name}` : ""}\` when ready.`);
+  return { kind, name: docName, path: docPath, ...(project !== undefined ? { project } : {}) };
 }

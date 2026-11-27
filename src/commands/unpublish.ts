@@ -1,11 +1,12 @@
 import { apiJson } from "../http.js";
 import { confirm } from "../confirm.js";
+import { assertJsonHasConsent, printJson } from "../json-output.js";
 import { parseOwnerSkill, parseOwnerSkillVersion } from "../spec.js";
 import { fetchVersionMeta } from "./add.js";
-import { UsageError } from "../usage-error.js";
+import { parseArgs, YES_FLAGS } from "../flags.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
 
-const USAGE = "Usage: ahood skill unpublish <owner>/<skill>[@version] [--yes]";
+const USAGE = "Usage: ahood skill unpublish <owner>/<skill>[@version] [--yes] [--json]";
 
 // yankVersion's response is `ok: true` plus an optional latest_version_warning
 // when the post-yank latest_version_id recompute failed -- see the comment at
@@ -25,9 +26,13 @@ function isVersioned(spec: string): boolean {
 }
 
 export async function unpublish(args: string[], scope?: KindScope): Promise<void> {
-  const yes = args.includes("--yes");
-  const spec = args.find((a) => !a.startsWith("--"));
-  if (!spec) throw new UsageError(USAGE);
+  // Strict, and first (ahood-cli#260): `unpublish a/b --dry-run --yes` used to
+  // ignore the flag it didn't know and delete the skill for everyone.
+  const parsed = parseArgs(args, { usage: USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
+  const yes = parsed.has(...YES_FLAGS);
+  const jsonOutput = parsed.has("--json");
+  assertJsonHasConsent(jsonOutput, yes, USAGE);
+  const spec = parsed.positionals[0];
 
   if (isVersioned(spec)) {
     const { owner, skill, version: parsedVersion } = parseOwnerSkillVersion(spec, USAGE);
@@ -80,7 +85,19 @@ export async function unpublish(args: string[], scope?: KindScope): Promise<void
       `/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/versions/${encodeURIComponent(version)}`,
       { method: "DELETE" },
     );
-    console.log(`Yanked ${key}. Existing lockfile pins still resolve; new installs will be warned off it.`);
+    if (jsonOutput) {
+      // latest_version_warning rides along in the document as well as on
+      // stderr below: it is the one signal a stale latest pointer leaves.
+      printJson({
+        owner,
+        skill,
+        version,
+        yanked: true,
+        ...(result.latest_version_warning ? { latest_version_warning: result.latest_version_warning } : {}),
+      });
+    } else {
+      console.log(`Yanked ${key}. Existing lockfile pins still resolve; new installs will be warned off it.`);
+    }
     // yankVersion (lib/skills/mutations.ts) still returns ok:true here even
     // when the yank itself succeeded but the latest_version_id recompute
     // that follows it failed -- it attaches this field instead of failing
@@ -111,5 +128,9 @@ export async function unpublish(args: string[], scope?: KindScope): Promise<void
   }
 
   await apiJson(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}`, { method: "DELETE" });
+  if (jsonOutput) {
+    printJson({ owner, skill, unpublished: true });
+    return;
+  }
   console.log(`Unpublished ${key}. Run \`ahood skill remove ${key}\` to also remove your local copy.`);
 }

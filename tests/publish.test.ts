@@ -1014,7 +1014,7 @@ describe("publish", () => {
       });
     });
 
-    it("emits a single {error} JSON object on stdout and preserves the exit-relevant error on a rejected publish", async () => {
+    it("prints nothing itself on a rejected publish, leaving the error document to main()", async () => {
       writeFileSync(join(dir, "SKILL.md"), "# demo");
       vi.stubGlobal(
         "fetch",
@@ -1045,13 +1045,14 @@ describe("publish", () => {
         /Publish failed: Archive could not be extracted/,
       );
 
-      expect(logSpy).toHaveBeenCalledTimes(1);
-      const [line] = logSpy.mock.calls[0] as [string];
-      const parsed = JSON.parse(line);
-      expect(parsed.error).toMatch(/Publish failed: Archive could not be extracted/);
+      // ahood-cli#251: publish throws like every other command and main()'s
+      // catch writes the one {error, exit_code} document (asserted end to end
+      // in json-contract.test.ts). Printing its own here as well would put
+      // two documents on stdout.
+      expect(logSpy).not.toHaveBeenCalled();
     });
 
-    it("emits a single {error} JSON object for a client-side validation failure (bad --version), before any network call", async () => {
+    it("prints nothing itself for a client-side validation failure (bad --version), before any network call", async () => {
       writeFileSync(join(dir, "SKILL.md"), "# demo");
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);
@@ -1062,10 +1063,7 @@ describe("publish", () => {
       ).rejects.toThrow(/must be a semver/);
 
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(logSpy).toHaveBeenCalledTimes(1);
-      const [line] = logSpy.mock.calls[0] as [string];
-      const parsed = JSON.parse(line);
-      expect(parsed.error).toMatch(/must be a semver/);
+      expect(logSpy).not.toHaveBeenCalled();
     });
   });
 });

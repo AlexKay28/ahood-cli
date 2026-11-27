@@ -15,15 +15,17 @@ import {
   type LockEntry,
 } from "../lockfile.js";
 import { promptSecret } from "../secret-prompt.js";
-import { recordInstallOrWarn } from "../installed.js";
+import { installedPathFor, recordInstallOrWarn } from "../installed.js";
+import { printJson, withProseOnStderr } from "../json-output.js";
 import { sanitizeForTerminal } from "../terminal-safe.js";
 import { assertCanonicalEntryPaths, tarEntryPath } from "../archive-entries.js";
 import { UsageError } from "../usage-error.js";
+import { parseArgs } from "../flags.js";
 import { printRateHint } from "../rate-hint.js";
 import { assertKind, describeKind, isPinnedFileKind, KINDS, strictKind, type CliKind, type KindScope, type PinnedFileKind } from "../kinds.js";
 import { buildProvenanceHeader, type ProvenanceHeaderMeta } from "../provenance-header.js";
 
-const USAGE = "Usage: ahood skill add <owner>/<skill>[@version]";
+const USAGE = "Usage: ahood skill add <owner>/<skill>[@version] [--json]";
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB compressed
 const MAX_EXTRACTED_BYTES = 200 * 1024 * 1024; // 200 MB decompressed
 const MAX_ENTRY_COUNT = 10_000;
@@ -604,9 +606,13 @@ function assertNoCollision(fileContents: Record<string, unknown>, owner: string,
 // infer it from `env` being non-empty.
 export async function resolveMcpServerConfig(
   buffer: Buffer,
-  options: { existingEnv?: Record<string, string>; allowNonTtyPrompt?: boolean } = {},
+  options: { existingEnv?: Record<string, string>; allowNonTtyPrompt?: boolean; neverPrompt?: boolean } = {},
 ): Promise<{ manifest: ServerManifest; serverConfig: Record<string, unknown>; secretNames: string[] }> {
-  const { existingEnv, allowNonTtyPrompt = true } = options;
+  // neverPrompt is `add --json` (ahood-cli#251): promptSecret writes its prompt
+  // and its masking asterisks to stdout, which --json has promised to one
+  // document, so an unresolved secret takes the unattended branch below even
+  // on a terminal.
+  const { existingEnv, allowNonTtyPrompt = true, neverPrompt = false } = options;
   const content = await extractSingleFileContent(buffer, "server.json");
   // Guarded the same way readMcpConfig guards .mcp.json: an unguarded parse
   // surfaced a raw V8 SyntaxError with a stack instead of this CLI's usual
@@ -709,7 +715,7 @@ export async function resolveMcpServerConfig(
       env[variable.name] = carriedForward;
       continue;
     }
-    if (!allowNonTtyPrompt && !process.stdin.isTTY) {
+    if (neverPrompt || (!allowNonTtyPrompt && !process.stdin.isTTY)) {
       // Optional means optional here too, exactly as it does on the
       // non-secret pass above (ahood-cli#126). This guard used to fire for
       // ANY unresolved secret, so a single artifact declaring an optional
@@ -723,12 +729,12 @@ export async function resolveMcpServerConfig(
       // forward both stay quiet.
       if (!variable.is_required) {
         console.warn(
-          `${sanitizeForTerminal(variable.name)} is optional and is not set -- updating ${sanitizeForTerminal(manifest.name)} without it.`,
+          `${sanitizeForTerminal(variable.name)} is optional and is not set -- ${neverPrompt ? "installing" : "updating"} ${sanitizeForTerminal(manifest.name)} without it.`,
         );
         continue;
       }
       throw new Error(
-        `${sanitizeForTerminal(variable.name)} is required by ${sanitizeForTerminal(manifest.name)} but is not set, and there is no terminal to prompt on -- export ${sanitizeForTerminal(variable.name)} and re-run.`,
+        `${sanitizeForTerminal(variable.name)} is required by ${sanitizeForTerminal(manifest.name)} but is not set, and ${neverPrompt ? "--json never prompts" : "there is no terminal to prompt on"} -- export ${sanitizeForTerminal(variable.name)} and re-run.`,
       );
     }
     env[variable.name] = await promptSecret(
@@ -871,13 +877,13 @@ function rollbackOrWarn(rollback: () => void, warning: string): void {
   }
 }
 
-async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, buffer: Buffer): Promise<void> {
+async function installMcpEntry(owner: string, skill: string, meta: VersionMeta, buffer: Buffer, neverPrompt = false): Promise<void> {
   // Check for an existing .mcp.json collision BEFORE resolving secrets --
   // matches resolveMcpServerConfig's own "don't cost the user a prompt for
   // something that's going to be refused anyway" reasoning, just for the
   // collision check specifically rather than the manifest-shape check.
   assertNoCollision(readMcpConfig(), owner, skill);
-  const { serverConfig, secretNames } = await resolveMcpServerConfig(buffer);
+  const { serverConfig, secretNames } = await resolveMcpServerConfig(buffer, { neverPrompt });
   // Whether a credential landed decides two things now (ahood-cli#158): the
   // mode a brand-new .mcp.json is created with below, and the warning after.
   // 0600 applies to creation only -- an existing file keeps its pre-existing
@@ -1205,16 +1211,37 @@ function assertPinnedFileIsOurs(kind: PinnedFileKind, owner: string, skill: stri
 }
 
 export async function add(args: string[], scope?: KindScope): Promise<void> {
-  await addArtifact(args, scope);
+  // Parsed once, here, and the result handed down (ahood-cli#260). add used to
+  // read args[0] before the install and AGAIN after it, so anything but a
+  // spec-first invocation could install and only then fail; and `add a/b c/d`
+  // installed a/b and never mentioned c/d.
+  const { positionals, has } = parseArgs(args, { usage: USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const spec = parseOwnerSkillVersion(positionals[0], USAGE);
+  const json = has("--json");
+  // --json (ahood-cli#251): the install paths' own lines and warnings go to
+  // stderr and stdout gets one document. `installed_path` is the absolute
+  // path `ahood status --json` and `ahood pin --json` report for this install
+  // (installedPathFor), so the three agree on what to call it.
+  const installed = await withProseOnStderr(json, () => addArtifact(spec, scope, json));
+  if (json) {
+    printJson({
+      owner: spec.owner,
+      skill: spec.skill,
+      version: installed.version,
+      kind: installed.kind,
+      installed_path: installedPathFor(installed.kind, spec.owner, spec.skill),
+    });
+    return;
+  }
   // ahood#1640: reached only after a completed install (every failure throws).
-  const { owner, skill } = parseOwnerSkillVersion(args[0] ?? "", USAGE);
-  printRateHint(strictKind(scope) ?? "skill", owner, skill);
+  printRateHint(strictKind(scope) ?? "skill", spec.owner, spec.skill);
 }
 
-async function addArtifact(args: string[], scope?: KindScope): Promise<void> {
-  const spec = args[0];
-  if (!spec) throw new UsageError(USAGE);
-  const { owner, skill, version: requestedVersion } = parseOwnerSkillVersion(spec, USAGE);
+async function addArtifact(
+  { owner, skill, version: requestedVersion }: ReturnType<typeof parseOwnerSkillVersion>,
+  scope?: KindScope,
+  neverPrompt = false,
+): Promise<{ version: string; kind: CliKind }> {
   const key = `${owner}/${skill}`;
 
   const meta = await fetchVersionMeta(owner, skill, requestedVersion);
@@ -1311,17 +1338,17 @@ async function addArtifact(args: string[], scope?: KindScope): Promise<void> {
     }
     recordInstallOrWarn({ owner, slug: skill, version: meta.version, kind: "agent", checksum_sha256: meta.checksum_sha256 });
     console.log(`Installed ${key}@${meta.version} to ${destPath}`);
-    return;
+    return { version: meta.version, kind: "agent" };
   }
 
   if (meta.kind === "mcp") {
-    await installMcpEntry(owner, skill, meta, buffer);
-    return;
+    await installMcpEntry(owner, skill, meta, buffer, neverPrompt);
+    return { version: meta.version, kind: "mcp" };
   }
 
   if (pinnedKind !== undefined) {
     await installPinnedFile(pinnedKind, owner, skill, meta, buffer);
-    return;
+    return { version: meta.version, kind: pinnedKind };
   }
 
   // Flat, owner@skill-joined directory name so Claude Code's own one-level-deep
@@ -1354,4 +1381,5 @@ async function addArtifact(args: string[], scope?: KindScope): Promise<void> {
 
   recordInstallOrWarn({ owner, slug: skill, version: meta.version, kind: "skill", checksum_sha256: meta.checksum_sha256 });
   console.log(`Installed ${key}@${meta.version} to ${destDir}`);
+  return { version: meta.version, kind: "skill" };
 }
