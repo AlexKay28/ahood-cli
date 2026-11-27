@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { SUBPROCESS_TEST_TIMEOUT } from "./helpers/subprocess-timeout.js";
+
+vi.setConfig({ testTimeout: SUBPROCESS_TEST_TIMEOUT, hookTimeout: SUBPROCESS_TEST_TIMEOUT });
 
 // Built-CLI tests for ahood-cli#172: what is verified here is observable
 // process behavior -- what reaches stdout and stderr, exit codes, and what ships in the npm tarball -- so it runs dist/index.js

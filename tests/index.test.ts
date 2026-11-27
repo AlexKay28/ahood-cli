@@ -4,6 +4,9 @@ import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { SUBPROCESS_TEST_TIMEOUT } from "./helpers/subprocess-timeout.js";
+
+vi.setConfig({ testTimeout: SUBPROCESS_TEST_TIMEOUT, hookTimeout: SUBPROCESS_TEST_TIMEOUT });
 
 // Mocked so the "invokes the underlying handler" test below can assert on
 // call args without hitting the network. Other exports of add.js are kept

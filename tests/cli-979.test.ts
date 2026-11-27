@@ -1,13 +1,16 @@
 // The built CLI, end to end, for the ahood#979 commands: dispatch, help, the
 // exit codes main() maps API errors to, and sync's refusal with no terminal
 // (stdin is a pipe here, exactly as under CI or an agent).
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { execFile } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AddressInfo } from "node:net";
+import { SUBPROCESS_TEST_TIMEOUT } from "./helpers/subprocess-timeout.js";
+
+vi.setConfig({ testTimeout: SUBPROCESS_TEST_TIMEOUT, hookTimeout: SUBPROCESS_TEST_TIMEOUT });
 
 const cliPath = resolve(__dirname, "..", "dist", "index.js");
 
