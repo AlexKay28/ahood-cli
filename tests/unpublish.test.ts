@@ -31,7 +31,7 @@ function stubStdio(answer: string): { promptedWith(): string } {
     },
   }) as unknown as NodeJS.WriteStream & { fd: 1 };
   vi.spyOn(process, "stdin", "get").mockReturnValue(fakeStdin);
-  vi.spyOn(process, "stdout", "get").mockReturnValue(fakeStdout);
+  vi.spyOn(process, "stderr", "get").mockReturnValue(fakeStdout);
   queueMicrotask(() => {
     fakeStdin.push(`${answer}\n`);
     fakeStdin.push(null);
@@ -101,7 +101,7 @@ describe("unpublish", () => {
     const calls = stubApi(200);
     const fakeStdin = new Readable({ read() {} }) as unknown as NodeJS.ReadStream & { fd: 0 };
     vi.spyOn(process, "stdin", "get").mockReturnValue(fakeStdin);
-    vi.spyOn(process, "stdout", "get").mockReturnValue(
+    vi.spyOn(process, "stderr", "get").mockReturnValue(
       new Writable({ write(_c, _e, cb) { cb(); } }) as unknown as NodeJS.WriteStream & { fd: 1 },
     );
     queueMicrotask(() => fakeStdin.push(null)); // EOF, no data at all

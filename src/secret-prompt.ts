@@ -1,4 +1,8 @@
-import { createInterface } from "node:readline";
+import { PromptUnansweredError, questionLine } from "./confirm.js";
+
+// Re-exported so the one caller that handles an unanswered secret prompt
+// (add.ts, which alone knows which variable to name) needs only this module.
+export { PromptUnansweredError };
 
 // Masked secret-value prompt, extending confirm.ts's TTY-safe "close" race
 // (see confirm.ts's own comment): the same closed-stdin-never-resolves
@@ -17,23 +21,12 @@ export function promptSecret(promptText: string): Promise<string> {
     // no keystroke stream to mask in this mode -- the whole line arrives as
     // one chunk -- and masking would only hide a value that's already
     // sitting unmasked in whatever produced the pipe.
-    const rl = createInterface({ input: stdin, output: process.stdout });
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      rl.once("close", () => {
-        if (settled) return;
-        settled = true;
-        reject(new Error("Prompt was not answered (stdin closed)."));
-      });
-      rl.question(promptText, (answer) => {
-        settled = true;
-        rl.close();
-        resolve(answer);
-      });
-    });
+    return questionLine(promptText, (reason) => `Prompt was not answered (${reason}).`);
   }
 
-  process.stdout.write(promptText);
+  // stderr for the prompt, mask and erase sequences alike (ahood-cli#277):
+  // a secret's '*' count must not land in captured stdout.
+  process.stderr.write(promptText);
   stdin.setRawMode(true);
   stdin.resume();
   stdin.setEncoding("utf8");
@@ -49,14 +42,14 @@ export function promptSecret(promptText: string): Promise<string> {
       for (const char of chunk) {
         if (char === "\n" || char === "\r") {
           cleanup();
-          process.stdout.write("\n");
+          process.stderr.write("\n");
           resolve(value);
           return;
         }
         if (char === "\u0003") {
           // Ctrl-C
           cleanup();
-          process.stdout.write("\n");
+          process.stderr.write("\n");
           reject(new Error("Prompt cancelled (Ctrl-C)."));
           return;
         }
@@ -64,12 +57,12 @@ export function promptSecret(promptText: string): Promise<string> {
           // Backspace/delete
           if (value.length > 0) {
             value = value.slice(0, -1);
-            process.stdout.write("\b \b");
+            process.stderr.write("\b \b");
           }
           continue;
         }
         value += char;
-        process.stdout.write("*");
+        process.stderr.write("*");
       }
     }
     stdin.on("data", onData);

@@ -58,7 +58,7 @@ function stubStdio(answer: string): { promptedWith(): string } {
     },
   }) as unknown as NodeJS.WriteStream & { fd: 1 };
   vi.spyOn(process, "stdin", "get").mockReturnValue(fakeStdin);
-  vi.spyOn(process, "stdout", "get").mockReturnValue(fakeStdout);
+  vi.spyOn(process, "stderr", "get").mockReturnValue(fakeStdout);
   queueMicrotask(() => {
     fakeStdin.push(`${answer}\n`);
     fakeStdin.push(null);
