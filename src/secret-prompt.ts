@@ -1,4 +1,8 @@
-import { createInterface } from "node:readline";
+import { PromptUnansweredError, questionLine } from "./confirm.js";
+
+// Re-exported so the one caller that handles an unanswered secret prompt
+// (add.ts, which alone knows which variable to name) needs only this module.
+export { PromptUnansweredError };
 
 // Masked secret-value prompt, extending confirm.ts's TTY-safe "close" race
 // (see confirm.ts's own comment): the same closed-stdin-never-resolves
@@ -17,20 +21,7 @@ export function promptSecret(promptText: string): Promise<string> {
     // no keystroke stream to mask in this mode -- the whole line arrives as
     // one chunk -- and masking would only hide a value that's already
     // sitting unmasked in whatever produced the pipe.
-    const rl = createInterface({ input: stdin, output: process.stdout });
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      rl.once("close", () => {
-        if (settled) return;
-        settled = true;
-        reject(new Error("Prompt was not answered (stdin closed)."));
-      });
-      rl.question(promptText, (answer) => {
-        settled = true;
-        rl.close();
-        resolve(answer);
-      });
-    });
+    return questionLine(promptText, (reason) => `Prompt was not answered (${reason}).`);
   }
 
   process.stdout.write(promptText);
