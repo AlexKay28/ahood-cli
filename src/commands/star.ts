@@ -1,5 +1,6 @@
 import { apiJson } from "../http.js";
 import { parseOwnerSkill } from "../spec.js";
+import { parseArgs } from "../flags.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
 
 type StarResponse = { starred: boolean };
@@ -11,7 +12,8 @@ type StarResponse = { starred: boolean };
 // unstarring one you never starred is a no-op 200, not an error.
 export async function star(args: string[], scope?: KindScope): Promise<void> {
   const USAGE = "Usage: ahood skill star <owner>/<skill>";
-  const { owner, skill } = parseOwnerSkill(args[0] ?? "", USAGE);
+  const { positionals } = parseArgs(args, { usage: USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const { owner, skill } = parseOwnerSkill(positionals[0], USAGE);
 
   await ensureRemoteKind(scope, owner, skill, "star", "star");
   await apiJson<StarResponse>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/star`, {
@@ -22,7 +24,8 @@ export async function star(args: string[], scope?: KindScope): Promise<void> {
 
 export async function unstar(args: string[], scope?: KindScope): Promise<void> {
   const USAGE = "Usage: ahood skill unstar <owner>/<skill>";
-  const { owner, skill } = parseOwnerSkill(args[0] ?? "", USAGE);
+  const { positionals } = parseArgs(args, { usage: USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const { owner, skill } = parseOwnerSkill(positionals[0], USAGE);
 
   await ensureRemoteKind(scope, owner, skill, "unstar", "unstar");
   await apiJson<StarResponse>(`/api/v1/skills/${encodeURIComponent(owner)}/${encodeURIComponent(skill)}/star`, {

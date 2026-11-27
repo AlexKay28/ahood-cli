@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { pack } from "tar-stream";
 import { createGzip } from "node:zlib";
 import { apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
-import { flagValue } from "../flags.js";
+import { parseArgs } from "../flags.js";
 import { confirmYesNo, isInteractive } from "../confirm.js";
 import { parseOwnerSkill, SEMVER_RE, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
@@ -274,6 +274,11 @@ async function tarGzDirectory(dir: string, rootDocName?: string): Promise<Buffer
   });
 }
 
+const PUBLISH_VALUE_FLAGS = [
+  "--path", "--owner", "--slug", "--version", "--name", "--tagline", "--tags", "--license",
+  "--homepage", "--repository", "--kind", "--changelog", "--visibility",
+];
+
 function parsePublishArgs(args: string[]): {
   owner: string;
   skill: string;
@@ -289,19 +294,28 @@ function parsePublishArgs(args: string[]): {
   changelog?: string;
   visibility?: Visibility;
 } {
-  const pathFlag = flagValue(args, "--path");
-  let owner = flagValue(args, "--owner");
-  let skill = flagValue(args, "--slug");
-  let version = flagValue(args, "--version");
-  const name = flagValue(args, "--name");
-  const tagline = flagValue(args, "--tagline");
-  const tags = flagValue(args, "--tags");
-  const license = flagValue(args, "--license");
-  const homepage = flagValue(args, "--homepage");
-  const repository = flagValue(args, "--repository");
-  const kind = flagValue(args, "--kind");
-  const changelog = flagValue(args, "--changelog");
-  const visibility = flagValue(args, "--visibility");
+  // Every flag publish reads is declared here and nothing else gets through
+  // (ahood-cli#260): `publish a/b@1.0.0 --visiblity public` used to publish
+  // with the visibility flag dropped, i.e. private, at exit 0.
+  const flags = parseArgs(args, {
+    usage: USAGE,
+    booleans: ["--json"],
+    values: PUBLISH_VALUE_FLAGS,
+    max: 1,
+  });
+  const pathFlag = flags.value("--path");
+  let owner = flags.value("--owner");
+  let skill = flags.value("--slug");
+  let version = flags.value("--version");
+  const name = flags.value("--name");
+  const tagline = flags.value("--tagline");
+  const tags = flags.value("--tags");
+  const license = flags.value("--license");
+  const homepage = flags.value("--homepage");
+  const repository = flags.value("--repository");
+  const kind = flags.value("--kind");
+  const changelog = flags.value("--changelog");
+  const visibility = flags.value("--visibility");
   if (visibility !== undefined && visibility !== "public" && visibility !== "private") {
     throw new UsageError(`--visibility must be "public" or "private" (got "${visibility}").\n${USAGE}`);
   }
@@ -317,8 +331,8 @@ function parsePublishArgs(args: string[]): {
     );
   }
 
-  const first = args[0];
-  if (first && !first.startsWith("--")) {
+  const first = flags.positionals[0];
+  if (first) {
     if (first.includes("/") && first.includes("@")) {
       // Primary form: ahood skill publish <owner>/<skill>@<version>
       const parsed = parseOwnerSkill(first.slice(0, first.lastIndexOf("@")), USAGE);

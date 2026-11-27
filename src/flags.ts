@@ -91,7 +91,21 @@ export function unrecognizedArgs(args: string[], booleanFlags: string[], valueFl
 // precisely `snap create "note" --tags deploy bugfix` folding "bugfix" into the
 // note body (ahood-cli#134). Positions are the only way to see that gap.
 export function unrecognizedIndices(args: string[], booleanFlags: string[], valueFlags: string[]): number[] {
+  return scanArgs(args, booleanFlags, valueFlags).leftover;
+}
+
+// The one copy of the stripping rules, also reporting which boolean flags it
+// actually saw AS FLAGS. parseArgs needs that rather than `args.includes`:
+// in `group create team --description -y` the "-y" is the description, and
+// reading it as a confirmation is how a destructive command would skip its
+// prompt on a value the user typed (ahood-cli#260).
+function scanArgs(
+  args: string[],
+  booleanFlags: string[],
+  valueFlags: string[],
+): { leftover: number[]; present: Set<string> } {
   const indices: number[] = [];
+  const present = new Set<string>();
   const seen = new Set<string>();
   // Which index (if any) the value flag just seen actually consumed. The test
   // used to be `valueFlags.includes(args[i - 1])`, which stripped the neighbour
@@ -104,7 +118,10 @@ export function unrecognizedIndices(args: string[], booleanFlags: string[], valu
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (i === consumedAt) continue;
-    if (booleanFlags.includes(arg)) continue;
+    if (booleanFlags.includes(arg)) {
+      present.add(arg);
+      continue;
+    }
     if (valueFlags.includes(arg)) {
       assertFirstOccurrence(seen, arg);
       // Same swallow-protection as flagValue: a following "--" token is not
@@ -121,7 +138,74 @@ export function unrecognizedIndices(args: string[], booleanFlags: string[], valu
     }
     indices.push(i);
   }
-  return indices;
+  return { leftover: indices, present };
+}
+
+// `-y` is accepted wherever `--yes` is: it worked on `sync` and `setup` only,
+// so `unpublish a/b -y` ignored it and then failed with "Confirmation was not
+// answered" (ahood-cli#260). One list, so no destructive verb drifts again.
+export const YES_FLAGS = ["--yes", "-y"];
+
+export type ArgSpec = {
+  usage: string;
+  booleans?: string[];
+  values?: string[];
+  min?: number;
+  max?: number;
+  // Only a "--" token is refused as a flag; a single-dash one is a positional.
+  // For `group join`, whose raw invite token is base64url and may begin "-".
+  dashIsPositional?: boolean;
+};
+
+export type ParsedArgs = {
+  positionals: string[];
+  has(...flags: string[]): boolean;
+  value(flag: string): string | undefined;
+};
+
+// The strict front door every handler parses through before it touches the
+// network or the filesystem (ahood-cli#260). Half the commands used to read
+// `args.includes("--yes")` plus "the first token not starting with --" and
+// never looked at what was left, so `unpublish a/b --dry-run --yes` deleted the
+// skill, `edit a/b --tagline x --visiblity public` silently dropped the
+// visibility change, and `add a/b c/d` installed only the first. Anything a
+// command does not declare -- an unknown flag, a surplus positional -- is a
+// UsageError here, and since this runs first, nothing has happened yet.
+//
+// Flags and positionals may come in any order (`remove --yes a/b` used to exit
+// 2 while `unpublish --yes a/b` deleted). A bare `--` ends flag parsing, so a
+// positional that genuinely starts with "-" still has a way in.
+//
+// Built on flagValue and the unrecognizedIndices scan rather than beside them:
+// flagValue runs first so "--group requires a value" and the repeated-flag
+// refusal read exactly as they always have.
+export function parseArgs(args: string[], spec: ArgSpec): ParsedArgs {
+  const { usage, booleans = [], values = [], min = 0, max = Infinity } = spec;
+  const end = args.indexOf("--");
+  const flagArgs = end === -1 ? args : args.slice(0, end);
+  const literal = end === -1 ? [] : args.slice(end + 1);
+
+  const found = new Map<string, string>();
+  for (const flag of values) {
+    const value = flagValue(flagArgs, flag);
+    if (value !== undefined) found.set(flag, value);
+  }
+  const { leftover, present } = scanArgs(flagArgs, booleans, values);
+  const bare = leftover.map((i) => flagArgs[i]);
+  const unknown = bare.find((a) => a.startsWith(spec.dashIsPositional ? "--" : "-") && a !== "-");
+  if (unknown !== undefined) throw new UsageError(`Unknown flag: ${unknown}\n${usage}`);
+
+  const positionals = [...bare, ...literal];
+  if (positionals.length > max) {
+    throw new UsageError(`Unexpected extra argument: ${positionals[max]}\n${usage}`);
+  }
+  if (positionals.length < min) throw new UsageError(usage);
+
+  return {
+    positionals,
+    has: (...flags) => flags.some((f) => present.has(f)),
+    value: (flag) => found.get(flag),
+  };
 }
 
 // Shared by every "<verb> <query> [--json] [--limit <n>]" command (skill
