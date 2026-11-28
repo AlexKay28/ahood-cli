@@ -2,6 +2,7 @@ import { ApiError, apiJson } from "../http.js";
 import { parseOwnerSkill } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { flagValue, unrecognizedArgs } from "../flags.js";
+import { usageLine } from "../help.js";
 import { ensureRemoteKind, strictKind, type KindScope } from "../kinds.js";
 
 type VoteResponse = { value: "up" | "down" | 1 | -1 | null; upvotes: number; downvotes: number };
@@ -9,8 +10,7 @@ type VoteResponse = { value: "up" | "down" | 1 | -1 | null; upvotes: number; dow
 const NOTE_MAX = 500;
 
 function usageFor(scope: KindScope | undefined): string {
-  const noun = scope?.noun ?? "skill";
-  return `Usage: ahood ${noun} vote <owner>/<slug> up|down [--note <text>] [--version <x.y.z>] [--json]\n       ahood ${noun} vote <owner>/<slug> --clear [--json]`;
+  return usageLine(scope?.noun ?? "skill", "vote");
 }
 
 function tally(r: VoteResponse): string {

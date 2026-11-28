@@ -431,7 +431,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood skill unpublish <owner>/<skill>[@version] [--yes]` | Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed). |
 | `ahood skill star <owner>/<skill>` | Star a skill. |
 | `ahood skill unstar <owner>/<skill>` | Remove your star from a skill. |
-| `ahood skill vote <owner>/<skill> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote a skill up or down after using it, or clear your vote with --clear. |
+| `ahood skill vote <owner>/<skill> up\|down\|--clear [--note <text>] [--version <x.y.z>] [--json]` | Vote a skill up or down after using it, or clear your vote with --clear. |
 | `ahood skill share <owner>/<skill> --group <group>` | Share a skill you own with a group, without changing its public/private visibility. |
 | `ahood skill unshare <owner>/<skill> --group <group>` | Stop sharing a skill you own with a group. |
 | `ahood skill init [name]` | Scaffold a new skill folder with a minimal, valid SKILL.md. |
@@ -455,7 +455,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood agent unpublish <owner>/<agent>[@version] [--yes]` | Delete an agent from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
 | `ahood agent star <owner>/<agent>` | Star an agent. |
 | `ahood agent unstar <owner>/<agent>` | Remove your star from an agent. |
-| `ahood agent vote <owner>/<agent> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote an agent up or down after using it, or clear your vote with --clear. |
+| `ahood agent vote <owner>/<agent> up\|down\|--clear [--note <text>] [--version <x.y.z>] [--json]` | Vote an agent up or down after using it, or clear your vote with --clear. |
 | `ahood agent share <owner>/<agent> --group <group>` | Share an agent you own with a group, without changing its visibility. |
 | `ahood agent unshare <owner>/<agent> --group <group>` | Stop sharing an agent you own with a group. |
 | `ahood agent init [name]` | Scaffold a new agent folder with a minimal, valid AGENT.md. |
@@ -479,7 +479,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood mcp unpublish <owner>/<server>[@version] [--yes]` | Delete an MCP server manifest from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
 | `ahood mcp star <owner>/<server>` | Star an MCP server manifest. |
 | `ahood mcp unstar <owner>/<server>` | Remove your star from an MCP server manifest. |
-| `ahood mcp vote <owner>/<server> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote an MCP server manifest up or down after using it, or clear your vote with --clear. |
+| `ahood mcp vote <owner>/<server> up\|down\|--clear [--note <text>] [--version <x.y.z>] [--json]` | Vote an MCP server manifest up or down after using it, or clear your vote with --clear. |
 | `ahood mcp share <owner>/<server> --group <group>` | Share an MCP server manifest you own with a group, without changing its visibility. |
 | `ahood mcp unshare <owner>/<server> --group <group>` | Stop sharing an MCP server manifest you own with a group. |
 | `ahood mcp init [name]` | Scaffold a new MCP server manifest folder with a minimal, valid server.json. |
@@ -503,7 +503,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood doc unpublish <owner>/<doc>[@version] [--yes]` | Delete a doc from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
 | `ahood doc star <owner>/<doc>` | Star a doc. |
 | `ahood doc unstar <owner>/<doc>` | Remove your star from a doc. |
-| `ahood doc vote <owner>/<doc> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote a doc up or down after using it, or clear your vote with --clear. |
+| `ahood doc vote <owner>/<doc> up\|down\|--clear [--note <text>] [--version <x.y.z>] [--json]` | Vote a doc up or down after using it, or clear your vote with --clear. |
 | `ahood doc share <owner>/<doc> --group <group>` | Share a doc you own with a group, without changing its visibility. |
 | `ahood doc unshare <owner>/<doc> --group <group>` | Stop sharing a doc you own with a group. |
 | `ahood doc init [name]` | Scaffold a new doc folder with a minimal, valid DOC.md. |
@@ -528,7 +528,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood project unpublish <owner>/<slug>[@version] [--yes]` | Delete a project guide from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
 | `ahood project star <owner>/<slug>` | Star a project guide. |
 | `ahood project unstar <owner>/<slug>` | Remove your star from a project guide. |
-| `ahood project vote <owner>/<slug> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote a project guide up or down after using it, or clear your vote with --clear. |
+| `ahood project vote <owner>/<slug> up\|down\|--clear [--note <text>] [--version <x.y.z>] [--json]` | Vote a project guide up or down after using it, or clear your vote with --clear. |
 | `ahood project share <owner>/<slug> --group <group>` | Share a project guide you own with a group, without changing its visibility. |
 | `ahood project unshare <owner>/<slug> --group <group>` | Stop sharing a project guide you own with a group. |
 | `ahood project init [name] [--project <git-remote> \| --no-project]` | Scaffold a new project guide folder with a minimal, valid PROJECT.md. |
@@ -552,7 +552,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood loop unpublish <owner>/<loop>[@version] [--yes]` | Delete a loop from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
 | `ahood loop star <owner>/<loop>` | Star a loop. |
 | `ahood loop unstar <owner>/<loop>` | Remove your star from a loop. |
-| `ahood loop vote <owner>/<loop> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote a loop up or down after using it, or clear your vote with --clear. |
+| `ahood loop vote <owner>/<loop> up\|down\|--clear [--note <text>] [--version <x.y.z>] [--json]` | Vote a loop up or down after using it, or clear your vote with --clear. |
 | `ahood loop share <owner>/<loop> --group <group>` | Share a loop you own with a group, without changing its visibility. |
 | `ahood loop unshare <owner>/<loop> --group <group>` | Stop sharing a loop you own with a group. |
 | `ahood loop init [name]` | Scaffold a new loop folder with a minimal, valid LOOP.md. |
@@ -573,7 +573,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood prompt unpublish <owner>/<prompt>[@version] [--yes]` | Delete a prompt from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
 | `ahood prompt star <owner>/<prompt>` | Star a prompt. |
 | `ahood prompt unstar <owner>/<prompt>` | Remove your star from a prompt. |
-| `ahood prompt vote <owner>/<prompt> up\|down [--note <text>] [--version <x.y.z>] [--json]` | Vote a prompt up or down after using it, or clear your vote with --clear. |
+| `ahood prompt vote <owner>/<prompt> up\|down\|--clear [--note <text>] [--version <x.y.z>] [--json]` | Vote a prompt up or down after using it, or clear your vote with --clear. |
 | `ahood prompt share <owner>/<prompt> --group <group>` | Share a prompt you own with a group, without changing its visibility. |
 | `ahood prompt unshare <owner>/<prompt> --group <group>` | Stop sharing a prompt you own with a group. |
 | `ahood prompt init [name]` | Scaffold a new prompt folder with a minimal, valid PROMPT.md. |

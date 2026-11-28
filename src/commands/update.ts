@@ -2,6 +2,7 @@ import { LOCKFILE_PATH, parseOwnerSkill } from "../spec.js";
 import { readLockfile } from "../lockfile.js";
 import { add, fetchVersionMeta, readMcpConfig, updateMcpEntry } from "./add.js";
 import { UsageError } from "../usage-error.js";
+import { parseArgs } from "../flags.js";
 import { assertKind, isCliKind, isPinnedFileKind, KINDS, localInstalledKind, strictKind, type KindScope } from "../kinds.js";
 
 const USAGE = "Usage: ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]";
@@ -123,12 +124,16 @@ function outOfScope(scope: KindScope | undefined, key: string, actual: unknown, 
 
 export async function update(args: string[], scope?: KindScope): Promise<void> {
   const kind = strictKind(scope);
-  const dryRun = args.includes("--dry-run");
-  const jsonOutput = args.includes("--json");
+  // Every non-flag token is a target, so an undeclared flag used to become
+  // one: `update --yes` went looking for an installed skill named "--yes"
+  // (ahood-cli#260).
+  const parsed = parseArgs(args, { usage: USAGE, booleans: ["--dry-run", "--json"] });
+  const dryRun = parsed.has("--dry-run");
+  const jsonOutput = parsed.has("--json");
   if (jsonOutput && !dryRun) {
     throw new UsageError(`--json is only supported together with --dry-run.\n${USAGE}`);
   }
-  const targets = args.filter((a) => a !== "--dry-run" && a !== "--json");
+  const targets = parsed.positionals;
 
   const lockfile = readLockfile(LOCKFILE_PATH);
   const implicit = targets.length === 0;

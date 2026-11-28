@@ -2,9 +2,10 @@ import { unrecognizedArgs } from "../flags.js";
 import { itemKey, migrateProjectLockfileOrWarn, readInstalled, updateInstalled, type InstalledItem } from "../installed.js";
 import { parseOwnerSkill, SEMVER_RE } from "../spec.js";
 import { UsageError } from "../usage-error.js";
+import { usageLine } from "../help.js";
 
-const PIN_USAGE = "Usage: ahood pin <owner>/<slug>[@version] [--json]";
-const UNPIN_USAGE = "Usage: ahood unpin <owner>/<slug> [--json]";
+const PIN_USAGE = usageLine("pin");
+const UNPIN_USAGE = usageLine("unpin");
 
 // `ahood pin` / `ahood unpin` (ahood#979): a pin holds every install of
 // owner/slug at one version, recorded in ~/.ahood/installed.json. `ahood sync`
@@ -33,8 +34,14 @@ function installsOf(items: InstalledItem[], key: string): InstalledItem[] {
   return items.filter((i) => itemKey(i).toLowerCase() === key.toLowerCase());
 }
 
+// Nothing is installed, so the entry's kind is unknown here: naming one noun
+// (`ahood skill add`) was wrong for an agent, mcp server, doc, project or loop
+// (ahood-cli#250), so the hint names the form per kind instead.
 function notInstalled(key: string): UsageError {
-  return new UsageError(`${key} is not installed (per \`ahood status\`) -- install it first with \`ahood skill add ${key}\`.`);
+  return new UsageError(
+    `${key} is not installed (per \`ahood status\`) -- install it first with \`ahood <kind> add ${key}\`, ` +
+      `where <kind> is the entry's kind: skill, agent, mcp, doc, project or loop.`,
+  );
 }
 
 export async function pin(args: string[]): Promise<void> {

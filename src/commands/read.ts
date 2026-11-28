@@ -3,11 +3,11 @@ import { provenanceMetaFor } from "./add.js";
 import { buildProvenanceHeader, type ProvenanceHeaderMeta } from "../provenance-header.js";
 import { parseOwnerSkill } from "../spec.js";
 import { sanitizeDocumentForTerminal, sanitizeForTerminal } from "../terminal-safe.js";
-import { UsageError } from "../usage-error.js";
+import { parseArgs } from "../flags.js";
 import { ensureRemoteKind, strictKind, type KindScope } from "../kinds.js";
 import { printRateHint } from "../rate-hint.js";
+import { usageLine } from "../help.js";
 
-const USAGE = "Usage: ahood skill read <owner>/<skill> [--json]";
 
 // Matches GET /api/v1/skills/{owner}/{skill}'s actual response shape -- same
 // endpoint view.ts calls (see view.ts's SkillDetail for the full field list
@@ -95,11 +95,13 @@ export async function readSkillMd(owner: string, skill: string): Promise<ReadSki
   };
 }
 
-export async function read(args: string[], scope?: KindScope): Promise<void> {
-  const jsonOutput = args.includes("--json");
-  const spec = args.find((a) => !a.startsWith("--"));
-  if (!spec) throw new UsageError(USAGE);
-  const { owner, skill } = parseOwnerSkill(spec, USAGE);
+// `ahood try` is this same handler under the plugin's name, so its usage line
+// is its own (ahood-cli#250: it used to print `ahood skill read ...`).
+export async function read(args: string[], scope?: KindScope, via: "read" | "try" = "read"): Promise<void> {
+  const USAGE = via === "try" ? usageLine("try") : usageLine(scope?.noun ?? "skill", "read");
+  const parsed = parseArgs(args, { usage: USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const jsonOutput = parsed.has("--json");
+  const { owner, skill } = parseOwnerSkill(parsed.positionals[0], USAGE);
 
   await ensureRemoteKind(scope, owner, skill, "read", "read");
   const { version, content, provenance } = await readSkillMd(owner, skill);
