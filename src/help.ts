@@ -365,7 +365,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     desc: "Remove your star from a skill.",
   },
   {
-    usage: "ahood skill vote <owner>/<skill> up|down [--note <text>] [--version <x.y.z>] [--json]",
+    usage: "ahood skill vote <owner>/<skill> up|down|--clear [--note <text>] [--version <x.y.z>] [--json]",
     summary: "Vote a skill up or down after using it, or clear your vote with --clear.",
     desc:
       "Rate a skill you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. " +
@@ -559,7 +559,7 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
     { usage: `${p} star <owner>/${n}`, summary: `Star ${a} ${label}.`, desc: `Star ${a} ${label}. ${kindRefusal}` },
     { usage: `${p} unstar <owner>/${n}`, summary: `Remove your star from ${a} ${label}.`, desc: `Remove your star from ${a} ${label}. ${kindRefusal}` },
     {
-      usage: `${p} vote <owner>/${n} up|down [--note <text>] [--version <x.y.z>] [--json]`,
+      usage: `${p} vote <owner>/${n} up|down|--clear [--note <text>] [--version <x.y.z>] [--json]`,
       summary: `Vote ${a} ${label} up or down after using it, or clear your vote with --clear.`,
       desc:
         `Rate ${a} ${label} you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. ` +
@@ -955,6 +955,19 @@ export function findCommandHelp(command: string, subcommand?: string): CommandHe
   }
   const resolved = COMMAND_ALIASES[command] ?? command;
   return TOP_LEVEL_COMMANDS_HELP.find((c) => c.usage.startsWith(`ahood ${resolved} `) || c.usage === `ahood ${resolved}`);
+}
+
+// The "Usage: ..." line a handler throws, read from the same entry --help
+// renders, so the noun, the per-kind placeholder (<owner>/<agent>) and the
+// flags can never drift from the help text (ahood-cli#250: handlers used to
+// hard-code `ahood skill <verb> <owner>/<skill>` and rely on a noun rewrite
+// that fixed the noun but not the placeholder, or named the wrong command
+// entirely for `try`). Throws on a missing entry so a typo'd verb fails in
+// tests, not as an empty usage line in front of a user.
+export function usageLine(command: string, verb?: string): string {
+  const entry = findCommandHelp(command, verb);
+  if (!entry) throw new Error(`No help entry for ${[command, verb].filter(Boolean).join(" ")}`);
+  return `Usage: ${entry.usage}`;
 }
 
 // Renders a CommandHelp entry's usage line with any known aliases folded in
