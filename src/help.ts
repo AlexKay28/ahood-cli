@@ -332,7 +332,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
   },
   {
-    usage: "ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+    usage: "ahood skill edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]",
     summary: "Update a skill you own, changing only the flags you pass.",
     desc:
       "Update a skill you own. Only the flags you pass are changed. Every flag also accepts " +
@@ -536,7 +536,7 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
       flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
     },
     {
-      usage: `${p} edit <owner>/${n} [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]`,
+      usage: `${p} edit <owner>/${n} [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]`,
       summary: `Update ${a} ${label} you own, changing only the flags you pass.`,
       desc: `Update ${a} ${label} you own; same flags as \`ahood skill edit\`. ${kindRefusal}`,
       flags: [

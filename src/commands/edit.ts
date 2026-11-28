@@ -3,6 +3,7 @@ import { parseArgs } from "../flags.js";
 import { parseOwnerSkill, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
+import { usageLine } from "../help.js";
 
 type UpdateResponse = {
   slug: string;
@@ -20,8 +21,6 @@ type UpdateResponse = {
   tags_warning?: string;
 };
 
-const USAGE =
-  "Usage: ahood skill edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]";
 
 // Mirrors PATCH /api/v1/skills/{owner}/{skill}'s allow-list exactly
 // (lib/skills/mutations.ts's UpdateSkillInput) -- only a field the caller
@@ -29,6 +28,7 @@ const USAGE =
 // never clobbers an existing value (the route only validates/writes keys
 // that are present on the body at all).
 export async function edit(args: string[], scope?: KindScope): Promise<void> {
+  const USAGE = usageLine(scope?.noun ?? "skill", "edit");
   // An undeclared flag is refused rather than dropped: `--visiblity public`
   // next to a valid --tagline used to PATCH the tagline alone and exit 0, so
   // the skill stayed private with nothing to say so (ahood-cli#260). --json is

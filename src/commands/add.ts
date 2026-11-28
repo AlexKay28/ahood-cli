@@ -23,8 +23,8 @@ import { parseArgs } from "../flags.js";
 import { printRateHint } from "../rate-hint.js";
 import { assertKind, describeKind, isPinnedFileKind, KINDS, strictKind, type CliKind, type KindScope, type PinnedFileKind } from "../kinds.js";
 import { buildProvenanceHeader, type ProvenanceHeaderMeta } from "../provenance-header.js";
+import { usageLine } from "../help.js";
 
-const USAGE = "Usage: ahood skill add <owner>/<skill>[@version]";
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB compressed
 const MAX_EXTRACTED_BYTES = 200 * 1024 * 1024; // 200 MB decompressed
 const MAX_ENTRY_COUNT = 10_000;
@@ -1206,6 +1206,7 @@ function assertPinnedFileIsOurs(kind: PinnedFileKind, owner: string, skill: stri
 }
 
 export async function add(args: string[], scope?: KindScope): Promise<void> {
+  const USAGE = usageLine(scope?.noun ?? "skill", "add");
   // Parsed once, here, and the result handed down (ahood-cli#260). add used to
   // read args[0] before the install and AGAIN after it, so anything but a
   // spec-first invocation could install and only then fail; and `add a/b c/d`

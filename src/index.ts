@@ -323,16 +323,7 @@ async function dispatchRegistry(noun: CliKind, args: string[]): Promise<void> {
     await handler(kind === undefined ? rest : handlerArgs);
     return;
   }
-  try {
-    await handler(handlerArgs, scope);
-  } catch (error) {
-    // Handlers phrase their usage lines as `ahood skill <verb>`; under another
-    // noun, say the command the user actually typed.
-    if (error instanceof UsageError && noun !== "skill") {
-      error.message = error.message.replace(/(Usage: |or: )ahood skill /g, `$1ahood ${noun} `);
-    }
-    throw error;
-  }
+  await handler(handlerArgs, scope);
 }
 
 async function dispatchSkill(args: string[]): Promise<void> {

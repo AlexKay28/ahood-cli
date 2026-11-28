@@ -427,7 +427,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]` | Deprecated; prefer `ahood sync`, which moves the same lockfile pin(s) forward across every project on this machine. |
 | `ahood skill outdated [<owner>/<skill> ...] [--json]` | Deprecated; prefer `ahood status`, which does the same read-only staleness check across every project on this machine. |
 | `ahood skill remove <owner>/<skill> [--yes]` | Uninstall and unpin a skill (local only, prompts for confirmation unless --yes is passed). |
-| `ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a skill you own, changing only the flags you pass. |
+| `ahood skill edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public\|private] [--homepage <url>] [--repository <url>]` | Update a skill you own, changing only the flags you pass. |
 | `ahood skill unpublish <owner>/<skill>[@version] [--yes]` | Delete a skill from the registry for every consumer, or yank a single version, not just your local install (prompts for confirmation unless --yes is passed). |
 | `ahood skill star <owner>/<skill>` | Star a skill. |
 | `ahood skill unstar <owner>/<skill>` | Remove your star from a skill. |
@@ -451,7 +451,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood agent update [<owner>/<agent> ...] [--dry-run] [--json]` | Move agent pins forward to the latest version. |
 | `ahood agent outdated [<owner>/<agent> ...] [--json]` | Read-only staleness check for installed agents. |
 | `ahood agent remove <owner>/<agent> [--yes]` | Uninstall and unpin an agent (local only, prompts unless --yes is passed). |
-| `ahood agent edit <owner>/<agent> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update an agent you own, changing only the flags you pass. |
+| `ahood agent edit <owner>/<agent> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public\|private] [--homepage <url>] [--repository <url>]` | Update an agent you own, changing only the flags you pass. |
 | `ahood agent unpublish <owner>/<agent>[@version] [--yes]` | Delete an agent from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
 | `ahood agent star <owner>/<agent>` | Star an agent. |
 | `ahood agent unstar <owner>/<agent>` | Remove your star from an agent. |
@@ -475,7 +475,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood mcp update [<owner>/<server> ...] [--dry-run] [--json]` | Move MCP server manifest pins forward to the latest version. |
 | `ahood mcp outdated [<owner>/<server> ...] [--json]` | Read-only staleness check for installed MCP server manifests. |
 | `ahood mcp remove <owner>/<server> [--yes]` | Uninstall and unpin an MCP server manifest (local only, prompts unless --yes is passed). |
-| `ahood mcp edit <owner>/<server> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update an MCP server manifest you own, changing only the flags you pass. |
+| `ahood mcp edit <owner>/<server> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public\|private] [--homepage <url>] [--repository <url>]` | Update an MCP server manifest you own, changing only the flags you pass. |
 | `ahood mcp unpublish <owner>/<server>[@version] [--yes]` | Delete an MCP server manifest from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
 | `ahood mcp star <owner>/<server>` | Star an MCP server manifest. |
 | `ahood mcp unstar <owner>/<server>` | Remove your star from an MCP server manifest. |
@@ -499,7 +499,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood doc update [<owner>/<doc> ...] [--dry-run] [--json]` | Move doc pins forward to the latest version. |
 | `ahood doc outdated [<owner>/<doc> ...] [--json]` | Read-only staleness check for installed docs. |
 | `ahood doc remove <owner>/<doc> [--yes]` | Uninstall and unpin a doc (local only, prompts unless --yes is passed). |
-| `ahood doc edit <owner>/<doc> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a doc you own, changing only the flags you pass. |
+| `ahood doc edit <owner>/<doc> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public\|private] [--homepage <url>] [--repository <url>]` | Update a doc you own, changing only the flags you pass. |
 | `ahood doc unpublish <owner>/<doc>[@version] [--yes]` | Delete a doc from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
 | `ahood doc star <owner>/<doc>` | Star a doc. |
 | `ahood doc unstar <owner>/<doc>` | Remove your star from a doc. |
@@ -524,7 +524,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood project update [<owner>/<slug> ...] [--dry-run] [--json]` | Move project guide pins forward to the latest version. |
 | `ahood project outdated [<owner>/<slug> ...] [--json]` | Read-only staleness check for installed project guides. |
 | `ahood project remove <owner>/<slug> [--yes]` | Uninstall and unpin a project guide (local only, prompts unless --yes is passed). |
-| `ahood project edit <owner>/<slug> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a project guide you own, changing only the flags you pass. |
+| `ahood project edit <owner>/<slug> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public\|private] [--homepage <url>] [--repository <url>]` | Update a project guide you own, changing only the flags you pass. |
 | `ahood project unpublish <owner>/<slug>[@version] [--yes]` | Delete a project guide from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
 | `ahood project star <owner>/<slug>` | Star a project guide. |
 | `ahood project unstar <owner>/<slug>` | Remove your star from a project guide. |
@@ -548,7 +548,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood loop update [<owner>/<loop> ...] [--dry-run] [--json]` | Move loop pins forward to the latest version. |
 | `ahood loop outdated [<owner>/<loop> ...] [--json]` | Read-only staleness check for installed loops. |
 | `ahood loop remove <owner>/<loop> [--yes]` | Uninstall and unpin a loop (local only, prompts unless --yes is passed). |
-| `ahood loop edit <owner>/<loop> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a loop you own, changing only the flags you pass. |
+| `ahood loop edit <owner>/<loop> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public\|private] [--homepage <url>] [--repository <url>]` | Update a loop you own, changing only the flags you pass. |
 | `ahood loop unpublish <owner>/<loop>[@version] [--yes]` | Delete a loop from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
 | `ahood loop star <owner>/<loop>` | Star a loop. |
 | `ahood loop unstar <owner>/<loop>` | Remove your star from a loop. |
@@ -569,7 +569,7 @@ alice/pdf-tools is a skill, not an agent -- refusing to install it. Use `ahood s
 | `ahood prompt versions <owner>/<prompt> [--json]` | List a prompt's published-version history. |
 | `ahood prompt diff <owner>/<prompt> <versionA> <versionB> [--json]` | Show what changed between two published versions of a prompt. |
 | `ahood prompt list [--json]` | List your own prompts, public and private. |
-| `ahood prompt edit <owner>/<prompt> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]` | Update a prompt you own, changing only the flags you pass. |
+| `ahood prompt edit <owner>/<prompt> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public\|private] [--homepage <url>] [--repository <url>]` | Update a prompt you own, changing only the flags you pass. |
 | `ahood prompt unpublish <owner>/<prompt>[@version] [--yes]` | Delete a prompt from the registry for every consumer, or yank one version (prompts unless --yes is passed). |
 | `ahood prompt star <owner>/<prompt>` | Star a prompt. |
 | `ahood prompt unstar <owner>/<prompt>` | Remove your star from a prompt. |

@@ -4,8 +4,8 @@ import { add, fetchVersionMeta, readMcpConfig, updateMcpEntry } from "./add.js";
 import { UsageError } from "../usage-error.js";
 import { parseArgs } from "../flags.js";
 import { assertKind, isCliKind, isPinnedFileKind, KINDS, localInstalledKind, strictKind, type KindScope } from "../kinds.js";
+import { usageLine } from "../help.js";
 
-const USAGE = "Usage: ahood skill update [<owner>/<skill> ...] [--dry-run] [--json]";
 
 // `update` is the only command that moves the lockfile pin forward -- `add`
 // always resolves and pins whatever version it's given (or latest, once,
@@ -123,6 +123,7 @@ function outOfScope(scope: KindScope | undefined, key: string, actual: unknown, 
 }
 
 export async function update(args: string[], scope?: KindScope): Promise<void> {
+  const USAGE = usageLine(scope?.noun ?? "skill", "update");
   const kind = strictKind(scope);
   // Every non-flag token is a target, so an undeclared flag used to become
   // one: `update --yes` went looking for an installed skill named "--yes"

@@ -310,7 +310,7 @@
           ]
         },
         {
-          "usage": "ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood skill edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]",
           "summary": "Update a skill you own, changing only the flags you pass.",
           "desc": "Update a skill you own. Only the flags you pass are changed. Every flag also accepts the --flag=value form (e.g. --tagline=--fast and cheap), needed when a value itself starts with --.",
           "flags": [
@@ -510,7 +510,7 @@
           ]
         },
         {
-          "usage": "ahood agent edit <owner>/<agent> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood agent edit <owner>/<agent> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]",
           "summary": "Update an agent you own, changing only the flags you pass.",
           "desc": "Update an agent you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not an agent.",
           "flags": [
@@ -690,7 +690,7 @@
           ]
         },
         {
-          "usage": "ahood mcp edit <owner>/<server> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood mcp edit <owner>/<server> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]",
           "summary": "Update an MCP server manifest you own, changing only the flags you pass.",
           "desc": "Update an MCP server manifest you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not an MCP server manifest.",
           "flags": [
@@ -870,7 +870,7 @@
           ]
         },
         {
-          "usage": "ahood doc edit <owner>/<doc> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood doc edit <owner>/<doc> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]",
           "summary": "Update a doc you own, changing only the flags you pass.",
           "desc": "Update a doc you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not a doc.",
           "flags": [
@@ -1063,7 +1063,7 @@
           ]
         },
         {
-          "usage": "ahood project edit <owner>/<slug> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood project edit <owner>/<slug> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]",
           "summary": "Update a project guide you own, changing only the flags you pass.",
           "desc": "Update a project guide you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not a project guide.",
           "flags": [
@@ -1247,7 +1247,7 @@
           ]
         },
         {
-          "usage": "ahood loop edit <owner>/<loop> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood loop edit <owner>/<loop> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]",
           "summary": "Update a loop you own, changing only the flags you pass.",
           "desc": "Update a loop you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not a loop.",
           "flags": [
@@ -1410,7 +1410,7 @@
           ]
         },
         {
-          "usage": "ahood prompt edit <owner>/<prompt> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+          "usage": "ahood prompt edit <owner>/<prompt> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]",
           "summary": "Update a prompt you own, changing only the flags you pass.",
           "desc": "Update a prompt you own; same flags as `ahood skill edit`. Refused, before anything else happens, when the target is not a prompt.",
           "flags": [

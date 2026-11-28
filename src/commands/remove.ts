@@ -19,6 +19,7 @@ import {
   strictKind,
   type KindScope,
 } from "../kinds.js";
+import { usageLine } from "../help.js";
 
 // `ahood agent remove` / `ahood mcp remove` (ahood-cli#172): decide whether
 // this install really is the scope's kind BEFORE the prompt and every delete
@@ -46,7 +47,6 @@ async function assertInstalledKind(scope: KindScope, owner: string, skill: strin
   }
 }
 
-const USAGE = "Usage: ahood skill remove <owner>/<skill> [--yes]";
 
 // Only a kind's own root (.claude/skills, agents, docs, loops) -- never
 // .claude itself -- and rmdirSync refuses a non-empty directory anyway.
@@ -61,6 +61,7 @@ function removeIfEmptyKindRoot(path: string): void {
 }
 
 export async function remove(args: string[], scope?: KindScope): Promise<void> {
+  const USAGE = usageLine(scope?.noun ?? "skill", "remove");
   // Any order (ahood-cli#260): `remove --yes a/b` used to exit 2 -- it read
   // args[0] as the spec -- while `unpublish --yes a/b` went through.
   const parsed = parseArgs(args, { usage: USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });

@@ -3,13 +3,12 @@ import { parseArgs } from "../flags.js";
 import { parseOwnerSkill } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
+import { usageLine } from "../help.js";
 
 // These are skill-entity verbs (reached as `ahood skill share`/`ahood skill
 // unshare`, registered in SKILL_COMMANDS in index.ts), not group verbs --
 // they mutate a skill's sharing, not a group. Grouped together in one file
 // the same way star.ts groups its own paired verbs (star/unstar).
-const SHARE_USAGE = "Usage: ahood skill share <owner>/<skill> --group <group>";
-const UNSHARE_USAGE = "Usage: ahood skill unshare <owner>/<skill> --group <group>";
 
 type ShareResponse = { shared: boolean };
 
@@ -18,6 +17,7 @@ type ShareResponse = { shared: boolean };
 // here. The spec and --group may come in either order: parseArgs strips
 // --group's value before looking for the positional (ahood-cli#260).
 export async function share(args: string[], scope?: KindScope): Promise<void> {
+  const SHARE_USAGE = usageLine(scope?.noun ?? "skill", "share");
   const parsed = parseArgs(args, { usage: SHARE_USAGE, booleans: ["--json"], values: ["--group"], min: 1, max: 1 });
   const { owner, skill } = parseOwnerSkill(parsed.positionals[0], SHARE_USAGE);
   const groupSlug = parsed.value("--group");
@@ -33,6 +33,7 @@ export async function share(args: string[], scope?: KindScope): Promise<void> {
 }
 
 export async function unshare(args: string[], scope?: KindScope): Promise<void> {
+  const UNSHARE_USAGE = usageLine(scope?.noun ?? "skill", "unshare");
   const parsed = parseArgs(args, { usage: UNSHARE_USAGE, booleans: ["--json"], values: ["--group"], min: 1, max: 1 });
   const { owner, skill } = parseOwnerSkill(parsed.positionals[0], UNSHARE_USAGE);
   const groupSlug = parsed.value("--group");

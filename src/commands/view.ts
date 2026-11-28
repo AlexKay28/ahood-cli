@@ -5,8 +5,8 @@ import { parseOwnerSkill } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { unrecognizedArgs } from "../flags.js";
 import { assertKind, ensureRemoteKind, type KindScope } from "../kinds.js";
+import { usageLine } from "../help.js";
 
-const USAGE = "Usage: ahood skill view <owner>/<skill> [--json] [--web]";
 
 // Matches GET /api/v1/skills/{owner}/{skill}'s actual response shape
 // (app/api/v1/skills/[owner]/[skill]/route.ts): visibility is always
@@ -79,6 +79,7 @@ export function formatStats(stats: SkillStats): string {
 }
 
 export async function view(args: string[], scope?: KindScope): Promise<void> {
+  const USAGE = usageLine(scope?.noun ?? "skill", "view");
   const jsonOutput = args.includes("--json");
   const web = args.includes("--web");
   const leftovers = unrecognizedArgs(args, ["--json", "--web"], []);

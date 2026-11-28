@@ -4,8 +4,8 @@ import { UsageError } from "../usage-error.js";
 import { CLI_KINDS, KINDS, strictKind, type CliKind, type KindScope } from "../kinds.js";
 import { parseArgs, type ParsedArgs } from "../flags.js";
 import { detectProjectRemote, normalizeProjectRemote } from "../project-remote.js";
+import { usageLine } from "../help.js";
 
-const USAGE = "Usage: ahood skill init [name]";
 
 // Mirrors the server's slug convention referenced by ahood-cli#60 (and the
 // same shape as spec.ts's SEGMENT_RE, minus "." and "_" -- skill slugs are
@@ -246,6 +246,7 @@ function skillNameFor(dirPath: string, fallback = "my-skill"): string {
 }
 
 export async function init(args: string[], scope?: KindScope): Promise<void> {
+  const USAGE = usageLine(scope?.noun ?? "skill", "init");
   const strict = strictKind(scope);
   const kind: CliKind = strict ?? "skill";
   // --project/--no-project are declared for the project kind only, so

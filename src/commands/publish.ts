@@ -4,6 +4,7 @@ import { pack } from "tar-stream";
 import { createGzip } from "node:zlib";
 import { apiJson, ApiError, sanitizeErrorMessage } from "../http.js";
 import { parseArgs } from "../flags.js";
+import { usageLine } from "../help.js";
 import { confirmYesNo, isInteractive } from "../confirm.js";
 import { parseOwnerSkill, SEMVER_RE, validateExternalUrl } from "../spec.js";
 import { UsageError } from "../usage-error.js";
@@ -59,9 +60,15 @@ async function pollVersionStatus(owner: string, skill: string, version: string):
   );
 }
 
-const USAGE =
-  "Usage: ahood skill publish <owner>/<skill>@<version> [--path <dir>] [--kind skill|agent|mcp|doc|project|loop|prompt] [--name <text>] [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--homepage <url>] [--repository <url>] [--changelog <text>] [--visibility public|private] [--json]\n" +
-  "   or: ahood skill publish <path> --owner <owner> --slug <skill> --version <x.y.z> [--json]";
+// The legacy `or:` form carries the same noun and per-kind placeholder as the
+// primary line, both read from help.ts (ahood-cli#280).
+function publishUsage(scope?: KindScope): string {
+  const noun = scope?.noun ?? "skill";
+  const primary = usageLine(noun, "publish");
+  const placeholder = /<owner>\/<([^>]+)>@/.exec(primary)?.[1] ?? "skill";
+  return `${primary}
+   or: ahood ${noun} publish <path> --owner <owner> --slug <${placeholder}> --version <x.y.z> [--json]`;
+}
 
 // Matched by ENTRY NAME at every depth, not by path prefix, so a nested
 // `vendor/thing/.git` is skipped the same as a top-level one. Not a
@@ -279,7 +286,7 @@ const PUBLISH_VALUE_FLAGS = [
   "--homepage", "--repository", "--kind", "--changelog", "--visibility",
 ];
 
-function parsePublishArgs(args: string[]): {
+function parsePublishArgs(args: string[], USAGE: string): {
   owner: string;
   skill: string;
   version: string;
@@ -572,7 +579,7 @@ function assertValidPromptMd(path: string): void {
 export async function publish(args: string[], scope?: KindScope): Promise<void> {
   const jsonOutput = args.includes("--json");
   try {
-    const parsed = parsePublishArgs(args);
+    const parsed = parsePublishArgs(args, publishUsage(scope));
     const { owner, skill, version, path, name, tagline, tags, license, homepage, repository, changelog, visibility: visibilityFlag } = parsed;
     // A kind-scoped publish implies its kind. The dispatcher has already
     // refused a contradictory --kind before this runs, so the flag (when the

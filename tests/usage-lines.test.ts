@@ -4,6 +4,18 @@ import { vote } from "../src/commands/vote.js";
 import { read } from "../src/commands/read.js";
 import { versions } from "../src/commands/versions.js";
 import { pin } from "../src/commands/pin.js";
+import { add } from "../src/commands/add.js";
+import { diff } from "../src/commands/diff.js";
+import { edit } from "../src/commands/edit.js";
+import { init } from "../src/commands/init.js";
+import { listSkills } from "../src/commands/list.js";
+import { publish } from "../src/commands/publish.js";
+import { remove } from "../src/commands/remove.js";
+import { search } from "../src/commands/search.js";
+import { share, unshare } from "../src/commands/share.js";
+import { unpublish } from "../src/commands/unpublish.js";
+import { update } from "../src/commands/update.js";
+import { view } from "../src/commands/view.js";
 import { main } from "../src/index.js";
 import type { KindScope } from "../src/kinds.js";
 import { setupEnv } from "./helpers/me-env.js";
@@ -27,6 +39,38 @@ describe("usage lines name the right command and placeholder (ahood-cli#250)", (
     );
     await expect(read([], scope)).rejects.toThrow(`Usage: ahood ${noun} read <owner>/<${ph}> [--json]`);
     await expect(versions([], scope)).rejects.toThrow(`Usage: ahood ${noun} versions <owner>/<${ph}> [--json]`);
+  });
+
+  // ahood-cli#280: the rest of the handlers, each fed bad args (no network).
+  it.each([
+    ["skill", "skill"],
+    ["agent", "agent"],
+    ["mcp", "server"],
+  ] as const)("every other verb under %s names its noun and placeholder", async (noun, ph) => {
+    const scope = noun === "skill" ? undefined : scopeOf(noun);
+    const o = `<owner>/<${ph}>`;
+    const cases: [string, () => Promise<unknown>, string][] = [
+      ["add", () => add([], scope), `Usage: ahood ${noun} add ${o}[@version]`],
+      ["diff", () => diff([], scope), `Usage: ahood ${noun} diff ${o} <versionA> <versionB> [--json]`],
+      ["edit", () => edit([], scope), `Usage: ahood ${noun} edit ${o} [--tagline <text>]`],
+      ["init", () => init(["--bogus"], scope), `Usage: ahood ${noun} init [name]`],
+      ["list", () => listSkills(["x"], scope), `Usage: ahood ${noun} list [--json]`],
+      ["publish", () => publish([], scope), `Usage: ahood ${noun} publish ${o}@<version>`],
+      ["publish legacy", () => publish([], scope), `or: ahood ${noun} publish <path> --owner <owner> --slug <${ph}>`],
+      ["remove", () => remove([], scope), `Usage: ahood ${noun} remove ${o} [--yes]`],
+      ["search", () => search([], scope), `Usage: ahood ${noun} search <query>`],
+      ["share", () => share([], scope), `Usage: ahood ${noun} share ${o} --group <group>`],
+      ["unshare", () => unshare([], scope), `Usage: ahood ${noun} unshare ${o} --group <group>`],
+      ["unpublish", () => unpublish([], scope), `Usage: ahood ${noun} unpublish ${o}[@version] [--yes]`],
+      ["update", () => update(["a/b", "--bogus"], scope), `Usage: ahood ${noun} update [${o} ...]`],
+      ["view", () => view([], scope), `Usage: ahood ${noun} view ${o} [--json] [--web]`],
+    ];
+    for (const [verb, p, expected] of cases) {
+      const err = await p().catch((e) => e as Error);
+      expect(err, verb).toBeInstanceOf(Error);
+      expect((err as Error).message, verb).toContain(expected);
+      if (noun !== "skill") expect((err as Error).message, verb).not.toContain("ahood skill");
+    }
   });
 
   it("try prints its own usage, not `skill read`", async () => {

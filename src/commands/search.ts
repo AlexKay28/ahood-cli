@@ -4,6 +4,7 @@ import { apiJson, ApiError, NO_ACCOUNT_MESSAGE } from "../http.js";
 import { flagValue, parseSearchQuery } from "../flags.js";
 import { UsageError } from "../usage-error.js";
 import { KINDS, strictKind, type CliKind, type KindScope } from "../kinds.js";
+import { usageLine } from "../help.js";
 
 // GET /api/v1/skills's browse row (ahood app/api/v1/skills/route.ts select:
 // id, slug, name, tagline, tags, kind, downloads_count, stars_count, user_id,
@@ -30,7 +31,6 @@ export type SearchOutcome = { skills: SearchRow[]; closest: SearchRow[] };
 export const SEARCH_SORTS = ["rank", "downloads", "stars", "recent", "updated"] as const;
 export type SearchSort = (typeof SEARCH_SORTS)[number];
 
-const USAGE = "Usage: ahood skill search <query> [--json] [--limit <n>]";
 
 // `kind` narrows the search server-side (GET /api/v1/skills?kind=, which the
 // backend validates against its ALLOWED_KINDS). Omitted -- the legacy
@@ -88,6 +88,7 @@ function formatRow(skill: SearchRow): string {
 }
 
 export async function search(args: string[], scope?: KindScope): Promise<void> {
+  const USAGE = usageLine(scope?.noun ?? "skill", "search");
   const kind = strictKind(scope);
   const jsonOutput = args.includes("--json");
   const limitStr = flagValue(args, "--limit");
