@@ -1,9 +1,9 @@
 import { apiJson } from "../http.js";
 import { parseOwnerSkill } from "../spec.js";
-import { UsageError } from "../usage-error.js";
+import { parseArgs } from "../flags.js";
+import { usageLine } from "../help.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
 
-const USAGE = "Usage: ahood skill versions <owner>/<skill> [--json]";
 
 // Matches GET /api/v1/skills/{owner}/{skill}/versions's response shape
 // (app/api/v1/skills/[owner]/[skill]/versions/route.ts) -- the same
@@ -47,10 +47,12 @@ export async function listSkillVersions(owner: string, skill: string): Promise<S
 }
 
 export async function versions(args: string[], scope?: KindScope): Promise<void> {
-  const jsonOutput = args.includes("--json");
-  const spec = args.find((a) => !a.startsWith("--"));
-  if (!spec) throw new UsageError(USAGE);
-  const { owner, skill } = parseOwnerSkill(spec, USAGE);
+  const USAGE = usageLine(scope?.noun ?? "skill", "versions");
+  // max: 1 -- `versions a/b c/d` used to list a/b and say nothing about c/d
+  // (ahood-cli#260).
+  const parsed = parseArgs(args, { usage: USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const jsonOutput = parsed.has("--json");
+  const { owner, skill } = parseOwnerSkill(parsed.positionals[0], USAGE);
 
   await ensureRemoteKind(scope, owner, skill, "versions", "list the versions of");
   const list = await listSkillVersions(owner, skill);

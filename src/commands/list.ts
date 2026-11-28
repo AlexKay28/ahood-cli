@@ -1,5 +1,8 @@
 import { apiJson } from "../http.js";
 import { KINDS, strictKind, type KindScope } from "../kinds.js";
+import { parseArgs } from "../flags.js";
+import { usageLine } from "../help.js";
+
 
 // Same underlying endpoint as search.ts (GET /api/v1/skills, here with
 // ?mine=true instead of ?q=), so it carries the same `profiles.username`
@@ -37,7 +40,8 @@ export async function listOwnSkills(kind?: string): Promise<OwnSkill[]> {
 }
 
 export async function listSkills(args: string[] = [], scope?: KindScope): Promise<void> {
-  const jsonOutput = args.includes("--json");
+  const USAGE = usageLine(scope?.noun ?? "skill", "list");
+  const jsonOutput = parseArgs(args, { usage: USAGE, booleans: ["--json"], max: 0 }).has("--json");
   const kind = strictKind(scope);
   const skills = await listOwnSkills(kind);
 

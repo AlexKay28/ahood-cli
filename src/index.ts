@@ -141,8 +141,8 @@ const SNAP_VERBS: Record<string, (args: string[]) => Promise<void>> = {
 // `group`, and `snap` entity groups. Future entities get their own entry
 // here alongside these.
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
-  login: () => login(),
-  logout: () => logout(),
+  login,
+  logout,
   whoami,
   token,
   completion,
@@ -159,7 +159,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   // search.ts); `try` IS `ahood skill read` (the legacy, any-kind handler,
   // unchanged) under the name the plugin uses; `stats` is the owner's numbers.
   find,
-  try: (args) => read(args),
+  try: (args) => read(args, undefined, "try"),
   stats,
   // ahood#1673: product feedback to the ahood team (works logged out).
   feedback,
@@ -323,16 +323,7 @@ async function dispatchRegistry(noun: CliKind, args: string[]): Promise<void> {
     await handler(kind === undefined ? rest : handlerArgs);
     return;
   }
-  try {
-    await handler(handlerArgs, scope);
-  } catch (error) {
-    // Handlers phrase their usage lines as `ahood skill <verb>`; under another
-    // noun, say the command the user actually typed.
-    if (error instanceof UsageError && noun !== "skill") {
-      error.message = error.message.replace(/(Usage: |or: )ahood skill /g, `$1ahood ${noun} `);
-    }
-    throw error;
-  }
+  await handler(handlerArgs, scope);
 }
 
 async function dispatchSkill(args: string[]): Promise<void> {
@@ -545,8 +536,12 @@ async function main() {
     // Every previously-flat skill command moved under `ahood skill <verb>`
     // in this release -- if the typo looks like one of those, point at the
     // new form specifically rather than just the generic top-level list.
-    const skillSuggestion = closestSkillCommand(command);
-    if (skillSuggestion) {
+    // `version` is one edit from the skill verb `versions`, but what someone
+    // typing it wants is the CLI's own version (ahood-cli#250).
+    const skillSuggestion = command === "version" ? undefined : closestSkillCommand(command);
+    if (command === "version") {
+      console.error("Did you mean 'ahood --version'?");
+    } else if (skillSuggestion) {
       console.error(`Did you mean 'ahood skill ${skillSuggestion}'?`);
     } else {
       const suggestion = closestCommand(command);

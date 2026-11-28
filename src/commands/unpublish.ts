@@ -2,10 +2,10 @@ import { apiJson } from "../http.js";
 import { confirm } from "../confirm.js";
 import { parseOwnerSkill, parseOwnerSkillVersion } from "../spec.js";
 import { fetchVersionMeta } from "./add.js";
-import { UsageError } from "../usage-error.js";
+import { parseArgs, YES_FLAGS } from "../flags.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
+import { usageLine } from "../help.js";
 
-const USAGE = "Usage: ahood skill unpublish <owner>/<skill>[@version] [--yes]";
 
 // yankVersion's response is `ok: true` plus an optional latest_version_warning
 // when the post-yank latest_version_id recompute failed -- see the comment at
@@ -25,9 +25,14 @@ function isVersioned(spec: string): boolean {
 }
 
 export async function unpublish(args: string[], scope?: KindScope): Promise<void> {
-  const yes = args.includes("--yes");
-  const spec = args.find((a) => !a.startsWith("--"));
-  if (!spec) throw new UsageError(USAGE);
+  const USAGE = usageLine(scope?.noun ?? "skill", "unpublish");
+  // Strict, and first (ahood-cli#260): `unpublish a/b --dry-run --yes` used to
+  // ignore the flag it didn't know and delete the skill for everyone. --json is
+  // declared only so scripts that already pass it keep working; it prints
+  // nothing different until ahood-cli#251.
+  const parsed = parseArgs(args, { usage: USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
+  const yes = parsed.has(...YES_FLAGS);
+  const spec = parsed.positionals[0];
 
   if (isVersioned(spec)) {
     const { owner, skill, version: parsedVersion } = parseOwnerSkillVersion(spec, USAGE);

@@ -44,7 +44,7 @@ export const TOP_LEVEL_COMMANDS_HELP: CommandHelp[] = [
       "Manage personal API tokens. All three subcommands require an existing browser-backed session -- a CLI " +
       "session authenticated with a bearer token can't manage tokens end-to-end; use /workspace/settings/tokens in the " +
       "browser instead.",
-    flags: ["--yes    (revoke only) Skip the confirmation prompt and revoke immediately."],
+    flags: ["--yes, -y    (revoke only) Skip the confirmation prompt and revoke immediately."],
     examples: ["ahood token create ci-runner", "ahood token list --json", "ahood token revoke <id>", "ahood token revoke <id> --yes"],
   },
   {
@@ -329,9 +329,10 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "Uninstall and unpin (local only). Prompts for confirmation unless --yes is passed. For an mcp-kind install, " +
       "also deletes its .mcp.json entry as long as it still matches what ahood last installed there -- a hand-edited " +
       "or unverifiable entry is left in place and warned about instead of being silently touched.",
+    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
   },
   {
-    usage: "ahood skill edit <owner>/<skill> [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]",
+    usage: "ahood skill edit <owner>/<skill> [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]",
     summary: "Update a skill you own, changing only the flags you pass.",
     desc:
       "Update a skill you own. Only the flags you pass are changed. Every flag also accepts " +
@@ -355,7 +356,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
       "With @version (e.g. alice/foo@1.2.3): yank that single version instead of deleting the whole skill -- " +
       "it is marked yanked, not removed. Existing lockfile pins still resolve and verify against it, but new " +
       "installs are warned off it. Prompts for a typed \"yes\" unless --yes is passed.",
-    flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
   },
   { usage: "ahood skill star <owner>/<skill>", summary: "Star a skill.", desc: "Star a skill." },
   {
@@ -364,7 +365,7 @@ export const SKILL_COMMANDS_HELP: CommandHelp[] = [
     desc: "Remove your star from a skill.",
   },
   {
-    usage: "ahood skill vote <owner>/<skill> up|down [--note <text>] [--version <x.y.z>] [--json]",
+    usage: "ahood skill vote <owner>/<skill> up|down|--clear [--note <text>] [--version <x.y.z>] [--json]",
     summary: "Vote a skill up or down after using it, or clear your vote with --clear.",
     desc:
       "Rate a skill you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. " +
@@ -532,10 +533,10 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
       desc:
         `Uninstall and unpin ${a} ${label} from this project (local only). Refused, before the prompt and before anything is deleted, ` +
         `when the install is another kind; the kind is read from the project's own files, and from the registry only when they can't tell.`,
-      flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+      flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
     },
     {
-      usage: `${p} edit <owner>/${n} [--tagline] [--tags] [--license] [--visibility] [--homepage] [--repository]`,
+      usage: `${p} edit <owner>/${n} [--tagline <text>] [--tags <comma,separated>] [--license <id>] [--visibility public|private] [--homepage <url>] [--repository <url>]`,
       summary: `Update ${a} ${label} you own, changing only the flags you pass.`,
       desc: `Update ${a} ${label} you own; same flags as \`ahood skill edit\`. ${kindRefusal}`,
       flags: [
@@ -553,12 +554,12 @@ function registryCommandsHelp(kind: Exclude<CliKind, "skill">): CommandHelp[] {
       desc:
         `Without @version: delete ${a} ${label} from the registry for every consumer. With @version: yank that version. ` +
         `Refused before the prompt when the target is not ${a} ${label}.`,
-      flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+      flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
     },
     { usage: `${p} star <owner>/${n}`, summary: `Star ${a} ${label}.`, desc: `Star ${a} ${label}. ${kindRefusal}` },
     { usage: `${p} unstar <owner>/${n}`, summary: `Remove your star from ${a} ${label}.`, desc: `Remove your star from ${a} ${label}. ${kindRefusal}` },
     {
-      usage: `${p} vote <owner>/${n} up|down [--note <text>] [--version <x.y.z>] [--json]`,
+      usage: `${p} vote <owner>/${n} up|down|--clear [--note <text>] [--version <x.y.z>] [--json]`,
       summary: `Vote ${a} ${label} up or down after using it, or clear your vote with --clear.`,
       desc:
         `Rate ${a} ${label} you have actually used: up if it worked, down if it was wrong or misleading, ideally with a concrete --note. ` +
@@ -771,7 +772,7 @@ export const GROUP_COMMANDS_HELP: CommandHelp[] = [
       "Remove a member from a group you own. The group's owner cannot be removed this way -- delete the " +
       "group instead. Only the group's owner can remove someone other than themselves. Prompts for a typed " +
       "\"yes\" unless --yes is passed.",
-    flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
   },
   {
     usage: "ahood group leave <group> [--yes]",
@@ -779,7 +780,7 @@ export const GROUP_COMMANDS_HELP: CommandHelp[] = [
     desc:
       "Leave a group you belong to. The group's owner cannot leave -- delete the group instead. Prompts for " +
       "a typed \"yes\" unless --yes is passed.",
-    flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
   },
   {
     usage: "ahood group delete <group> [--yes]",
@@ -787,7 +788,7 @@ export const GROUP_COMMANDS_HELP: CommandHelp[] = [
     desc:
       "Permanently delete a group you own, removing it for every member. Prompts for a typed \"yes\" unless " +
       "--yes is passed.",
-    flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
   },
 ];
 
@@ -868,7 +869,7 @@ export const SNAP_COMMANDS_HELP: CommandHelp[] = [
     usage: "ahood snap remove <id> [--yes]",
     summary: "Permanently delete a snap (prompts for confirmation unless --yes is passed).",
     desc: "Permanently delete a snap. Irreversible. Prompts for a typed \"yes\" unless --yes is passed.",
-    flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
   },
   {
     usage: "ahood snap share <id> [--json]",
@@ -883,7 +884,7 @@ export const SNAP_COMMANDS_HELP: CommandHelp[] = [
       "Revoke a snap's share link -- the snap itself is untouched, and re-running `ahood snap share` mints a new " +
       "link. Prompts for a typed \"yes\" unless --yes is passed, since anyone using the old link loses access " +
       "immediately.",
-    flags: ["--yes    Skip the interactive confirmation, for scripts/CI."],
+    flags: ["--yes, -y    Skip the interactive confirmation, for scripts/CI."],
   },
   {
     usage: "ahood snap tags <id> [tag ...] [--clear] [--json]",
@@ -954,6 +955,19 @@ export function findCommandHelp(command: string, subcommand?: string): CommandHe
   }
   const resolved = COMMAND_ALIASES[command] ?? command;
   return TOP_LEVEL_COMMANDS_HELP.find((c) => c.usage.startsWith(`ahood ${resolved} `) || c.usage === `ahood ${resolved}`);
+}
+
+// The "Usage: ..." line a handler throws, read from the same entry --help
+// renders, so the noun, the per-kind placeholder (<owner>/<agent>) and the
+// flags can never drift from the help text (ahood-cli#250: handlers used to
+// hard-code `ahood skill <verb> <owner>/<skill>` and rely on a noun rewrite
+// that fixed the noun but not the placeholder, or named the wrong command
+// entirely for `try`). Throws on a missing entry so a typo'd verb fails in
+// tests, not as an empty usage line in front of a user.
+export function usageLine(command: string, verb?: string): string {
+  const entry = findCommandHelp(command, verb);
+  if (!entry) throw new Error(`No help entry for ${[command, verb].filter(Boolean).join(" ")}`);
+  return `Usage: ${entry.usage}`;
 }
 
 // Renders a CommandHelp entry's usage line with any known aliases folded in

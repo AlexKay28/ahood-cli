@@ -1,29 +1,26 @@
 import { apiJson } from "../http.js";
-import { flagValue } from "../flags.js";
+import { parseArgs } from "../flags.js";
 import { parseOwnerSkill } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { ensureRemoteKind, type KindScope } from "../kinds.js";
+import { usageLine } from "../help.js";
 
 // These are skill-entity verbs (reached as `ahood skill share`/`ahood skill
 // unshare`, registered in SKILL_COMMANDS in index.ts), not group verbs --
 // they mutate a skill's sharing, not a group. Grouped together in one file
 // the same way star.ts groups its own paired verbs (star/unstar).
-const SHARE_USAGE = "Usage: ahood skill share <owner>/<skill> --group <group>";
-const UNSHARE_USAGE = "Usage: ahood skill unshare <owner>/<skill> --group <group>";
 
 type ShareResponse = { shared: boolean };
 
 // Owner-of-the-skill-only server-side, and the caller must already be a
 // member of the target group -- both enforced by the API, not re-checked
-// here. Follows edit.ts's convention of requiring the owner/skill spec
-// first (before any flags), since --group takes a value and a "first
-// non---flag token" scan would misidentify the --group value as the spec
-// if --group happened to come first.
+// here. The spec and --group may come in either order: parseArgs strips
+// --group's value before looking for the positional (ahood-cli#260).
 export async function share(args: string[], scope?: KindScope): Promise<void> {
-  const spec = args[0];
-  if (!spec || spec.startsWith("--")) throw new UsageError(SHARE_USAGE);
-  const { owner, skill } = parseOwnerSkill(spec, SHARE_USAGE);
-  const groupSlug = flagValue(args, "--group");
+  const SHARE_USAGE = usageLine(scope?.noun ?? "skill", "share");
+  const parsed = parseArgs(args, { usage: SHARE_USAGE, booleans: ["--json"], values: ["--group"], min: 1, max: 1 });
+  const { owner, skill } = parseOwnerSkill(parsed.positionals[0], SHARE_USAGE);
+  const groupSlug = parsed.value("--group");
   if (!groupSlug) throw new UsageError(SHARE_USAGE);
   await ensureRemoteKind(scope, owner, skill, "share", "share");
 
@@ -36,10 +33,10 @@ export async function share(args: string[], scope?: KindScope): Promise<void> {
 }
 
 export async function unshare(args: string[], scope?: KindScope): Promise<void> {
-  const spec = args[0];
-  if (!spec || spec.startsWith("--")) throw new UsageError(UNSHARE_USAGE);
-  const { owner, skill } = parseOwnerSkill(spec, UNSHARE_USAGE);
-  const groupSlug = flagValue(args, "--group");
+  const UNSHARE_USAGE = usageLine(scope?.noun ?? "skill", "unshare");
+  const parsed = parseArgs(args, { usage: UNSHARE_USAGE, booleans: ["--json"], values: ["--group"], min: 1, max: 1 });
+  const { owner, skill } = parseOwnerSkill(parsed.positionals[0], UNSHARE_USAGE);
+  const groupSlug = parsed.value("--group");
   if (!groupSlug) throw new UsageError(UNSHARE_USAGE);
   await ensureRemoteKind(scope, owner, skill, "unshare", "unshare");
 

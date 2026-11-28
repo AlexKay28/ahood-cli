@@ -4,15 +4,15 @@ import { parseOwnerSkill, SEMVER_RE } from "../spec.js";
 import { UsageError } from "../usage-error.js";
 import { unrecognizedArgs } from "../flags.js";
 import { assertKind, isCliKind, KINDS, type KindScope } from "../kinds.js";
+import { usageLine } from "../help.js";
 
-const USAGE = "Usage: ahood skill diff <owner>/<skill> <versionA> <versionB> [--json]";
 
 // Both versions must be explicit semver here, unlike `add`'s
 // parseOwnerSkillVersion which lets "latest" default the version -- a diff
 // is meaningless without two concrete, unambiguous versions to compare, and
 // "latest" would silently mean two different things if the registry gained
 // a new version between resolving vA and vB.
-function validateVersion(version: string, spec: string): void {
+function validateVersion(version: string, spec: string, USAGE: string): void {
   if (!SEMVER_RE.test(version)) {
     throw new UsageError(`Invalid version "${version}" in "${spec}" -- expected a semver like 1.2.3.\n${USAGE}`);
   }
@@ -64,6 +64,7 @@ function diffManifests(
 }
 
 export async function diff(args: string[], scope?: KindScope): Promise<void> {
+  const USAGE = usageLine(scope?.noun ?? "skill", "diff");
   // Delegated to flags.ts's shared stripping helper rather than the naive
   // `args.filter((a) => !a.startsWith("--"))` this used to do, which silently
   // dropped any unrecognized "--" flag (a typo'd --jsonn proceeded as if never
@@ -71,7 +72,7 @@ export async function diff(args: string[], scope?: KindScope): Promise<void> {
   // expected -- the exact bug class #134/#135/#136 fixed for every sibling
   // command that already calls unrecognizedArgs.
   const positionals = unrecognizedArgs(args, ["--json"], []);
-  const unknownFlag = positionals.find((a) => a.startsWith("--"));
+  const unknownFlag = positionals.find((a) => a.startsWith("-"));
   if (unknownFlag) throw new UsageError(`Unknown flag: ${unknownFlag}\n${USAGE}`);
   if (positionals.length > 3) throw new UsageError(`Unexpected argument "${positionals[3]}".\n${USAGE}`);
   const jsonOutput = args.includes("--json");
@@ -79,8 +80,8 @@ export async function diff(args: string[], scope?: KindScope): Promise<void> {
   if (!spec || !versionA || !versionB) throw new UsageError(USAGE);
 
   const { owner, skill } = parseOwnerSkill(spec, USAGE);
-  validateVersion(versionA, `${spec} ${versionA}`);
-  validateVersion(versionB, `${spec} ${versionB}`);
+  validateVersion(versionA, `${spec} ${versionA}`, USAGE);
+  validateVersion(versionB, `${spec} ${versionB}`, USAGE);
 
   const [metaA, metaB] = await Promise.all([
     fetchVersionMeta(owner, skill, versionA),

@@ -1,8 +1,7 @@
 import { apiJson } from "../http.js";
-import { flagValue } from "../flags.js";
+import { parseArgs, YES_FLAGS } from "../flags.js";
 import { confirm } from "../confirm.js";
 import { getApiUrl } from "../config.js";
-import { UsageError } from "../usage-error.js";
 
 // Mirrors GET /api/v1/groups' and GET /api/v1/groups/{slug}'s response
 // shapes (see the ahood repo's app/api/v1/groups routes) -- owner_user_id is
@@ -35,15 +34,14 @@ const REMOVE_MEMBER_USAGE = "Usage: ahood group remove-member <group> <username>
 const LEAVE_USAGE = "Usage: ahood group leave <group> [--yes]";
 const DELETE_USAGE = "Usage: ahood group delete <group> [--yes]";
 
-// Creates a group (caller becomes owner). Follows edit.ts's convention of
-// requiring the positional argument first, since --description takes a
-// value and a "find the first non---flag token" scan would misidentify a
-// bare description value (one that doesn't start with "--") as the name if
-// --description happened to come first.
+// Creates a group (caller becomes owner). Every verb here parses through
+// parseArgs before its first request (ahood-cli#260): `group delete team
+// --dry-run --yes` used to delete the group. --json on a write verb is
+// tolerated, not implemented (ahood-cli#251).
 export async function createGroup(args: string[]): Promise<void> {
-  const name = args[0];
-  if (!name || name.startsWith("--")) throw new UsageError(CREATE_USAGE);
-  const description = flagValue(args, "--description");
+  const parsed = parseArgs(args, { usage: CREATE_USAGE, booleans: ["--json"], values: ["--description"], min: 1, max: 1 });
+  const name = parsed.positionals[0];
+  const description = parsed.value("--description");
 
   const body: Record<string, unknown> = { name };
   if (description !== undefined) body.description = description;
@@ -59,7 +57,7 @@ export async function createGroup(args: string[]): Promise<void> {
 
 // Lists the caller's own groups (owner or member).
 export async function listGroups(args: string[] = []): Promise<void> {
-  const jsonOutput = args.includes("--json");
+  const jsonOutput = parseArgs(args, { usage: LIST_USAGE, booleans: ["--json"], max: 0 }).has("--json");
   const { groups } = await apiJson<{ groups: GroupSummary[] }>("/api/v1/groups");
 
   if (jsonOutput) {
@@ -78,9 +76,9 @@ export async function listGroups(args: string[] = []): Promise<void> {
 // Group detail + members -- 404s (mapped to exit code 5) if the caller
 // isn't a member, same as any other not-found.
 export async function groupMembers(args: string[]): Promise<void> {
-  const jsonOutput = args.includes("--json");
-  const slug = args.find((a) => !a.startsWith("--"));
-  if (!slug) throw new UsageError(MEMBERS_USAGE);
+  const parsed = parseArgs(args, { usage: MEMBERS_USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const jsonOutput = parsed.has("--json");
+  const slug = parsed.positionals[0];
 
   const { group, members } = await apiJson<{ group: GroupSummary; members: Member[] }>(
     `/api/v1/groups/${encodeURIComponent(slug)}`,
@@ -103,9 +101,9 @@ export async function groupMembers(args: string[]): Promise<void> {
 // so it stays correct against a non-default AHOOD_API_URL, same reasoning
 // as view.ts's --web URL.
 export async function inviteLink(args: string[]): Promise<void> {
-  const jsonOutput = args.includes("--json");
-  const slug = args.find((a) => !a.startsWith("--"));
-  if (!slug) throw new UsageError(INVITE_LINK_USAGE);
+  const parsed = parseArgs(args, { usage: INVITE_LINK_USAGE, booleans: ["--json"], min: 1, max: 1 });
+  const jsonOutput = parsed.has("--json");
+  const slug = parsed.positionals[0];
 
   const { token, expiresAt } = await apiJson<{ token: string; expiresAt: string }>(
     `/api/v1/groups/${encodeURIComponent(slug)}/invites`,
@@ -147,8 +145,10 @@ function extractToken(input: string): string {
 }
 
 export async function joinGroup(args: string[]): Promise<void> {
-  const input = args.find((a) => !a.startsWith("--"));
-  if (!input) throw new UsageError(JOIN_USAGE);
+  // dashIsPositional: a raw invite token is base64url, so one in 64 starts
+  // with "-" and must not be refused as an unknown flag.
+  const input = parseArgs(args, { usage: JOIN_USAGE, booleans: ["--json"], min: 1, max: 1, dashIsPositional: true })
+    .positionals[0];
   const token = extractToken(input);
 
   const { groupSlug, groupName } = await apiJson<{ groupSlug: string; groupName: string }>(
@@ -159,13 +159,11 @@ export async function joinGroup(args: string[]): Promise<void> {
 }
 
 // Removes a member (owner-only for someone else; see leaveGroup below for
-// "remove yourself"). No flags today, so plain positional filtering is
-// unambiguous.
+// "remove yourself").
 export async function removeMember(args: string[]): Promise<void> {
-  const yes = args.includes("--yes");
-  const positional = args.filter((a) => !a.startsWith("--"));
-  const [slug, username] = positional;
-  if (!slug || !username) throw new UsageError(REMOVE_MEMBER_USAGE);
+  const parsed = parseArgs(args, { usage: REMOVE_MEMBER_USAGE, booleans: [...YES_FLAGS, "--json"], min: 2, max: 2 });
+  const yes = parsed.has(...YES_FLAGS);
+  const [slug, username] = parsed.positionals;
 
   // Mirrors deleteGroup's confirm-before-destroy pattern (CLAUDE.md:
   // "Destructive commands ... prompt for confirmation unless --yes is
@@ -200,9 +198,9 @@ async function getOwnUsername(): Promise<string> {
 // handles both cases identically (DELETE .../members/{username} with your
 // own username removes you, same as an owner removing someone else).
 export async function leaveGroup(args: string[]): Promise<void> {
-  const yes = args.includes("--yes");
-  const slug = args.find((a) => !a.startsWith("--"));
-  if (!slug) throw new UsageError(LEAVE_USAGE);
+  const parsed = parseArgs(args, { usage: LEAVE_USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
+  const yes = parsed.has(...YES_FLAGS);
+  const slug = parsed.positionals[0];
 
   // Same confirm-before-destroy gate as removeMember -- an accidentally
   // re-run `leave` drops you from a private group with no other command to
@@ -225,9 +223,9 @@ export async function leaveGroup(args: string[]): Promise<void> {
 // confirmation-prompt pattern exactly (--yes bypasses it for scripts/CI,
 // otherwise a typed "yes" is required).
 export async function deleteGroup(args: string[]): Promise<void> {
-  const yes = args.includes("--yes");
-  const slug = args.find((a) => !a.startsWith("--"));
-  if (!slug) throw new UsageError(DELETE_USAGE);
+  const parsed = parseArgs(args, { usage: DELETE_USAGE, booleans: [...YES_FLAGS, "--json"], min: 1, max: 1 });
+  const yes = parsed.has(...YES_FLAGS);
+  const slug = parsed.positionals[0];
 
   const confirmed = yes
     ? true
